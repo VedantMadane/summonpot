@@ -1,9 +1,9 @@
 # summonpot
 
-**Summon an agent behind any endpoint. An AI-native API framework for Python.**
+**An API framework where every endpoint is an agent. Like FastAPI, but the handler thinks.**
 
 <p align="center">
-  <em>Brew a summoning potion at every route. Define the endpoint, summon the intelligence.</em>
+  <em>Define routes. The framework runs the agents. No agent configuration. No framework ontology. Just endpoints that think.</em>
 </p>
 
 [![CI](https://github.com/tugrulguner/summonpot/actions/workflows/ci.yml/badge.svg)](https://github.com/tugrulguner/summonpot/actions/workflows/ci.yml)
@@ -11,9 +11,50 @@
 [![Python versions](https://img.shields.io/pypi/pyversions/summonpot)](https://pypi.org/project/summonpot/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-summonpot lets you expose **agentic intelligence** as ordinary API endpoints. You don't configure an agent — you summon one behind a route.
+summonpot is a **full API framework** — like Django or FastAPI — but built for the era where APIs don't just respond, they reason.
 
-The docstring is the system prompt. The parameters are the request schema. The return type is the output contract. The framework owns the agentic runtime.
+You define routes with a function signature, a docstring, and tools. The framework owns the agentic runtime — the LLM call loop, tool orchestration, structured output, and streaming. You don't configure an agent. You define an endpoint. The agent is summoned.
+
+```python
+from summonpot import Pot
+
+pot = Pot("my-service", tools=[search_web])
+
+@pot.summon("/research")
+def research_topic(query: str, depth: str = "standard") -> str:
+    """Research this topic thoroughly and return a comprehensive report."""
+
+@pot.summon("/analyze")
+def analyze_sentiment(text: str) -> dict:
+    """Analyze the text and return a JSON object with sentiment and topics."""
+
+pot.serve()
+```
+
+Call it like any API:
+
+```bash
+curl -X POST http://localhost:8000/research \
+  -H "Content-Type: application/json" \
+  -d '{"query": "quantum computing", "depth": "deep"}'
+```
+
+Behind the scenes, an agent runs — it thinks, uses tools, calls the LLM, enforces structured output, and returns the result. But you never wrote an agent. You wrote a route.
+
+## Why another framework?
+
+Every existing approach to building agentic APIs has the same problem: you first learn an agent framework (LangChain, CrewAI, AutoGen), then bolt an API on top (FastAPI wrapper). The mental model is "configure an agent" — which is complex, brittle, and framework-y.
+
+summonpot flips this: the **web framework IS the agent framework**. The routing is the agentic logic. The decorator is the incantation. The framework owns the smart parts.
+
+| | Existing frameworks | summonpot |
+|---|---|---|
+| Mental model | "Configure an agent" | "Define an endpoint" |
+| Surface area | Large (chains, agents, tools, memory, callbacks...) | Tiny (decorator + types + docstring) |
+| API exposure | Bolt-on (FastAPI wrapper) | Native (routing IS the agent) |
+| Complexity | User manages the loop | Framework owns the loop, user provides intent |
+| Testability | Mock the LLM, mock tools, mock chains | Test like a FastAPI endpoint |
+| Onboarding | Learn the framework's ontology | If you know FastAPI, you know this |
 
 ## Installation
 
@@ -34,7 +75,7 @@ export SUMMONPOT_BASE_URL=https://api.openai.com/v1   # optional
 
 ## Quick Start
 
-Define your endpoints once, summon agents behind them:
+Create a file `app.py`:
 
 ```python
 from summonpot import Pot
@@ -50,7 +91,7 @@ pot = Pot("my-service", tools=[search_web])
 def research_topic(query: str, depth: str = "standard") -> str:
     """Research this topic thoroughly and return a comprehensive report."""
 
-@pot.summon("/summarize", tools=[])
+@pot.summon("/summarize")
 def summarize(text: str) -> str:
     """Summarize the given text into key bullet points."""
 
@@ -59,26 +100,18 @@ def analyze_sentiment(text: str) -> dict:
     """Analyze the text and return a JSON object with sentiment and topics."""
 ```
 
-Summon everything as an HTTP API:
+Serve it:
 
 ```bash
 summonpot serve app.py                  # serves on 0.0.0.0:8000
 summonpot serve app.py --port 9000
 ```
 
-Or programmatically:
+Or from Python:
 
 ```python
 pot.serve()                             # 0.0.0.0:8000
 pot.serve(host="127.0.0.1", port=9000)
-```
-
-Then call your agent behind the endpoint:
-
-```bash
-curl -X POST http://localhost:8000/research \
-  -H "Content-Type: application/json" \
-  -d '{"query": "quantum computing", "depth": "deep"}'
 ```
 
 ## The Summoning Model
@@ -97,15 +130,13 @@ curl -X POST http://localhost:8000/research \
 summonpot inspects your endpoint function:
 
 - **Docstring** → becomes the system prompt the agent follows
-- **Parameters** → become the JSON request schema (validated by FastAPI/Pydantic)
+- **Parameters** → become the JSON request schema (validated by Pydantic)
 - **Return type** → becomes the output contract (structured JSON for non-`str` types)
 - **Tools** → exposed to the agent via function calling, so it can act, not just answer
 
 The framework owns the LLM call loop, tool orchestration, and structured-output enforcement. You provide intent — the endpoint.
 
 ## Configuration
-
-summonpot reads configuration from environment variables:
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -131,15 +162,8 @@ cd summonpot
 uv sync --all-extras
 ```
 
-Run the check suite:
-
 ```bash
 make check   # lint + test
-```
-
-Individual targets:
-
-```bash
 make lint     # ruff check + format check
 make test     # pytest
 make format   # auto-format
