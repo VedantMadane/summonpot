@@ -35,7 +35,7 @@ def build_app(pot: Pot) -> Any:
 
             RequestModel = create_model(
                 f"{endpoint.name}Request",
-                **fields,
+                **fields,  # pyright: ignore[reportArgumentType, reportCallIssue]
             )
 
             # Use a unique module-level attribute so FastAPI/Pydantic can resolve it
@@ -47,7 +47,7 @@ def build_app(pot: Pot) -> Any:
             # Resolve the model for the closure
             resolved_model = RequestModel
 
-            async def handler(
+            async def _handle_with_body(
                 body: resolved_model,  # type: ignore[valid-type]
                 _ep=endpoint,
                 _pt=pot,
@@ -55,11 +55,11 @@ def build_app(pot: Pot) -> Any:
                 params = body.model_dump() if hasattr(body, "model_dump") else body
                 return await _pt._runtime.call(_ep, params)
 
-            handler.__annotations__["body"] = resolved_model
+            _handle_with_body.__annotations__["body"] = resolved_model
 
             app.add_api_route(
                 route_path,
-                handler,
+                _handle_with_body,
                 methods=[method],
                 summary=(
                     endpoint.description.split("\n")[0]
@@ -70,12 +70,12 @@ def build_app(pot: Pot) -> Any:
             )
         else:
 
-            async def handler(ep=endpoint, pt=pot) -> Any:
+            async def _handle_without_body(ep=endpoint, pt=pot) -> Any:
                 return await pt._runtime.call(ep, {})
 
             app.add_api_route(
                 route_path,
-                handler,
+                _handle_without_body,
                 methods=[method],
                 summary=(
                     endpoint.description.split("\n")[0]
