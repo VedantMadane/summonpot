@@ -35,6 +35,7 @@ dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
     "ruff>=0.8.0",
+    "pyright>=1.1.390",
     "pre-commit>=4.0.0",
     "httpx>=0.27.0",
     "summonpot[all]",
@@ -87,6 +88,18 @@ showcontent = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.pyright]
+pythonVersion = "3.11"
+typeCheckingMode = "standard"
+include = ["src", "tests"]
+reportUnknownMemberType = false
+reportUnknownArgumentType = false
+reportUnknownVariableType = false
+reportUnknownParameterType = false
+reportMissingTypeStubs = false
+reportAttributeAccessIssue = false
+reportAssignmentType = false
 
 [tool.ruff]
 target-version = "py311"
