@@ -22,7 +22,7 @@ def _version_callback(value: bool) -> None:
 
 app = typer.Typer(
     name="summonpot",
-    help="Summon an agent behind any endpoint. AI-native API framework.",
+    help="An API framework where every endpoint is an agent. Like FastAPI, but the handler thinks.",
     no_args_is_help=True,
 )
 
@@ -38,7 +38,7 @@ def main(
         help="Show version and exit.",
     ),
 ) -> None:
-    """Summon an agent behind any endpoint."""
+    """An API framework where every endpoint is an agent."""
 
 
 @app.command("serve")

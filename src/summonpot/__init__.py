@@ -1,4 +1,4 @@
-"""summonpot — Summon an agent behind any endpoint."""
+"""summonpot — An API framework where every endpoint is an agent."""
 
 from importlib.metadata import PackageNotFoundError, version
 

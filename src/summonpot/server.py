@@ -14,7 +14,7 @@ def build_app(pot: Pot) -> Any:
 
     app = FastAPI(
         title=pot.name,
-        description="AI-native API framework — summon an agent behind any endpoint.",
+        description="An API framework where every endpoint is an agent. Like FastAPI, but the handler thinks.",
         version="0.1.0",
     )
 
