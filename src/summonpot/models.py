@@ -1,0 +1,89 @@
+"""Data models for summonpot."""
+
+from __future__ import annotations
+
+import inspect
+from dataclasses import dataclass, field
+from typing import Any
+
+
+@dataclass
+class ParamDef:
+    """A single parameter of an endpoint or tool."""
+
+    name: str
+    type_annotation: str = "str"
+    description: str = ""
+    required: bool = True
+    default: Any = None
+
+
+@dataclass
+class ToolDef:
+    """A tool registered with summonpot."""
+
+    name: str
+    description: str
+    parameters: list[ParamDef] = field(default_factory=list)
+    fn: Any = None  # the callable
+
+    def to_openai_tool(self) -> dict:
+        """Serialize to an OpenAI-compatible tool definition."""
+        properties = {}
+        required = []
+        for p in self.parameters:
+            properties[p.name] = {
+                "type": _pytype_to_json(p.type_annotation),
+                "description": p.description,
+            }
+            if p.required:
+                required.append(p.name)
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": properties,
+                    "required": required,
+                },
+            },
+        }
+
+    async def call(self, **kwargs: Any) -> Any:
+        """Execute the tool with the given arguments."""
+        if inspect.iscoroutinefunction(self.fn):
+            return await self.fn(**kwargs)
+        return self.fn(**kwargs)
+
+
+@dataclass
+class EndpointDef:
+    """A registered endpoint summoned behind a route."""
+
+    path: str
+    name: str
+    description: str  # docstring = system prompt
+    parameters: list[ParamDef] = field(default_factory=list)
+    return_type: str = "str"
+    tools: list[ToolDef] = field(default_factory=list)
+    stream: bool = False
+    model: str | None = None
+
+
+def _pytype_to_json(type_str: str) -> str:
+    """Map a Python type name to a JSON schema type."""
+    mapping = {
+        "str": "string",
+        "int": "integer",
+        "float": "number",
+        "bool": "boolean",
+        "dict": "object",
+        "list": "array",
+        "Any": "string",
+        "None": "null",
+    }
+    # Handle Optional[str] etc. — just take the first non-None type
+    cleaned = type_str.replace("Optional[", "").replace("]", "")
+    return mapping.get(cleaned, "string")
