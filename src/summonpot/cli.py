@@ -22,7 +22,7 @@ def _version_callback(value: bool) -> None:
 
 app = typer.Typer(
     name="summonpot",
-    help="An API framework where every endpoint is an agent. Like FastAPI, but the handler thinks.",
+    help="An AI-native API framework. Every endpoint is an agent that runs automatically.",
     no_args_is_help=True,
 )
 
