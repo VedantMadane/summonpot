@@ -1,6 +1,6 @@
 # summonpot
 
-**An API framework where every endpoint is an agent. Like FastAPI, but the handler thinks.**
+**An AI-native API framework. Every endpoint is an agent that runs automatically.**
 
 <p align="center">
   <em>Define routes. The framework runs the agents. No agent configuration. No framework ontology. Just endpoints that think.</em>
@@ -11,7 +11,7 @@
 [![Python versions](https://img.shields.io/pypi/pyversions/summonpot)](https://pypi.org/project/summonpot/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-summonpot is a **full API framework** — like Django or FastAPI — but built for the era where APIs don't just respond, they reason.
+summonpot is a **full API framework** — with routing, validation, middleware, and serving — but built for the era where APIs don't just respond, they reason.
 
 You define routes with a function signature, a docstring, and tools. The framework owns the agentic runtime — the LLM call loop, tool orchestration, structured output, and streaming. You don't configure an agent. You define an endpoint. The agent is summoned.
 
@@ -43,7 +43,7 @@ Behind the scenes, an agent runs — it thinks, uses tools, calls the LLM, enfor
 
 ## Why another framework?
 
-Every existing approach to building agentic APIs has the same problem: you first learn an agent framework (LangChain, CrewAI, AutoGen), then bolt an API on top (FastAPI wrapper). The mental model is "configure an agent" — which is complex, brittle, and framework-y.
+Every existing approach to building agentic APIs has the same problem: you first learn an agent framework (LangChain, CrewAI, AutoGen), then bolt an HTTP server on top. The mental model is "configure an agent" — which is complex, brittle, and framework-y.
 
 summonpot flips this: the **web framework IS the agent framework**. The routing is the agentic logic. The decorator is the incantation. The framework owns the smart parts.
 
@@ -51,16 +51,16 @@ summonpot flips this: the **web framework IS the agent framework**. The routing 
 |---|---|---|
 | Mental model | "Configure an agent" | "Define an endpoint" |
 | Surface area | Large (chains, agents, tools, memory, callbacks...) | Tiny (decorator + types + docstring) |
-| API exposure | Bolt-on (FastAPI wrapper) | Native (routing IS the agent) |
+| API exposure | Bolt-on HTTP wrapper | Native (routing IS the agent) |
 | Complexity | User manages the loop | Framework owns the loop, user provides intent |
-| Testability | Mock the LLM, mock tools, mock chains | Test like a FastAPI endpoint |
-| Onboarding | Learn the framework's ontology | If you know FastAPI, you know this |
+| Testability | Heavy mocking required | Test like a regular HTTP endpoint |
+| Onboarding | Learn the framework's ontology | If you know HTTP, you know this |
 
 ## Installation
 
 ```bash
 pip install summonpot            # core
-pip install summonpot[serve]     # + FastAPI/uvicorn HTTP server
+pip install summonpot[serve]     # + HTTP server (FastAPI/uvicorn)
 pip install summonpot[cli]       # + Typer CLI
 pip install summonpot[all]       # everything
 ```
