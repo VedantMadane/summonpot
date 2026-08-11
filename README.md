@@ -1,7 +1,7 @@
 # summonpot
 
 <p align="center">
-  <img src="summonpot_image.png" alt="IntPot" width="600">
+  <img src="summonpot.png" alt="SummonPot" width="600">
 </p>
 
 [![CI](https://github.com/tugrulguner/summonpot/actions/workflows/ci.yml/badge.svg)](https://github.com/tugrulguner/summonpot/actions/workflows/ci.yml)
