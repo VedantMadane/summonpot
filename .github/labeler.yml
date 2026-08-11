@@ -1,0 +1,34 @@
+# Auto-label rules for pull requests.
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/**/*"
+          - "Makefile"
+
+documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "README.md"
+          - "CONTRIBUTING.md"
+          - "CHANGELOG.md"
+          - "docs/**/*"
+
+source:
+  - changed-files:
+      - any-glob-to-any-file: "src/**/*"
+
+tests:
+  - changed-files:
+      - any-glob-to-any-file: "tests/**/*"
+
+dependencies:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "pyproject.toml"
+          - "uv.lock"
+          - ".github/dependabot.yml"
+
+examples:
+  - changed-files:
+      - any-glob-to-any-file: "examples/**/*"
