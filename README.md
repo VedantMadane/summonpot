@@ -13,20 +13,32 @@
 
 summonpot is a **full API framework** — with routing, validation, middleware, and serving — but built for the era where APIs don't just respond, they reason. Define routes. The framework runs the agents. No agent configuration. No framework ontology. Just endpoints that think.
 
-You define routes with a function signature, a docstring, and tools. The framework owns the agentic runtime — the LLM call loop, tool orchestration, structured output, and streaming. You don't configure an agent. You define an endpoint. The agent is summoned.
+You define routes with Pydantic request and response models, a docstring, and tools. The framework owns the agentic runtime — the LLM call loop, tool orchestration, structured output, and streaming. You don't configure an agent. You define an endpoint. The agent is summoned.
 
 ```python
+from pydantic import BaseModel, Field
 from summonpot import Pot
+
+
+class ResearchRequest(BaseModel):
+    query: str = Field(min_length=3)
+    depth: int = Field(default=3, ge=1, le=5)
+
+
+class ResearchResponse(BaseModel):
+    summary: str
+    key_findings: list[str]
+    sources: list[str]
+
 
 pot = Pot("my-service", tools=[search_web])
 
-@pot.summon("/research")
-def research_topic(query: str, depth: str = "standard") -> str:
-    """Research this topic thoroughly and return a comprehensive report."""
 
-@pot.summon("/analyze")
-def analyze_sentiment(text: str) -> dict:
-    """Analyze the text and return a JSON object with sentiment and topics."""
+@pot.summon("/research")
+def research_topic(request: ResearchRequest) -> ResearchResponse:
+    """Research this topic thoroughly and return a sourced report."""
+    raise NotImplementedError
+
 
 pot.serve()
 ```
@@ -36,7 +48,7 @@ Call it like any API:
 ```bash
 curl -X POST http://localhost:8000/research \
   -H "Content-Type: application/json" \
-  -d '{"query": "quantum computing", "depth": "deep"}'
+  -d '{"query": "quantum computing", "depth": 5}'
 ```
 
 Behind the scenes, an agent runs — it thinks, uses tools, calls the LLM, enforces structured output, and returns the result. But you never wrote an agent. You wrote a route.
@@ -65,39 +77,70 @@ pip install summonpot[cli]       # + Typer CLI
 pip install summonpot[all]       # everything
 ```
 
-You also need an OpenAI-compatible API key:
+Install the provider you want to use:
 
 ```bash
-export SUMMONPOT_API_KEY=sk-...          # or OPENAI_API_KEY
-export SUMMONPOT_MODEL=gpt-4o-mini        # optional, default gpt-4o-mini
-export SUMMONPOT_BASE_URL=https://api.openai.com/v1   # optional
+pip install "summonpot[openai]"       # OpenAI
+pip install "summonpot[anthropic]"    # Anthropic
+pip install "summonpot[google]"       # Google Gemini
+pip install "summonpot[groq]"         # Groq
+pip install "summonpot[mistral]"      # Mistral
+pip install "summonpot[openrouter]"   # OpenRouter
+pip install "summonpot[xai]"          # xAI
+pip install "summonpot[all]"          # serving, CLI, and every provider
 ```
+
+Choose a model with an explicit `provider:model` identifier and set that provider's standard API-key environment variable:
+
+```bash
+export SUMMONPOT_MODEL=anthropic:claude-sonnet-4-5
+export ANTHROPIC_API_KEY=...
+```
+
+OpenRouter keeps the upstream provider and model in the portion after the first colon:
+
+```bash
+export SUMMONPOT_MODEL=openrouter:anthropic/claude-sonnet-4
+export OPENROUTER_API_KEY=...
+```
+
+The endpoint API does not change between providers. Unprefixed legacy model names such as `gpt-4o-mini` continue to resolve as `openai:gpt-4o-mini`.
 
 ## Quick Start
 
 Create a file `app.py`:
 
 ```python
+from typing import Literal
+
+from pydantic import BaseModel, Field
 from summonpot import Pot
+
+
+class AnalyzeRequest(BaseModel):
+    text: str = Field(min_length=1)
+    max_topics: int = Field(default=5, ge=1, le=20)
+
+
+class AnalyzeResponse(BaseModel):
+    sentiment: Literal["positive", "negative", "neutral"]
+    topics: list[str]
+    explanation: str
+
 
 # A tool available to every endpoint
 def search_web(query: str) -> list[dict]:
     """Search the web for information."""
     return [{"query": query, "result": "..."}]
 
+
 pot = Pot("my-service", tools=[search_web])
 
-@pot.summon("/research")
-def research_topic(query: str, depth: str = "standard") -> str:
-    """Research this topic thoroughly and return a comprehensive report."""
-
-@pot.summon("/summarize")
-def summarize(text: str) -> str:
-    """Summarize the given text into key bullet points."""
 
 @pot.summon("/analyze")
-def analyze_sentiment(text: str) -> dict:
-    """Analyze the text and return a JSON object with sentiment and topics."""
+def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
+    """Analyze the text and return its sentiment, topics, and explanation."""
+    raise NotImplementedError
 ```
 
 Serve it:
@@ -125,32 +168,85 @@ pot.serve(host="127.0.0.1", port=9000)
 | Return type | What appears |
 | `stream=True` | You asked it to speak continuously |
 
+## Pydantic endpoint contracts
+
+A structured endpoint declares exactly one Pydantic request model and returns one Pydantic response model:
+
+```python
+from pydantic import BaseModel, Field
+
+
+class PlanRequest(BaseModel):
+    goal: str
+    constraints: list[str] = Field(default_factory=list)
+
+
+class PlanResponse(BaseModel):
+    steps: list[str]
+    risks: list[str]
+
+
+@pot.summon("/plan")
+def plan(request: PlanRequest) -> PlanResponse:
+    """Create an actionable plan that respects every constraint."""
+    raise NotImplementedError
+```
+
+Those two annotations are the complete API contract. The decorated function is declarative—the agent runtime does not execute its body. `raise NotImplementedError` makes that explicit while keeping static type checkers satisfied.
+
+- The request model validates incoming JSON, including nested models, defaults, field constraints, aliases, and custom validators.
+- The response model appears in OpenAPI and validates the final HTTP response.
+- The runtime gives the provider the response contract through the structured-output strategy that provider supports.
+- The provider result is validated into the declared Pydantic class. Invalid output is retried within a bounded budget, then fails explicitly instead of returning malformed data.
+- Primitive function signatures remain supported for compatibility, but Pydantic models are the primary API for structured endpoints.
+
+A Pydantic request model must be the endpoint's only function parameter. Put all request fields inside that model so there is one unambiguous body schema.
+
 ## How it works
 
 summonpot inspects your endpoint function:
 
 - **Docstring** → becomes the system prompt the agent follows
-- **Parameters** → become the JSON request schema (validated by Pydantic)
-- **Return type** → becomes the output contract (structured JSON for non-`str` types)
+- **Pydantic request model** → becomes the validated JSON request body and OpenAPI input schema
+- **Pydantic response model** → becomes the provider's structured-output schema, runtime validator, and OpenAPI response schema
 - **Tools** → exposed to the agent via function calling, so it can act, not just answer
 
 The framework owns the LLM call loop, tool orchestration, and structured-output enforcement. You provide intent — the endpoint.
 
-## Configuration
+## Provider and model configuration
 
-| Variable | Default | Purpose |
-|---|---|---|
-| `SUMMONPOT_API_KEY` | `OPENAI_API_KEY` | API key for the LLM provider |
-| `SUMMONPOT_BASE_URL` | `OPENAI_BASE_URL` or `https://api.openai.com/v1` | OpenAI-compatible endpoint |
-| `SUMMONPOT_MODEL` | `gpt-4o-mini` | Default model for all endpoints |
+Summonpot uses provider-qualified model identifiers. Provider SDKs, authentication, tool calling, structured-output negotiation, and model-specific behavior are handled internally by the provider-agnostic runtime.
 
-Per-endpoint overrides:
+| Provider | Install extra | Model example | API-key variable |
+|---|---|---|---|
+| OpenAI | `summonpot[openai]` | `openai:gpt-4o-mini` | `OPENAI_API_KEY` |
+| Anthropic | `summonpot[anthropic]` | `anthropic:claude-sonnet-4-5` | `ANTHROPIC_API_KEY` |
+| Google | `summonpot[google]` | `google:gemini-2.5-flash` | `GOOGLE_API_KEY` |
+| Groq | `summonpot[groq]` | `groq:llama-3.3-70b-versatile` | `GROQ_API_KEY` |
+| Mistral | `summonpot[mistral]` | `mistral:mistral-large-latest` | `MISTRAL_API_KEY` |
+| OpenRouter | `summonpot[openrouter]` | `openrouter:anthropic/claude-sonnet-4` | `OPENROUTER_API_KEY` |
+| xAI | `summonpot[xai]` | `xai:grok-4` | `XAI_API_KEY` |
+
+`SUMMONPOT_MODEL` sets the default for every endpoint:
+
+```bash
+export SUMMONPOT_MODEL=openrouter:anthropic/claude-sonnet-4
+```
+
+An endpoint can override it without changing its request, response, or tools:
 
 ```python
-@pot.summon("/research", model="gpt-4o", stream=True)
-def research_topic(query: str) -> str:
+@pot.summon(
+    "/research",
+    model="anthropic:claude-sonnet-4-5",
+    stream=True,
+)
+def research_topic(request: ResearchRequest) -> ResearchResponse:
     """Research this topic."""
+    raise NotImplementedError
 ```
+
+Pydantic AI is an internal runtime dependency. Summonpot users do not construct Pydantic AI agents or provider clients; the stable public contract remains `Pot`, `@pot.summon`, tools, and Pydantic endpoint models.
 
 ## Development
 
