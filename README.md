@@ -13,9 +13,10 @@
 
 summonpot is a **full API framework** — with routing, validation, middleware, and serving — but built for the era where APIs don't just respond, they reason. Define routes. The framework runs the agents. No agent configuration. No framework ontology. Just endpoints that think.
 
-You define routes with Pydantic request and response models, a docstring, and exact deterministic capabilities. The framework owns the agentic runtime — the LLM call loop, capability orchestration, structured output, and streaming. You don't configure an agent or write handler glue. You define an endpoint. The agent is summoned.
+You define routes with Pydantic request and response models, a docstring, and exact deterministic capabilities. The framework owns the agentic runtime — the LLM call loop, capability orchestration, and structured output. You don't configure an agent or write handler glue. You define an endpoint. The agent is summoned.
 
 ```python
+from my_service.operations import record_research, search_web
 from pydantic import BaseModel, Field
 from summonpot import Depends, Pot, Required
 
@@ -29,16 +30,6 @@ class ResearchResponse(BaseModel):
     summary: str
     key_findings: list[str]
     sources: list[str]
-
-
-def search_web(query: str) -> list[str]:
-    """Search approved sources for the query."""
-    return []
-
-
-def record_research(query: str) -> dict[str, str]:
-    """Record that the research request was processed."""
-    return {"query": query, "status": "recorded"}
 
 
 pot = Pot("my-service")
@@ -65,7 +56,7 @@ curl -X POST http://localhost:8000/research \
   -d '{"query": "quantum computing", "depth": 5}'
 ```
 
-Behind the scenes, the agent can call only the declared operations. The runtime rejects a final response until `record_research` has completed, validates the Pydantic output locally, and never executes the decorated function body. You wrote an endpoint contract, not an agent loop or handler.
+The imported functions are real, application-owned operations: `search_web` must query the approved source service, and `record_research` must perform the actual write. Summonpot does not replace their implementations with generated behavior. It exposes only those exact operations to the endpoint agent, rejects a final response until `record_research` has completed, validates the Pydantic output locally, and never executes the decorated function body.
 
 ## Why another framework?
 
@@ -148,13 +139,7 @@ class AnalyzeResponse(BaseModel):
     explanation: str
 
 
-# A tool available to every endpoint
-def search_web(query: str) -> list[dict]:
-    """Search the web for information."""
-    return [{"query": query, "result": "..."}]
-
-
-pot = Pot("my-service", tools=[search_web])
+pot = Pot("my-service")
 
 
 @pot.summon("/analyze")
@@ -183,16 +168,16 @@ pot.serve(host="127.0.0.1", port=9000)
 |---|---|
 | Route definition | "At this path, I summon..." |
 | Docstring | The incantation (system prompt) |
-| Tools | Ingredients placed in the circle |
-| Parameters | What the summoner brings |
+| Capabilities | Exact operations placed in the circle |
+| Request model | What the summoner brings |
 | Return type | What appears |
-| `stream=True` | You asked it to speak continuously |
 
 ## Declarative dependencies
 
 An endpoint signature can combine one Pydantic request model, exact deterministic dependencies, and one Pydantic response model:
 
 ```python
+from my_service.operations import check_capacity, load_constraints
 from pydantic import BaseModel, Field
 from summonpot import Depends, Required
 
@@ -205,16 +190,6 @@ class PlanRequest(BaseModel):
 class PlanResponse(BaseModel):
     steps: list[str]
     risks: list[str]
-
-
-def load_constraints(goal: str) -> list[str]:
-    """Load exact stored constraints for the goal."""
-    return []
-
-
-def check_capacity(goal: str) -> dict:
-    """Check current capacity with deterministic business logic."""
-    return {"available": True}
 
 
 @pot.summon("/plan")
@@ -272,20 +247,23 @@ Summonpot uses provider-qualified model identifiers. Provider SDKs, authenticati
 export SUMMONPOT_MODEL=openrouter:anthropic/claude-sonnet-4
 ```
 
-An endpoint can override it without changing its request, response, or tools:
+An endpoint can override it without changing its request, response, or capabilities:
 
 ```python
 @pot.summon(
     "/research",
     model="anthropic:claude-sonnet-4-5",
-    stream=True,
 )
-def research_topic(request: ResearchRequest) -> ResearchResponse:
+def research_topic(
+    request: ResearchRequest,
+    sources=Depends(search_web),
+    receipt=Required(record_research),
+) -> ResearchResponse:
     """Research this topic."""
     raise NotImplementedError
 ```
 
-Pydantic AI is an internal runtime dependency. Summonpot users do not construct Pydantic AI agents or provider clients; the stable public contract remains `Pot`, `@pot.summon`, tools, and Pydantic endpoint models.
+Pydantic AI is an internal runtime dependency. Summonpot users do not construct Pydantic AI agents or provider clients; the stable public contract remains `Pot`, `@pot.summon`, declarative capabilities, and Pydantic endpoint models.
 
 ## Development
 
