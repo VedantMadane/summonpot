@@ -4,8 +4,14 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+import pytest
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, Field
+from pydantic_ai.exceptions import (
+    ModelHTTPError,
+    UnexpectedModelBehavior,
+    UsageLimitExceeded,
+)
 
 from summonpot import Depends, Pot, __version__
 from summonpot.server import build_app
@@ -144,6 +150,75 @@ def test_request_schema_validates_generic_element_types(mock_runtime):
 
     assert client.post("/items", json={"values": [1, 2]}).status_code == 200
     assert client.post("/items", json={"values": ["a", "b"]}).status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("raised", "expected_status", "expected_detail"),
+    [
+        (
+            UsageLimitExceeded("request limit of 2 exceeded"),
+            429,
+            "exceeded its configured usage limit",
+        ),
+        (TimeoutError(), 504, "timed out"),
+        (
+            ModelHTTPError(status_code=429, model_name="openai:gpt-4o-mini"),
+            429,
+            "status 429",
+        ),
+        (
+            ModelHTTPError(status_code=500, model_name="openai:gpt-4o-mini"),
+            502,
+            "status 500",
+        ),
+        (
+            UnexpectedModelBehavior("Exceeded maximum retries"),
+            502,
+            "did not satisfy the endpoint contract",
+        ),
+    ],
+)
+def test_runtime_failures_map_to_stable_http_responses(
+    raised, expected_status, expected_detail
+):
+    """Every one of these used to reach the caller as an opaque 500."""
+    pot = Pot("svc")
+
+    @pot.summon("/research")
+    def research(query: str) -> str:
+        """Research a topic."""
+        return ""
+
+    class FailingRuntime:
+        async def call(self, endpoint, params):
+            raise raised
+
+    pot._runtime = FailingRuntime()
+    client = TestClient(build_app(pot), raise_server_exceptions=False)
+
+    response = client.post("/research", json={"query": "agents"})
+
+    assert response.status_code == expected_status
+    assert expected_detail in response.json()["detail"]
+
+
+def test_unexpected_capability_failure_still_surfaces_as_a_server_error():
+    """An error inside user code is a genuine 500, not a mislabelled gateway error."""
+    pot = Pot("svc")
+
+    @pot.summon("/research")
+    def research(query: str) -> str:
+        """Research a topic."""
+        return ""
+
+    class FailingRuntime:
+        async def call(self, endpoint, params):
+            raise ValueError("the accounts database is down")
+
+    pot._runtime = FailingRuntime()
+    client = TestClient(build_app(pot), raise_server_exceptions=False)
+
+    assert client.post("/research", json={"query": "agents"}).status_code == 500
 
 
 def test_build_app_requires_body_fields(mock_runtime):
