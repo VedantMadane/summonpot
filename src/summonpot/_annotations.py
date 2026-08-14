@@ -44,8 +44,46 @@ def get_type_str(
 
 
 def safe_get_type_hints(func: Callable[..., Any]) -> dict[str, Any]:
-    """Resolve a callable's annotations, falling back to the unevaluated strings."""
+    """Resolve a callable's annotations.
+
+    Only a `NameError` is tolerated, and only so the caller can report *which* name
+    failed to resolve. Anything else propagates: swallowing every exception here is
+    what let an endpoint silently lose its Pydantic contract.
+    """
     try:
         return inspect.get_annotations(func, eval_str=True)
-    except Exception:
-        return inspect.get_annotations(func, eval_str=False)
+    except NameError:
+        pass
+
+    # One bad annotation fails the whole call, which would make every other
+    # annotation look unresolvable too and report the wrong parameter. Resolve them
+    # one at a time so only the genuinely broken name is left as a string.
+    raw = inspect.get_annotations(func, eval_str=False)
+    globalns = getattr(func, "__globals__", {})
+    resolved: dict[str, Any] = {}
+    for name, annotation in raw.items():
+        if not isinstance(annotation, str):
+            resolved[name] = annotation
+            continue
+        try:
+            resolved[name] = eval(annotation, globalns)
+        except Exception:
+            resolved[name] = annotation
+    return resolved
+
+
+def reject_unresolved(annotation: Any, *, where: str, endpoint: str) -> None:
+    """Fail loudly when an annotation could not be resolved to a type.
+
+    An unresolved annotation is still a string, so nothing downstream can tell a
+    Pydantic model from a plain value. Degrading to an untyped endpoint would discard
+    exactly the contract the framework exists to enforce.
+    """
+    if isinstance(annotation, str):
+        raise TypeError(
+            f"Could not resolve the annotation {annotation!r} for {where} of "
+            f"endpoint {endpoint!r}. summonpot builds the request and response "
+            "contracts from these annotations and will not fall back to an untyped "
+            "endpoint. Import the type at runtime rather than only under "
+            "TYPE_CHECKING, and declare it at module scope."
+        )

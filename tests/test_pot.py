@@ -59,6 +59,59 @@ def test_summon_registers_pydantic_input_and_output_contracts():
     assert endpoint.return_type == "ResearchResponse"
 
 
+def _register_with_unresolvable_annotations(source: str):
+    """Register an endpoint whose annotations cannot be evaluated at runtime."""
+    namespace: dict = {}
+    # exec keeps the caller's `from __future__ import annotations`, which is what
+    # leaves these annotations unevaluated at registration time.
+    exec(source, namespace)
+
+
+def test_summon_rejects_an_unresolvable_parameter_annotation():
+    """Silently dropping the contract is what this must never do again."""
+    with pytest.raises(TypeError, match="Could not resolve the annotation"):
+        _register_with_unresolvable_annotations(
+            "from summonpot import Pot\n"
+            "pot = Pot('svc')\n"
+            "@pot.summon('/research')\n"
+            "def research(request: OnlyUnderTypeChecking) -> str:\n"
+            "    '''Research a topic.'''\n"
+            "    raise NotImplementedError\n"
+        )
+
+
+def test_summon_rejects_an_unresolvable_return_annotation():
+    with pytest.raises(TypeError, match="the return type"):
+        _register_with_unresolvable_annotations(
+            "from summonpot import Pot\n"
+            "pot = Pot('svc')\n"
+            "@pot.summon('/research')\n"
+            "def research(query: str) -> MissingResponseModel:\n"
+            "    '''Research a topic.'''\n"
+            "    raise NotImplementedError\n"
+        )
+
+
+def test_summon_rejects_a_model_defined_in_a_local_scope():
+    """A model built inside a factory is the realistic way to hit this."""
+
+    def build_pot():
+        class LocalRequest(BaseModel):
+            query: str
+
+        pot = Pot("svc")
+
+        @pot.summon("/research")
+        def research(request: LocalRequest) -> str:
+            """Research a topic."""
+            raise NotImplementedError
+
+        return pot
+
+    with pytest.raises(TypeError, match="Could not resolve the annotation"):
+        build_pot()
+
+
 def test_summon_rejects_mixed_pydantic_and_scalar_inputs():
     pot = Pot("svc")
 
