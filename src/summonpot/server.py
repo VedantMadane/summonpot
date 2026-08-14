@@ -5,7 +5,7 @@ from __future__ import annotations
 import inspect
 import logging
 from types import UnionType
-from typing import TYPE_CHECKING, Any, Union, get_args, get_origin
+from typing import TYPE_CHECKING, Annotated, Any, Union, get_args, get_origin
 
 from summonpot import __version__
 from summonpot.pot import BODYLESS_METHODS, _unwrap_annotated
@@ -195,13 +195,14 @@ def _make_query_handler(endpoint: Any, pot: Any) -> Any:
         # a generic keeps its element type instead of collapsing to its first member.
         annotation = _field_type(p)
         # A sequence is read as a request body unless it is marked as a query
-        # parameter, so it would silently arrive as None on a bodyless method. A
-        # scalar needs no marker, and must not get one: a Query default overrides
-        # any constraint the annotation carries in its own Annotated metadata.
+        # parameter, so it would silently arrive as None on a bodyless method. The
+        # marker goes *inside* Annotated rather than into the default: as a default
+        # it replaces whatever FieldInfo the annotation already carried, silently
+        # dropping the declared constraint.
         if _needs_query_marker(annotation):
-            default: Any = Query(... if p.required else p.default)
-        else:
-            default = inspect.Parameter.empty if p.required else p.default
+            annotation = Annotated[annotation, Query()]
+
+        default = inspect.Parameter.empty if p.required else p.default
 
         parameters.append(
             inspect.Parameter(

@@ -471,3 +471,50 @@ def test_annotated_query_parameter_enforces_its_constraint(mock_runtime):
 
     assert client.get("/search?term=abc").status_code == 200
     assert client.get("/search?term=ab").status_code == 422
+
+
+def test_sequence_query_parameter_keeps_its_own_constraint(mock_runtime):
+    """The query marker must not replace the annotation's declared FieldInfo."""
+    pot = mock_runtime(mock_response="ok")
+
+    @pot.summon("/batch", method="GET")
+    def batch(ids: Annotated[list[int], Field(min_length=2)]) -> str:
+        """Look up several records."""
+        return ""
+
+    client = TestClient(build_app(pot))
+
+    assert client.get("/batch?ids=1&ids=2").status_code == 200
+    # One value violates min_length=2, which the signature declares.
+    assert client.get("/batch?ids=1").status_code == 422
+
+
+def test_sequence_query_parameter_keeps_its_element_constraint(mock_runtime):
+    pot = mock_runtime(mock_response="ok")
+
+    @pot.summon("/batch", method="GET")
+    def batch(ids: list[Annotated[int, Field(ge=1)]] | None = None) -> str:
+        """Look up several records."""
+        return ""
+
+    client = TestClient(build_app(pot))
+
+    assert client.get("/batch?ids=1&ids=2").status_code == 200
+    # 0 violates the element constraint ge=1.
+    assert client.get("/batch?ids=0&ids=2").status_code == 422
+
+
+def test_unconstrained_sequence_query_parameter_still_binds(mock_runtime):
+    """The marker is still required for a sequence to bind at all."""
+    pot = mock_runtime(mock_response="ok")
+
+    @pot.summon("/batch", method="GET")
+    def batch(ids: list[int] | None = None) -> str:
+        """Look up several records."""
+        return ""
+
+    client = TestClient(build_app(pot))
+
+    assert client.get("/batch?ids=1&ids=2").status_code == 200
+    pot._runtime.call.assert_any_await(pot.endpoints[0], {"ids": [1, 2]})
+    assert client.get("/batch?ids=a").status_code == 422
