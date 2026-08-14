@@ -345,3 +345,82 @@ def test_legacy_structured_return_parses_json_when_possible(model_output, expect
     )
 
     assert result == expected
+
+
+@pytest.mark.parametrize(
+    ("capability_kind", "expected_name"),
+    [
+        ("async_callable", "AsyncLookup"),
+        ("positional_only_function", "lookup_positionally"),
+        ("positional_only_callable", "PositionalLookup"),
+    ],
+)
+def test_runtime_supports_every_callable_capability_form(
+    capability_kind, expected_name
+):
+    """Each form must reach the model with the right schema and actually run."""
+
+    class AsyncLookup:
+        """Look up an account asynchronously."""
+
+        async def __call__(self, identifier: str) -> str:
+            return f"async:{identifier}"
+
+    def lookup_positionally(identifier: str, /) -> str:
+        """Look up an account positionally."""
+        return f"positional:{identifier}"
+
+    class PositionalLookup:
+        """Look up an account positionally."""
+
+        def __call__(self, identifier: str, /) -> str:
+            return f"object:{identifier}"
+
+    capability = {
+        "async_callable": AsyncLookup(),
+        "positional_only_function": lookup_positionally,
+        "positional_only_callable": PositionalLookup(),
+    }[capability_kind]
+
+    pot = Pot("svc")
+
+    @pot.summon("/research")
+    def research(
+        request: ResearchRequest, record=Depends(capability)
+    ) -> ResearchResponse:
+        """Research a topic."""
+        raise NotImplementedError
+
+    observed: dict[str, object] = {}
+    turns = 0
+
+    def model_function(messages, info: AgentInfo):
+        nonlocal turns
+        turns += 1
+        if turns == 1:
+            observed["name"] = info.function_tools[0].name
+            observed["properties"] = sorted(
+                info.function_tools[0].parameters_json_schema["properties"]
+            )
+            return ModelResponse(
+                parts=[ToolCallPart(expected_name, {"identifier": "7"})]
+            )
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    info.output_tools[0].name,
+                    {"summary": "done", "confidence": 1.0},
+                )
+            ]
+        )
+
+    result = asyncio.run(
+        Runtime(model=FunctionModel(model_function)).call(
+            pot.endpoints[0], {"query": "agents"}
+        )
+    )
+
+    assert observed["name"] == expected_name
+    # A positional-only parameter is still offered to the model by name.
+    assert observed["properties"] == ["identifier"]
+    assert result.summary == "done"

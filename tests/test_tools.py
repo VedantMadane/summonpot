@@ -145,3 +145,24 @@ def test_unannotated_parameters_default_to_string_type():
     definition = build_tool_from_func(lookup)
 
     assert definition.parameters[0].type_annotation == "str"
+
+
+def test_async_callable_object_capability_is_awaited():
+    """The async form must not hand an un-awaited coroutine back as the result."""
+
+    class AsyncRepository:
+        """Look up an account asynchronously."""
+
+        def __init__(self, connection: str) -> None:
+            self.connection = connection
+
+        async def __call__(self, identifier: str) -> str:
+            return f"{self.connection}:{identifier}"
+
+    definition = build_tool_from_func(AsyncRepository("primary"))
+
+    result = asyncio.run(definition.call(identifier="7"))
+
+    assert definition.name == "AsyncRepository"
+    assert result == "primary:7"
+    assert not inspect.isawaitable(result)
