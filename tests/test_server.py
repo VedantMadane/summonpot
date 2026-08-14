@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 import pytest
 from fastapi.testclient import TestClient
@@ -437,3 +437,37 @@ def test_build_app_never_raises_for_a_registered_endpoint(mock_runtime):
         return ""
 
     assert build_app(pot) is not None
+
+
+def test_literal_query_parameter_enforces_its_allowed_values(mock_runtime):
+    """A Literal is a valid query contract: accepted in-set, 422 out of set."""
+    pot = mock_runtime(mock_response="ok")
+
+    @pot.summon("/tickets", method="GET")
+    def tickets(status: Literal["open", "closed"] = "open") -> str:
+        """List tickets by status."""
+        return ""
+
+    client = TestClient(build_app(pot))
+    parameter = client.get("/openapi.json").json()["paths"]["/tickets"]["get"][
+        "parameters"
+    ][0]
+
+    assert parameter["in"] == "query"
+    assert client.get("/tickets?status=open").status_code == 200
+    assert client.get("/tickets?status=closed").status_code == 200
+    assert client.get("/tickets?status=banana").status_code == 422
+
+
+def test_annotated_query_parameter_enforces_its_constraint(mock_runtime):
+    pot = mock_runtime(mock_response="ok")
+
+    @pot.summon("/search", method="GET")
+    def search(term: Annotated[str, Field(min_length=3)]) -> str:
+        """Search for a term."""
+        return ""
+
+    client = TestClient(build_app(pot))
+
+    assert client.get("/search?term=abc").status_code == 200
+    assert client.get("/search?term=ab").status_code == 422

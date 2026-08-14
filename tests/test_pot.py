@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from typing import Annotated, Literal
+
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from summonpot import Depends, Pot, Required
 from summonpot.tools import tool
@@ -516,3 +518,48 @@ def test_summon_accepts_query_representable_annotations(annotation):
     pot.summon("/lookup", method="GET")(namespace["endpoint"])
 
     assert pot.endpoints[0].method == "GET"
+
+
+@pytest.mark.parametrize(
+    "annotation",
+    [
+        "Literal['open', 'closed']",
+        "list[Literal['open', 'closed']] | None",
+        "Annotated[str, Field(min_length=3)]",
+        "Annotated[list[int], Field()] | None",
+    ],
+)
+def test_summon_accepts_constrained_scalar_query_annotations(annotation):
+    """Literal and Annotated wrap a scalar; they do not make it unrepresentable."""
+    namespace = {
+        "Annotated": Annotated,
+        "Literal": Literal,
+        "Field": Field,
+        "Pot": Pot,
+    }
+    source = (
+        f"def endpoint(value: {annotation} = None) -> str:\n"
+        "    '''Look something up.'''\n"
+        "    return ''\n"
+    )
+    exec(source, namespace)
+    pot = Pot("svc")
+
+    pot.summon("/lookup", method="GET")(namespace["endpoint"])
+
+    assert pot.endpoints[0].method == "GET"
+
+
+def test_summon_still_rejects_a_mapping_hidden_behind_annotated():
+    """Unwrapping Annotated must not open a hole for mappings."""
+    namespace = {"Annotated": Annotated, "Field": Field, "Pot": Pot}
+    source = (
+        "def endpoint(value: Annotated[dict[str, int], Field()] = None) -> str:\n"
+        "    '''Look something up.'''\n"
+        "    return ''\n"
+    )
+    exec(source, namespace)
+    pot = Pot("svc")
+
+    with pytest.raises(TypeError, match="has no query encoding"):
+        pot.summon("/lookup", method="GET")(namespace["endpoint"])

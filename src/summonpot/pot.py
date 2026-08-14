@@ -5,8 +5,9 @@ from __future__ import annotations
 import inspect
 from collections.abc import Callable, Mapping
 from dataclasses import replace
+from enum import Enum
 from types import UnionType
-from typing import Any, Union, get_args, get_origin
+from typing import Annotated, Any, Literal, Union, get_args, get_origin
 
 from pydantic import BaseModel
 
@@ -300,11 +301,28 @@ class Pot:
         uvicorn.run(app, host=host, port=port)  # type: ignore[arg-type]
 
 
+def _unwrap_annotated(annotation: Any) -> Any:
+    """Return the underlying type of an ``Annotated``, leaving anything else alone."""
+    while get_origin(annotation) is Annotated:
+        annotation = get_args(annotation)[0]
+    return annotation
+
+
 def _is_query_scalar(annotation: Any) -> bool:
     """Report whether a single value can travel in a query string."""
+    annotation = _unwrap_annotated(annotation)
     if annotation is Any:
         return True
-    if get_origin(annotation) is not None:
+
+    origin = get_origin(annotation)
+    if origin is Literal:
+        # A constrained scalar: every member still arrives as one query value.
+        return all(
+            isinstance(member, str | int | float | bool | bytes | Enum)
+            or member is None
+            for member in get_args(annotation)
+        )
+    if origin is not None:
         # A nested generic, e.g. dict[str, int] or list[list[int]].
         return False
     if isinstance(annotation, type) and issubclass(annotation, BaseModel):
@@ -320,6 +338,8 @@ def _is_query_representable(annotation: Any) -> bool:
     """
     if annotation is None or annotation is inspect.Parameter.empty:
         return True
+
+    annotation = _unwrap_annotated(annotation)
     origin = get_origin(annotation)
     if origin is Union or origin is UnionType:
         return all(

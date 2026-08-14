@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import inspect
 import logging
-from typing import TYPE_CHECKING, Any
+from types import UnionType
+from typing import TYPE_CHECKING, Any, Union, get_args, get_origin
 
 from summonpot import __version__
-from summonpot.pot import BODYLESS_METHODS
+from summonpot.pot import BODYLESS_METHODS, _unwrap_annotated
 
 if TYPE_CHECKING:
     from summonpot.pot import Pot
@@ -166,6 +167,19 @@ def _make_body_handler(endpoint: Any, pot: Any, request_model: type[Any]) -> Any
     return handle
 
 
+def _needs_query_marker(annotation: Any) -> bool:
+    """Report whether FastAPI needs an explicit Query marker to bind this type."""
+    annotation = _unwrap_annotated(annotation)
+    origin = get_origin(annotation)
+    if origin is Union or origin is UnionType:
+        return any(
+            _needs_query_marker(argument)
+            for argument in get_args(annotation)
+            if argument is not type(None)
+        )
+    return origin in (list, set, frozenset, tuple)
+
+
 def _make_query_handler(endpoint: Any, pot: Any) -> Any:
     """Create a handler whose parameters arrive as a query string."""
 
@@ -180,14 +194,20 @@ def _make_query_handler(endpoint: Any, pot: Any) -> Any:
         # Same resolved annotation the body path uses, so a union stays nullable and
         # a generic keeps its element type instead of collapsing to its first member.
         annotation = _field_type(p)
-        # Declared with Query(...) rather than a bare default: FastAPI reads a
-        # non-scalar annotation as a request body otherwise, so a list parameter
-        # would silently arrive as None on a method that has no body.
+        # A sequence is read as a request body unless it is marked as a query
+        # parameter, so it would silently arrive as None on a bodyless method. A
+        # scalar needs no marker, and must not get one: a Query default overrides
+        # any constraint the annotation carries in its own Annotated metadata.
+        if _needs_query_marker(annotation):
+            default: Any = Query(... if p.required else p.default)
+        else:
+            default = inspect.Parameter.empty if p.required else p.default
+
         parameters.append(
             inspect.Parameter(
                 p.name,
                 inspect.Parameter.KEYWORD_ONLY,
-                default=Query(... if p.required else p.default),
+                default=default,
                 annotation=annotation,
             )
         )
