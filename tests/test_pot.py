@@ -265,3 +265,37 @@ def test_summon_still_rejects_a_quoted_name_that_does_not_exist():
             "    '''Research a topic.'''\n"
             "    raise NotImplementedError\n"
         )
+
+
+def test_summon_resolves_forward_references_inside_container_annotations():
+    """`list["ResearchResponse"]` must resolve, not stay a container of strings."""
+    pot = Pot("svc")
+
+    @pot.summon("/research")
+    def research(request: "ResearchRequest") -> "ResearchResponse":  # noqa: UP037
+        """Research a topic."""
+        raise NotImplementedError
+
+    @pot.summon("/batch")
+    def batch(items: list["ResearchRequest"]) -> dict[str, "ResearchResponse"]:  # noqa: UP037
+        """Research several topics."""
+        raise NotImplementedError
+
+    assert pot.endpoints[0].input_model is ResearchRequest
+    # The container resolved to real classes, so it renders with their names rather
+    # than as a container of quoted strings.
+    batch_endpoint = pot.endpoints[1]
+    assert batch_endpoint.parameters[0].type_annotation == "list[ResearchRequest]"
+    assert batch_endpoint.return_type == "dict[str, ResearchResponse]"
+
+
+def test_summon_rejects_a_missing_name_nested_in_a_container():
+    with pytest.raises(TypeError, match="'MissingInside'"):
+        _register_with_unresolvable_annotations(
+            "from summonpot import Pot\n"
+            "pot = Pot('svc')\n"
+            "@pot.summon('/research')\n"
+            'def research(items: list["MissingInside"]) -> str:\n'
+            "    '''Research topics.'''\n"
+            "    raise NotImplementedError\n"
+        )

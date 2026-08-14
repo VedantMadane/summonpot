@@ -7,6 +7,7 @@ signature, so the answers live here once rather than in two copies that can drif
 from __future__ import annotations
 
 import inspect
+import typing
 from collections.abc import Callable
 from typing import Any
 
@@ -43,31 +44,30 @@ def get_type_str(
     return "str"
 
 
-# A quoted reference may nest ("Request" -> 'Request' -> Request); the bound stops
-# a pathological self-referential alias from looping.
-_MAX_FORWARD_REF_DEPTH = 5
-
-
 def _resolve_annotation(annotation: Any, globalns: dict[str, Any]) -> Any:
-    """Evaluate an annotation, following nested quoted forward references.
+    """Resolve an annotation, including forward references nested inside it.
 
-    Under ``from __future__ import annotations`` an explicitly quoted annotation such
-    as ``request: "Request"`` is stored as the source text ``'"Request"'``. Evaluating
-    that once yields the *string* ``'Request'`` rather than the class, so a single
-    pass cannot tell a valid forward reference from an unresolvable name.
+    Under ``from __future__ import annotations`` an annotation is stored as source
+    text, and a quoted reference may sit *inside* an otherwise resolvable type:
+    ``list["Request"]`` evaluates to ``list['Request']``, whose argument is still a
+    string. ``typing.get_type_hints`` applies the same recursive treatment the type
+    system uses, so containers, unions and optionals all resolve.
 
     Returns the resolved object, or the name that failed to resolve so the caller can
     report it.
     """
-    current = annotation
-    for _ in range(_MAX_FORWARD_REF_DEPTH):
-        if not isinstance(current, str):
-            return current
-        try:
-            current = eval(current, globalns)
-        except Exception:
-            return current
-    return current
+
+    def holder() -> None: ...
+
+    holder.__annotations__ = {"value": annotation}
+    try:
+        return typing.get_type_hints(holder, globalns)["value"]
+    except NameError as exc:
+        # `NameError.name` is the single name that could not be resolved, which reads
+        # far better than the whole annotation source.
+        return exc.name or annotation
+    except Exception:
+        return annotation
 
 
 def safe_get_type_hints(func: Callable[..., Any]) -> dict[str, Any]:

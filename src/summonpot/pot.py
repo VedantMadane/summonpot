@@ -12,6 +12,7 @@ from summonpot._annotations import (
     get_type_str,
     reject_unresolved,
     safe_get_type_hints,
+    type_name,
 )
 from summonpot.dependencies import Dependency
 from summonpot.models import EndpointDef, ParamDef, ToolDef
@@ -146,10 +147,10 @@ class Pot:
             output_model = return_hint if _is_pydantic_model(return_hint) else None
             if return_hint is inspect.Parameter.empty or return_hint is None:
                 return_type = "str"
-            elif hasattr(return_hint, "__name__"):
-                return_type = return_hint.__name__
             else:
-                return_type = str(return_hint)
+                # Rendered with the shared helper so a generic keeps its arguments;
+                # __name__ alone reduces dict[str, Response] to "dict".
+                return_type = type_name(return_hint)
 
             endpoint_tools = [*all_tools, *dependency_tools]
             tool_names = [tool.name for tool in endpoint_tools]

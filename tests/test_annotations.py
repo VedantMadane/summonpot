@@ -73,3 +73,25 @@ def test_safe_get_type_hints_reports_the_name_that_failed():
 
     # The failing *name* comes back, not the quoted source, so the error reads well.
     assert safe_get_type_hints(endpoint)["value"] == "NeverDefined"
+
+
+def test_safe_get_type_hints_resolves_forward_references_inside_containers():
+    """A quoted reference may sit inside an otherwise resolvable outer type."""
+
+    def endpoint(items): ...
+
+    endpoint.__annotations__ = {"items": 'list["int"]', "return": 'dict[str, "int"]'}
+
+    assert safe_get_type_hints(endpoint) == {
+        "items": list[int],
+        "return": dict[str, int],
+    }
+
+
+def test_safe_get_type_hints_reports_a_missing_name_nested_in_a_container():
+    def endpoint(items): ...
+
+    endpoint.__annotations__ = {"items": 'list["NeverDefined"]'}
+
+    # Just the failing name, not the whole container source.
+    assert safe_get_type_hints(endpoint)["items"] == "NeverDefined"
