@@ -230,3 +230,45 @@ class CapabilityService:
     def describe(cls, value: str) -> str:
         """Describe a value."""
         return f"{cls.__name__}:{value}"
+
+
+def test_unbound_method_of_a_locally_defined_class_is_rejected():
+    """App factories and fixtures commonly declare service classes inside a function."""
+
+    class LocalService:
+        def lookup(receiver, key: str) -> str:  # pyright: ignore[reportSelfClsParameterName]
+            """Look up a key."""
+            return key
+
+    with pytest.raises(TypeError, match="unbound method"):
+        build_tool_from_func(LocalService.lookup)
+
+
+def test_bound_method_of_a_locally_defined_class_is_accepted():
+    class LocalService:
+        def __init__(self, prefix: str) -> None:
+            self.prefix = prefix
+
+        def lookup(self, key: str) -> str:
+            """Look up a key."""
+            return f"{self.prefix}:{key}"
+
+    definition = build_tool_from_func(LocalService("accounts").lookup)
+
+    assert [parameter.name for parameter in definition.parameters] == ["key"]
+    assert asyncio.run(definition.call(key="7")) == "accounts:7"
+
+
+def test_nested_plain_function_with_a_self_field_is_accepted():
+    """A function defined in a function body has no receiver, whatever its fields."""
+
+    def render(self: str, template: str) -> str:
+        """Render a template for a self-describing entity."""
+        return self + template
+
+    definition = build_tool_from_func(render)
+
+    assert [parameter.name for parameter in definition.parameters] == [
+        "self",
+        "template",
+    ]

@@ -98,12 +98,28 @@ def _annotation_source(func: Callable[..., Any]) -> Any:
     return target
 
 
+def _owning_class(func: Callable[..., Any], parent_path: str) -> type | None:
+    """Return the class ``func`` was defined in, if it can be looked up."""
+    module = sys.modules.get(getattr(func, "__module__", ""))
+    if module is None:
+        return None
+    owner: Any = module
+    for part in parent_path.split("."):
+        if part == "<locals>":
+            # Declared inside a function; the class is not reachable by name.
+            return None
+        owner = getattr(owner, part, None)
+        if owner is None:
+            return None
+    return owner if isinstance(owner, type) else None
+
+
 def _is_unbound_method(func: Callable[..., Any]) -> bool:
     """Report whether ``func`` is a plain function reached through its class.
 
-    Detected from the qualified name and the owning class rather than from the first
-    parameter's spelling: a receiver may be named anything, and a plain function is
-    free to have a business field called ``self``.
+    Read from the qualified name rather than the first parameter's spelling: a
+    receiver may be named anything, and a plain function is free to have a business
+    field called ``self``.
     """
     if inspect.ismethod(func):
         # Already bound to an instance or a class; the receiver is supplied.
@@ -111,29 +127,22 @@ def _is_unbound_method(func: Callable[..., Any]) -> bool:
 
     qualname = getattr(func, "__qualname__", "")
     parent_path, _, name = qualname.rpartition(".")
-    if not parent_path:
+    if not parent_path or parent_path.endswith("<locals>"):
+        # A module-level function, or one defined directly in a function body.
+        # Neither has a receiver.
         return False
 
-    module = sys.modules.get(getattr(func, "__module__", ""))
-    if module is None:
-        return False
+    owner = _owning_class(func, parent_path)
+    if owner is not None:
+        # getattr_static returns the descriptor, so a staticmethod or classmethod -
+        # both callable exactly as reached - is not mistaken for an unbound method.
+        return inspect.isfunction(inspect.getattr_static(owner, name, None))
 
-    owner: Any = module
-    for part in parent_path.split("."):
-        if part == "<locals>":
-            # Defined inside a function; the owner is not reachable, so accept
-            # rather than guess.
-            return False
-        owner = getattr(owner, part, None)
-        if owner is None:
-            return False
-
-    if not isinstance(owner, type):
-        return False
-
-    # getattr_static returns the descriptor itself, so a staticmethod or
-    # classmethod - both callable as-is - is not mistaken for an unbound method.
-    return inspect.isfunction(inspect.getattr_static(owner, name, None))
+    # The class was declared inside a function, so the descriptor cannot be
+    # inspected. It is defined in a class body and takes arguments, so treat it as a
+    # method: wrongly rejecting a local staticmethod fails loudly at registration,
+    # while wrongly accepting an unbound method fails confusingly mid-run.
+    return bool(inspect.signature(func).parameters)
 
 
 def _reject_unbound_receiver(func: Callable[..., Any], sig: inspect.Signature) -> None:
@@ -149,7 +158,9 @@ def _reject_unbound_receiver(func: Callable[..., Any], sig: inspect.Signature) -
     raise TypeError(
         f"Capability {capability_name(func)!r} is an unbound method, so its "
         f"receiver {receiver!r} cannot be supplied and it cannot be called. Pass a "
-        "bound method (instance.method) or a callable object instead."
+        "bound method (instance.method) or a callable object instead. If this is a "
+        "staticmethod on a class declared inside a function, move the class to "
+        "module scope so it can be recognised as one."
     )
 
 
