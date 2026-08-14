@@ -175,6 +175,14 @@ class Pot:
             if duplicate_names:
                 raise TypeError(f"Duplicate capability name: {duplicate_names[0]}")
 
+            existing = next((e for e in self._endpoints if e.path == path), None)
+            if existing is not None:
+                raise ValueError(
+                    f"Endpoint path {path!r} is already registered by "
+                    f"{existing.name!r}. Only the first registration is reachable, "
+                    "so the second would be silently dead code."
+                )
+
             endpoint = EndpointDef(
                 path=path,
                 name=endpoint_name,

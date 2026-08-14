@@ -334,3 +334,22 @@ def test_summon_rejects_a_path_without_a_leading_slash():
         def research(request: ResearchRequest) -> ResearchResponse:
             """Research a topic."""
             raise NotImplementedError
+
+
+def test_summon_rejects_a_duplicate_path():
+    """Starlette dispatches the first match, so the second was silently dead."""
+    pot = Pot("svc")
+
+    @pot.summon("/research")
+    def research(request: ResearchRequest) -> ResearchResponse:
+        """Research a topic."""
+        raise NotImplementedError
+
+    with pytest.raises(ValueError, match="already registered by 'research'"):
+
+        @pot.summon("/research")
+        def research_again(request: ResearchRequest) -> ResearchResponse:
+            """Research a topic differently."""
+            raise NotImplementedError
+
+    assert len(pot.endpoints) == 1
