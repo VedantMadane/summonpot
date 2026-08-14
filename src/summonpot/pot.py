@@ -80,10 +80,19 @@ class Pot:
         Args:
             path: URL path for the endpoint (e.g. ``/research``).
             tools: Additional tools specific to this endpoint.
-            stream: Whether to stream the response.
+            stream: Not implemented. Passing ``True`` raises, rather than
+                silently returning a fully buffered response.
             model: LLM model override for this endpoint.
             method: HTTP method (default POST).
         """
+
+        if stream:
+            raise NotImplementedError(
+                "stream=True is not implemented. The flag shipped in 0.2.0 but was "
+                "never read, so a streaming endpoint returned a fully buffered "
+                "response with no indication the flag did nothing. Omit it until "
+                "streaming lands."
+            )
 
         if not path.startswith("/"):
             raise ValueError(
