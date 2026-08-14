@@ -117,6 +117,11 @@ class Pot:
                         description="",
                         required=is_required,
                         default=None if is_required else param.default,
+                        annotation=(
+                            None
+                            if annotation is inspect.Parameter.empty
+                            else annotation
+                        ),
                     )
                 )
 

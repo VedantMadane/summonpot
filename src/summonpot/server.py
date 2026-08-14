@@ -32,7 +32,7 @@ def build_app(pot: Pot) -> Any:
 
                 fields: dict[str, tuple[type, Any]] = {}
                 for p in endpoint.parameters:
-                    field_type = _str_to_type(p.type_annotation)
+                    field_type = _field_type(p)
                     if p.required:
                         fields[p.name] = (field_type, ...)
                     else:
@@ -100,8 +100,24 @@ def _make_no_body_handler(endpoint: Any, pot: Any) -> Any:
     return handle
 
 
+def _field_type(param: Any) -> Any:
+    """Resolve the request-body field type for one endpoint parameter.
+
+    Prefers the resolved annotation object so unions stay nullable, ``Any`` stays
+    permissive, and a generic keeps its element type. Falls back to parsing the
+    display string only when no annotation could be resolved.
+    """
+    annotation = param.annotation
+    if annotation is None or isinstance(annotation, str):
+        return _str_to_type(param.type_annotation)
+    return annotation
+
+
 def _str_to_type(type_str: str) -> type:
-    """Convert a type annotation string to a Python type."""
+    """Convert a type annotation string to a Python type.
+
+    Fallback for parameters whose annotation could not be resolved to an object.
+    """
     mapping: dict[str, type] = {
         "str": str,
         "int": int,
