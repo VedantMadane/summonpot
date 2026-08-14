@@ -235,3 +235,33 @@ def search_web_raw(query: str) -> list[dict]:
 def translate_raw(text: str, target: str = "es") -> str:
     """Translate text to a target language."""
     return text
+
+
+def test_summon_accepts_explicitly_quoted_forward_references():
+    """`request: "ResearchRequest"` is a valid annotation and must not be rejected.
+
+    Under PEP 563 the stored source is `'"ResearchRequest"'`, so evaluating it once
+    yields the string `'ResearchRequest'` rather than the class.
+    """
+    pot = Pot("svc")
+
+    @pot.summon("/research")
+    def research(request: "ResearchRequest") -> "ResearchResponse":  # noqa: UP037
+        """Research a topic."""
+        raise NotImplementedError
+
+    endpoint = pot.endpoints[0]
+    assert endpoint.input_model is ResearchRequest
+    assert endpoint.output_model is ResearchResponse
+
+
+def test_summon_still_rejects_a_quoted_name_that_does_not_exist():
+    with pytest.raises(TypeError, match="'StillMissing'"):
+        _register_with_unresolvable_annotations(
+            "from summonpot import Pot\n"
+            "pot = Pot('svc')\n"
+            "@pot.summon('/research')\n"
+            'def research(request: "StillMissing") -> str:\n'
+            "    '''Research a topic.'''\n"
+            "    raise NotImplementedError\n"
+        )

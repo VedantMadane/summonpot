@@ -54,3 +54,22 @@ def test_safe_get_type_hints_resolves_string_annotations():
     def endpoint(value: int) -> str: ...
 
     assert safe_get_type_hints(endpoint) == {"value": int, "return": str}
+
+
+def test_safe_get_type_hints_follows_nested_quoted_forward_references():
+    """PEP 563 stores `x: "int"` as the source text '"int"', not as 'int'."""
+
+    def endpoint(value): ...
+
+    endpoint.__annotations__ = {"value": '"int"', "return": '"str"'}
+
+    assert safe_get_type_hints(endpoint) == {"value": int, "return": str}
+
+
+def test_safe_get_type_hints_reports_the_name_that_failed():
+    def endpoint(value): ...
+
+    endpoint.__annotations__ = {"value": '"NeverDefined"'}
+
+    # The failing *name* comes back, not the quoted source, so the error reads well.
+    assert safe_get_type_hints(endpoint)["value"] == "NeverDefined"

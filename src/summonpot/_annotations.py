@@ -43,33 +43,45 @@ def get_type_str(
     return "str"
 
 
+# A quoted reference may nest ("Request" -> 'Request' -> Request); the bound stops
+# a pathological self-referential alias from looping.
+_MAX_FORWARD_REF_DEPTH = 5
+
+
+def _resolve_annotation(annotation: Any, globalns: dict[str, Any]) -> Any:
+    """Evaluate an annotation, following nested quoted forward references.
+
+    Under ``from __future__ import annotations`` an explicitly quoted annotation such
+    as ``request: "Request"`` is stored as the source text ``'"Request"'``. Evaluating
+    that once yields the *string* ``'Request'`` rather than the class, so a single
+    pass cannot tell a valid forward reference from an unresolvable name.
+
+    Returns the resolved object, or the name that failed to resolve so the caller can
+    report it.
+    """
+    current = annotation
+    for _ in range(_MAX_FORWARD_REF_DEPTH):
+        if not isinstance(current, str):
+            return current
+        try:
+            current = eval(current, globalns)
+        except Exception:
+            return current
+    return current
+
+
 def safe_get_type_hints(func: Callable[..., Any]) -> dict[str, Any]:
     """Resolve a callable's annotations.
 
-    Only a `NameError` is tolerated, and only so the caller can report *which* name
-    failed to resolve. Anything else propagates: swallowing every exception here is
-    what let an endpoint silently lose its Pydantic contract.
+    Each annotation is resolved independently: one unresolvable name would otherwise
+    fail the whole call and make every healthy annotation beside it look broken too,
+    so the error would name the wrong parameter.
     """
-    try:
-        return inspect.get_annotations(func, eval_str=True)
-    except NameError:
-        pass
-
-    # One bad annotation fails the whole call, which would make every other
-    # annotation look unresolvable too and report the wrong parameter. Resolve them
-    # one at a time so only the genuinely broken name is left as a string.
-    raw = inspect.get_annotations(func, eval_str=False)
     globalns = getattr(func, "__globals__", {})
-    resolved: dict[str, Any] = {}
-    for name, annotation in raw.items():
-        if not isinstance(annotation, str):
-            resolved[name] = annotation
-            continue
-        try:
-            resolved[name] = eval(annotation, globalns)
-        except Exception:
-            resolved[name] = annotation
-    return resolved
+    return {
+        name: _resolve_annotation(annotation, globalns)
+        for name, annotation in inspect.get_annotations(func, eval_str=False).items()
+    }
 
 
 def reject_unresolved(annotation: Any, *, where: str, endpoint: str) -> None:
