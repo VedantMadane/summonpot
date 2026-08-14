@@ -112,6 +112,28 @@ def test_summon_rejects_a_model_defined_in_a_local_scope():
         build_pot()
 
 
+def test_summon_requires_a_docstring_goal():
+    """The docstring is the agent's instructions, so an empty one is not usable."""
+    pot = Pot("svc")
+
+    with pytest.raises(TypeError, match="has no docstring"):
+
+        @pot.summon("/research")
+        def research(request: ResearchRequest) -> ResearchResponse:
+            raise NotImplementedError
+
+
+def test_summon_rejects_a_whitespace_only_docstring():
+    pot = Pot("svc")
+
+    with pytest.raises(TypeError, match="has no docstring"):
+
+        @pot.summon("/research")
+        def research(request: ResearchRequest) -> ResearchResponse:
+            """ """
+            raise NotImplementedError
+
+
 def test_summon_rejects_mixed_pydantic_and_scalar_inputs():
     pot = Pot("svc")
 
@@ -168,6 +190,7 @@ def test_summon_rejects_duplicate_capability_names():
             first=Depends(lookup),
             second=Depends(second_lookup),
         ) -> ResearchResponse:
+            """Research a topic."""
             raise NotImplementedError
 
 

@@ -303,6 +303,7 @@ def test_runtime_fails_when_required_capability_never_runs():
         request: ResearchRequest,
         sources=Required(load_sources),
     ) -> ResearchResponse:
+        """Research a topic."""
         raise NotImplementedError
 
     def model_function(messages, info: AgentInfo):
@@ -368,6 +369,7 @@ def test_legacy_structured_return_parses_json_when_possible(model_output, expect
 
     @pot.summon("/legacy")
     def legacy(value: str) -> dict:
+        """Return a legacy structured payload."""
         return {}
 
     def model_function(messages, info: AgentInfo):
