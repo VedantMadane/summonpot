@@ -36,15 +36,41 @@ def test_tool_decorator_uses_function_metadata_and_defaults():
 
 
 def test_unbound_method_capability_is_rejected():
-    """Nothing can supply `self`, so this must fail at registration, not at call."""
-
-    class Service:
-        def lookup(self, key: str) -> str:
-            """Look up a key."""
-            return key
-
+    """Nothing can supply the receiver, so this fails at registration, not at call."""
     with pytest.raises(TypeError, match="unbound method"):
-        build_tool_from_func(Service.lookup)
+        build_tool_from_func(CapabilityService.lookup)
+
+
+def test_unbound_method_is_detected_whatever_the_receiver_is_called():
+    """Detection reads the owning class, not the first parameter's spelling."""
+    with pytest.raises(TypeError, match="'receiver'"):
+        build_tool_from_func(CapabilityService.lookup_oddly_named)
+
+
+def test_plain_function_with_a_self_field_is_accepted():
+    """`self` is a legal business field name on a function that is not a method."""
+
+    def render(self: str, template: str) -> str:
+        """Render a template for a self-describing entity."""
+        return self + template
+
+    definition = build_tool_from_func(render)
+
+    assert [parameter.name for parameter in definition.parameters] == [
+        "self",
+        "template",
+    ]
+
+
+def test_staticmethod_and_classmethod_capabilities_are_accepted():
+    """Both are callable as reached, so neither is an unbound method."""
+    static_definition = build_tool_from_func(CapabilityService.normalize)
+    class_definition = build_tool_from_func(CapabilityService.describe)
+
+    assert [p.name for p in static_definition.parameters] == ["value"]
+    assert [p.name for p in class_definition.parameters] == ["value"]
+    assert asyncio.run(static_definition.call(value="v")) == "v"
+    assert asyncio.run(class_definition.call(value="v")) == "CapabilityService:v"
 
 
 def test_bound_method_capability_is_accepted():
@@ -181,3 +207,26 @@ def test_async_callable_object_capability_is_awaited():
     assert definition.name == "AsyncRepository"
     assert result == "primary:7"
     assert not inspect.isawaitable(result)
+class CapabilityService:
+    """Capabilities reached through a class, used by the receiver tests."""
+
+    def __init__(self, prefix: str = "svc") -> None:
+        self.prefix = prefix
+
+    def lookup(self, key: str) -> str:
+        """Look up a key."""
+        return f"{self.prefix}:{key}"
+
+    def lookup_oddly_named(receiver, key: str) -> str:
+        """Look up a key through a receiver that is not called self."""
+        return key
+
+    @staticmethod
+    def normalize(value: str) -> str:
+        """Normalize a value."""
+        return value
+
+    @classmethod
+    def describe(cls, value: str) -> str:
+        """Describe a value."""
+        return f"{cls.__name__}:{value}"

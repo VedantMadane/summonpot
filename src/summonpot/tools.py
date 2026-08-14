@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import functools
 import inspect
+import sys
 from collections.abc import Callable
 from typing import Any
 
@@ -97,20 +98,59 @@ def _annotation_source(func: Callable[..., Any]) -> Any:
     return target
 
 
-def _reject_unbound_receiver(func: Callable[..., Any], sig: inspect.Signature) -> None:
-    """Reject a capability whose first parameter is an unfilled ``self``/``cls``.
+def _is_unbound_method(func: Callable[..., Any]) -> bool:
+    """Report whether ``func`` is a plain function reached through its class.
 
-    Nothing can supply that argument at call time, so the model would be asked to
-    invent a receiver. Silently hiding it from the schema is worse: the model then
-    calls the operation and the call fails on a missing argument.
+    Detected from the qualified name and the owning class rather than from the first
+    parameter's spelling: a receiver may be named anything, and a plain function is
+    free to have a business field called ``self``.
     """
-    first = next(iter(sig.parameters), None)
-    if first in ("self", "cls"):
-        raise TypeError(
-            f"Capability {capability_name(func)!r} declares {first!r} as its first "
-            "parameter, so it is an unbound method and cannot be called. Pass a "
-            "bound method (instance.method) or a callable object instead."
-        )
+    if inspect.ismethod(func):
+        # Already bound to an instance or a class; the receiver is supplied.
+        return False
+
+    qualname = getattr(func, "__qualname__", "")
+    parent_path, _, name = qualname.rpartition(".")
+    if not parent_path:
+        return False
+
+    module = sys.modules.get(getattr(func, "__module__", ""))
+    if module is None:
+        return False
+
+    owner: Any = module
+    for part in parent_path.split("."):
+        if part == "<locals>":
+            # Defined inside a function; the owner is not reachable, so accept
+            # rather than guess.
+            return False
+        owner = getattr(owner, part, None)
+        if owner is None:
+            return False
+
+    if not isinstance(owner, type):
+        return False
+
+    # getattr_static returns the descriptor itself, so a staticmethod or
+    # classmethod - both callable as-is - is not mistaken for an unbound method.
+    return inspect.isfunction(inspect.getattr_static(owner, name, None))
+
+
+def _reject_unbound_receiver(func: Callable[..., Any], sig: inspect.Signature) -> None:
+    """Reject a capability reached through its class rather than an instance.
+
+    Nothing can supply the receiver at call time, so the model would be asked to
+    invent one. Silently hiding it from the schema is worse: the model then calls the
+    operation and the call fails on a missing argument.
+    """
+    if not _is_unbound_method(func):
+        return
+    receiver = next(iter(sig.parameters), "its first parameter")
+    raise TypeError(
+        f"Capability {capability_name(func)!r} is an unbound method, so its "
+        f"receiver {receiver!r} cannot be supplied and it cannot be called. Pass a "
+        "bound method (instance.method) or a callable object instead."
+    )
 
 
 def build_tool_from_func(func: Callable[..., Any]) -> ToolDef:
