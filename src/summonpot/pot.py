@@ -103,8 +103,15 @@ class Pot:
             stream: Not implemented. Passing ``True`` raises, rather than
                 silently returning a fully buffered response.
             model: LLM model override for this endpoint.
-            method: HTTP method (default POST).
+            method: HTTP method (default POST). Bodyless methods (GET, DELETE,
+                HEAD) take their parameters as a query string.
         """
+        normalized_method = method.upper()
+        if normalized_method not in SUPPORTED_METHODS:
+            raise ValueError(
+                f"Unsupported HTTP method {method!r}. Supported methods are "
+                f"{', '.join(sorted(SUPPORTED_METHODS))}."
+            )
 
         if stream:
             raise NotImplementedError(
@@ -188,6 +195,14 @@ class Pot:
                     "Pydantic endpoints must declare exactly one request parameter"
                 )
 
+            if input_model is not None and normalized_method in BODYLESS_METHODS:
+                raise TypeError(
+                    f"Endpoint {endpoint_name!r} uses {normalized_method}, which "
+                    "carries no request body, so it cannot take a Pydantic request "
+                    "model. Declare the fields as individual parameters, or use "
+                    "POST."
+                )
+
             # Return type
             return_hint = hints.get("return", sig.return_annotation)
             reject_unresolved(
@@ -232,6 +247,7 @@ class Pot:
                 tools=endpoint_tools,
                 stream=stream,
                 model=model,
+                method=normalized_method,
             )
             self._routes[route] = endpoint_name
             self._endpoints.append(endpoint)
@@ -269,6 +285,10 @@ class Pot:
 
         app = build_app(self)
         uvicorn.run(app, host=host, port=port)  # type: ignore[arg-type]
+
+
+BODYLESS_METHODS = frozenset({"GET", "DELETE", "HEAD"})
+SUPPORTED_METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"})
 
 
 def _is_pydantic_model(annotation: Any) -> bool:

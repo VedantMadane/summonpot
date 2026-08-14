@@ -304,3 +304,64 @@ def test_runtime_exception_text_is_not_returned_to_the_caller(raised, caplog):
     assert "PRIVATE_CUSTOMER_RECORD_123" not in response.text
     # The operator still gets the detail.
     assert "PRIVATE_CUSTOMER_RECORD_123" in caplog.text
+def test_get_endpoint_is_registered_as_get_with_query_parameters(mock_runtime):
+    """method= used to be accepted and discarded, always producing a POST route."""
+    pot = mock_runtime(mock_response="Berlin is sunny.")
+
+    @pot.summon("/forecast", method="GET")
+    def forecast(city: str, days: int = 3) -> str:
+        """Report the forecast."""
+        return ""
+
+    client = TestClient(build_app(pot))
+    operation = client.get("/openapi.json").json()["paths"]["/forecast"]
+
+    assert set(operation) == {"get"}
+    parameters = {p["name"]: p for p in operation["get"]["parameters"]}
+    assert set(parameters) == {"city", "days"}
+    assert parameters["city"]["in"] == "query"
+    assert parameters["city"]["required"] is True
+    assert parameters["days"]["required"] is False
+    assert "requestBody" not in operation["get"]
+
+    response = client.get("/forecast?city=Berlin&days=5")
+    assert response.status_code == 200
+    assert response.json() == "Berlin is sunny."
+    pot._runtime.call.assert_awaited_once_with(
+        pot.endpoints[0], {"city": "Berlin", "days": 5}
+    )
+
+
+def test_get_endpoint_rejects_a_post(mock_runtime):
+    pot = mock_runtime(mock_response="ok")
+
+    @pot.summon("/forecast", method="GET")
+    def forecast(city: str) -> str:
+        """Report the forecast."""
+        return ""
+
+    client = TestClient(build_app(pot))
+
+    assert client.post("/forecast", json={"city": "Berlin"}).status_code == 405
+
+
+def test_put_and_delete_methods_are_registered(mock_runtime):
+    pot = mock_runtime(mock_response="ok")
+
+    @pot.summon("/records", method="PUT")
+    def replace_record(record_id: str, payload: str) -> str:
+        """Replace a record."""
+        return ""
+
+    @pot.summon("/records/purge", method="DELETE")
+    def purge_record(record_id: str) -> str:
+        """Purge a record."""
+        return ""
+
+    paths = TestClient(build_app(pot)).get("/openapi.json").json()["paths"]
+
+    # PUT keeps a JSON body; DELETE takes query parameters.
+    assert set(paths["/records"]) == {"put"}
+    assert "requestBody" in paths["/records"]["put"]
+    assert set(paths["/records/purge"]) == {"delete"}
+    assert "requestBody" not in paths["/records/purge"]["delete"]

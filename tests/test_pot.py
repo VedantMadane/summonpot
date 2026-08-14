@@ -449,3 +449,35 @@ def test_pot_rejects_both_model_and_runtime():
 
     with pytest.raises(TypeError, match="not both"):
         Pot("svc", model="openai:gpt-4o-mini", runtime=Runtime())
+def test_summon_normalizes_and_records_the_method():
+    pot = Pot("svc")
+
+    @pot.summon("/forecast", method="get")
+    def forecast(city: str) -> str:
+        """Report the forecast."""
+        return ""
+
+    assert pot.endpoints[0].method == "GET"
+
+
+def test_summon_rejects_an_unsupported_method():
+    pot = Pot("svc")
+
+    with pytest.raises(ValueError, match="Unsupported HTTP method"):
+
+        @pot.summon("/forecast", method="TRACE")
+        def forecast(city: str) -> str:
+            """Report the forecast."""
+            return ""
+
+
+def test_summon_rejects_a_request_model_on_a_bodyless_method():
+    """A GET has no body to carry the model, so this must fail at registration."""
+    pot = Pot("svc")
+
+    with pytest.raises(TypeError, match="carries no request body"):
+
+        @pot.summon("/research", method="GET")
+        def research(request: ResearchRequest) -> ResearchResponse:
+            """Research a topic."""
+            raise NotImplementedError

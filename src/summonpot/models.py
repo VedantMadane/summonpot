@@ -67,3 +67,4 @@ class EndpointDef:
     tools: list[ToolDef] = field(default_factory=list)
     stream: bool = False
     model: str | None = None
+    method: str = "POST"

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import logging
+import inspect
 from typing import TYPE_CHECKING, Any
 
 from summonpot import __version__
+from summonpot.pot import BODYLESS_METHODS
 
 if TYPE_CHECKING:
     from summonpot.pot import Pot
@@ -25,9 +27,25 @@ def build_app(pot: Pot) -> Any:
 
     for endpoint in pot.endpoints:
         route_path = endpoint.path
-        method = "POST"
+        method = endpoint.method
 
-        if endpoint.parameters:
+        if endpoint.parameters and method in BODYLESS_METHODS:
+            # GET/DELETE/HEAD carry no request body, so the declared parameters
+            # become query parameters instead.
+            _handle_with_query = _make_query_handler(endpoint, pot)
+            app.add_api_route(
+                route_path,
+                _handle_with_query,
+                methods=[method],
+                response_model=endpoint.output_model,
+                summary=(
+                    endpoint.description.split("\n")[0]
+                    if endpoint.description
+                    else endpoint.name
+                ),
+                description=endpoint.description,
+            )
+        elif endpoint.parameters:
             if endpoint.input_model is not None:
                 RequestModel = endpoint.input_model
             else:
@@ -145,6 +163,33 @@ def _make_body_handler(endpoint: Any, pot: Any, request_model: type[Any]) -> Any
         return await _run_endpoint(pot, endpoint, params)
 
     handle.__annotations__["body"] = request_model
+    return handle
+
+
+def _make_query_handler(endpoint: Any, pot: Any) -> Any:
+    """Create a handler whose parameters arrive as a query string."""
+
+    async def handle(**kwargs: Any) -> Any:
+        return await _run_endpoint(pot, endpoint, kwargs)
+
+    parameters = []
+    annotations: dict[str, Any] = {}
+    for p in endpoint.parameters:
+        annotation = _str_to_type(p.type_annotation)
+        parameters.append(
+            inspect.Parameter(
+                p.name,
+                inspect.Parameter.KEYWORD_ONLY,
+                default=inspect.Parameter.empty if p.required else p.default,
+                annotation=annotation,
+            )
+        )
+        annotations[p.name] = annotation
+
+    # FastAPI reads __signature__, so this is what turns **kwargs into a documented
+    # set of query parameters.
+    handle.__signature__ = inspect.Signature(parameters)  # type: ignore[attr-defined]
+    handle.__annotations__ = annotations
     return handle
 
 
