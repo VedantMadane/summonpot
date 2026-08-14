@@ -8,6 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from summonpot._annotations import get_type_str, safe_get_type_hints
 from summonpot.dependencies import Dependency
 from summonpot.models import EndpointDef, ParamDef, ToolDef
 from summonpot.runtime import Runtime
@@ -93,7 +94,7 @@ class Pot:
 
             # Extract parameters from function signature
             sig = inspect.signature(func)
-            hints = _safe_get_type_hints(func)
+            hints = safe_get_type_hints(func)
             parameters: list[ParamDef] = []
             dependency_tools: list[ToolDef] = []
             input_model: type[BaseModel] | None = None
@@ -108,7 +109,7 @@ class Pot:
                 annotation = hints.get(pname, param.annotation)
                 if _is_pydantic_model(annotation):
                     input_model = annotation
-                type_str = _get_type_str(pname, param, hints)
+                type_str = get_type_str(pname, param, hints)
                 is_required = param.default is inspect.Parameter.empty
                 parameters.append(
                     ParamDef(
@@ -199,40 +200,3 @@ class Pot:
 
 def _is_pydantic_model(annotation: Any) -> bool:
     return isinstance(annotation, type) and issubclass(annotation, BaseModel)
-
-
-def _get_type_str(
-    pname: str,
-    param: inspect.Parameter,
-    hints: dict[str, Any],
-) -> str:
-    if pname in hints:
-        return _type_name(hints[pname])
-    if param.annotation is not inspect.Parameter.empty:
-        return _type_name(param.annotation)
-    return "str"
-
-
-def _type_name(tp: Any) -> str:
-    if hasattr(tp, "__origin__"):
-        origin = tp.__origin__
-        args = tp.__args__
-        if origin is list and args:
-            return f"list[{_type_name(args[0])}]"
-        if origin is dict and len(args) >= 2:
-            return f"dict[{_type_name(args[0])}, {_type_name(args[1])}]"
-        if origin is tuple:
-            return f"tuple[{', '.join(_type_name(a) for a in args)}]"
-        return _type_name(origin)
-    if tp is type(None):
-        return "None"
-    if hasattr(tp, "__name__"):
-        return tp.__name__
-    return str(tp)
-
-
-def _safe_get_type_hints(func: Callable[..., Any]) -> dict[str, Any]:
-    try:
-        return inspect.get_annotations(func, eval_str=True)
-    except Exception:
-        return inspect.get_annotations(func, eval_str=False)
