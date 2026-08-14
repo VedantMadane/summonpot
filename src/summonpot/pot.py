@@ -83,6 +83,12 @@ class Pot:
             method: HTTP method (default POST).
         """
 
+        if not path.startswith("/"):
+            raise ValueError(
+                f"Endpoint path {path!r} must start with '/'. A path without a "
+                "leading slash registers an endpoint that no request can reach."
+            )
+
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             endpoint_name = func.__name__
             description = inspect.getdoc(func) or ""
