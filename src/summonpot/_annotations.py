@@ -61,7 +61,9 @@ def _resolve_annotation(annotation: Any, globalns: dict[str, Any]) -> Any:
 
     holder.__annotations__ = {"value": annotation}
     try:
-        return typing.get_type_hints(holder, globalns)["value"]
+        # include_extras keeps Annotated metadata, which carries the parameter's
+        # validation constraints; dropping it would silently weaken the contract.
+        return typing.get_type_hints(holder, globalns, include_extras=True)["value"]
     except NameError as exc:
         # `NameError.name` is the single name that could not be resolved, which reads
         # far better than the whole annotation source.
