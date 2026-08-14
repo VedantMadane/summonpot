@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Literal
 
 import pytest
@@ -272,3 +273,34 @@ def test_build_app_no_body_route_hides_internal_context(mock_runtime):
     response = client.post("/health")
     assert response.status_code == 200
     assert response.json() == "ready"
+
+
+@pytest.mark.parametrize(
+    "raised",
+    [
+        UnexpectedModelBehavior("invalid model output: PRIVATE_CUSTOMER_RECORD_123"),
+        UsageLimitExceeded("limit hit: PRIVATE_CUSTOMER_RECORD_123"),
+    ],
+)
+def test_runtime_exception_text_is_not_returned_to_the_caller(raised, caplog):
+    """Agent-loop exceptions can carry rejected model output or tool-call context."""
+    pot = Pot("svc")
+
+    @pot.summon("/research")
+    def research(query: str) -> str:
+        """Research a topic."""
+        return ""
+
+    class FailingRuntime:
+        async def call(self, endpoint, params):
+            raise raised
+
+    pot._runtime = FailingRuntime()
+    client = TestClient(build_app(pot), raise_server_exceptions=False)
+
+    with caplog.at_level(logging.WARNING, logger="summonpot.server"):
+        response = client.post("/research", json={"query": "agents"})
+
+    assert "PRIVATE_CUSTOMER_RECORD_123" not in response.text
+    # The operator still gets the detail.
+    assert "PRIVATE_CUSTOMER_RECORD_123" in caplog.text

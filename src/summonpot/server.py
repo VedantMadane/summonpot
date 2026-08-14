@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 from summonpot import __version__
 
 if TYPE_CHECKING:
     from summonpot.pot import Pot
+
+logger = logging.getLogger("summonpot.server")
 
 
 def build_app(pot: Pot) -> Any:
@@ -92,16 +95,26 @@ async def _run_endpoint(pot: Any, endpoint: Any, params: dict[str, Any]) -> Any:
     try:
         return await pot._runtime.call(endpoint, params)
     except UsageLimitExceeded as exc:
+        # Details are logged, never returned: an exception raised inside the agent
+        # loop can carry rejected model output or tool-call context, and the HTTP
+        # response is the one surface an untrusted caller reads.
+        logger.warning(
+            "Endpoint %s exceeded its usage limit", endpoint.path, exc_info=exc
+        )
         raise HTTPException(
             status_code=429,
-            detail=f"Endpoint exceeded its configured usage limit: {exc}",
+            detail="Endpoint exceeded its configured usage limit.",
         ) from exc
     except TimeoutError as exc:
+        logger.warning("Endpoint %s timed out", endpoint.path, exc_info=exc)
         raise HTTPException(
             status_code=504,
             detail="Endpoint timed out before the model produced a valid response.",
         ) from exc
     except ModelHTTPError as exc:
+        logger.warning(
+            "Endpoint %s failed against the model provider", endpoint.path, exc_info=exc
+        )
         # A provider rate limit is the one upstream status a caller can act on.
         status_code = 429 if exc.status_code == 429 else 502
         raise HTTPException(
@@ -109,11 +122,13 @@ async def _run_endpoint(pot: Any, endpoint: Any, params: dict[str, Any]) -> Any:
             detail=f"Model provider request failed with status {exc.status_code}.",
         ) from exc
     except UnexpectedModelBehavior as exc:
+        logger.warning(
+            "Endpoint %s did not satisfy its contract", endpoint.path, exc_info=exc
+        )
         raise HTTPException(
             status_code=502,
             detail=(
-                "Model did not satisfy the endpoint contract within the retry "
-                f"budget: {exc}"
+                "Model did not satisfy the endpoint contract within the retry budget."
             ),
         ) from exc
 
