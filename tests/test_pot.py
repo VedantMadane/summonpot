@@ -411,3 +411,27 @@ def test_summon_still_accepts_the_default_non_streaming_endpoint():
         raise NotImplementedError
 
     assert pot.endpoints[0].stream is False
+
+
+def test_pot_level_capabilities_are_not_shared_between_endpoints():
+    """`required` is per-endpoint state and must not leak across endpoints."""
+    pot = Pot("svc", tools=[search_web_raw])
+
+    @pot.summon("/one")
+    def one(q: str) -> str:
+        """One."""
+        return ""
+
+    @pot.summon("/two")
+    def two(q: str) -> str:
+        """Two."""
+        return ""
+
+    first, second = pot.endpoints[0].tools[0], pot.endpoints[1].tools[0]
+    assert first is not second
+    assert first is not pot._pot_tools[0]
+
+    first.required = True
+
+    assert second.required is False
+    assert pot._pot_tools[0].required is False

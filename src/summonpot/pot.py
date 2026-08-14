@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Any
 
 from pydantic import BaseModel
@@ -113,15 +114,18 @@ class Pot:
                     "it is required."
                 )
 
-            # Merge pot-level tools with endpoint-specific tools
-            all_tools = list(self._pot_tools)
+            # Merge pot-level tools with endpoint-specific tools. Each endpoint
+            # gets its own ToolDef: `required` is per-endpoint state, so sharing
+            # one object would let a Required(...) on one endpoint leak into every
+            # other endpoint using the same capability.
+            all_tools = [replace(t) for t in self._pot_tools]
             if tools:
                 # Convert raw functions to ToolDefs
                 for t in tools:
                     if not isinstance(t, ToolDef):
                         all_tools.append(build_tool_from_func(t))
                     else:
-                        all_tools.append(t)
+                        all_tools.append(replace(t))
 
             # Extract parameters from function signature
             sig = inspect.signature(func)
