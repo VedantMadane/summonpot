@@ -169,18 +169,25 @@ def _make_body_handler(endpoint: Any, pot: Any, request_model: type[Any]) -> Any
 def _make_query_handler(endpoint: Any, pot: Any) -> Any:
     """Create a handler whose parameters arrive as a query string."""
 
+    from fastapi import Query
+
     async def handle(**kwargs: Any) -> Any:
         return await _run_endpoint(pot, endpoint, kwargs)
 
     parameters = []
     annotations: dict[str, Any] = {}
     for p in endpoint.parameters:
-        annotation = _str_to_type(p.type_annotation)
+        # Same resolved annotation the body path uses, so a union stays nullable and
+        # a generic keeps its element type instead of collapsing to its first member.
+        annotation = _field_type(p)
+        # Declared with Query(...) rather than a bare default: FastAPI reads a
+        # non-scalar annotation as a request body otherwise, so a list parameter
+        # would silently arrive as None on a method that has no body.
         parameters.append(
             inspect.Parameter(
                 p.name,
                 inspect.Parameter.KEYWORD_ONLY,
-                default=inspect.Parameter.empty if p.required else p.default,
+                default=Query(... if p.required else p.default),
                 annotation=annotation,
             )
         )

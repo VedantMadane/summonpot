@@ -365,3 +365,39 @@ def test_put_and_delete_methods_are_registered(mock_runtime):
     assert "requestBody" in paths["/records"]["put"]
     assert set(paths["/records/purge"]) == {"delete"}
     assert "requestBody" not in paths["/records/purge"]["delete"]
+
+
+def test_query_parameters_keep_their_resolved_type_contract(mock_runtime):
+    """A GET must honour the signature, not a lossy display-string approximation."""
+    pot = mock_runtime(mock_response="ok")
+
+    @pot.summon("/lookup", method="GET")
+    def lookup(
+        value: int | str,
+        count: int = 1,
+        tags: list[int] | None = None,
+    ) -> str:
+        """Look up a record."""
+        return ""
+
+    client = TestClient(build_app(pot))
+    operation = client.get("/openapi.json").json()["paths"]["/lookup"]["get"]
+    assert {p["name"]: p["in"] for p in operation["parameters"]} == {
+        "value": "query",
+        "count": "query",
+        "tags": "query",
+    }
+
+    # A union member that is not the first one is accepted.
+    assert client.get("/lookup?value=customer-alpha").status_code == 200
+    # A scalar is still coerced to its declared type.
+    assert client.get("/lookup?value=x&count=7").status_code == 200
+    # A generic keeps its element type: repeated values parse, wrong ones are rejected.
+    assert client.get("/lookup?value=x&tags=1&tags=2").status_code == 200
+    assert client.get("/lookup?value=x&tags=a").status_code == 422
+    # Required-ness survives.
+    assert client.get("/lookup").status_code == 422
+
+    pot._runtime.call.assert_any_await(
+        pot.endpoints[0], {"value": "x", "count": 1, "tags": [1, 2]}
+    )
