@@ -217,7 +217,7 @@ class CapabilityService:
         """Look up a key."""
         return f"{self.prefix}:{key}"
 
-    def lookup_oddly_named(receiver, key: str) -> str:
+    def lookup_oddly_named(receiver, key: str) -> str:  # pyright: ignore[reportSelfClsParameterName]
         """Look up a key through a receiver that is not called self."""
         return key
 
