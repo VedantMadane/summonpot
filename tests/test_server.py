@@ -304,6 +304,8 @@ def test_runtime_exception_text_is_not_returned_to_the_caller(raised, caplog):
     assert "PRIVATE_CUSTOMER_RECORD_123" not in response.text
     # The operator still gets the detail.
     assert "PRIVATE_CUSTOMER_RECORD_123" in caplog.text
+
+
 def test_get_endpoint_is_registered_as_get_with_query_parameters(mock_runtime):
     """method= used to be accepted and discarded, always producing a POST route."""
     pot = mock_runtime(mock_response="Berlin is sunny.")
@@ -401,3 +403,37 @@ def test_query_parameters_keep_their_resolved_type_contract(mock_runtime):
     pot._runtime.call.assert_any_await(
         pot.endpoints[0], {"value": "x", "count": 1, "tags": [1, 2]}
     )
+
+
+def test_query_route_uses_the_shared_runtime_error_mapping():
+    """A parameterised GET must get the same stable statuses as a body route."""
+    pot = Pot("svc")
+
+    @pot.summon("/forecast", method="GET")
+    def forecast(city: str) -> str:
+        """Report the forecast."""
+        return ""
+
+    class FailingRuntime:
+        async def call(self, endpoint, params):
+            raise UnexpectedModelBehavior("invalid output: PRIVATE_SENTINEL_123")
+
+    pot._runtime = FailingRuntime()
+    client = TestClient(build_app(pot), raise_server_exceptions=False)
+
+    response = client.get("/forecast?city=Berlin")
+
+    assert response.status_code == 502
+    assert "PRIVATE_SENTINEL_123" not in response.text
+
+
+def test_build_app_never_raises_for_a_registered_endpoint(mock_runtime):
+    """Unsupported query shapes are refused at registration, not inside FastAPI."""
+    pot = mock_runtime(mock_response="ok")
+
+    @pot.summon("/forecast", method="GET")
+    def forecast(city: str, days: list[int] | None = None) -> str:
+        """Report the forecast."""
+        return ""
+
+    assert build_app(pot) is not None

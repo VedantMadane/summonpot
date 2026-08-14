@@ -481,3 +481,38 @@ def test_summon_rejects_a_request_model_on_a_bodyless_method():
         def research(request: ResearchRequest) -> ResearchResponse:
             """Research a topic."""
             raise NotImplementedError
+
+
+@pytest.mark.parametrize(
+    "annotation",
+    ["dict[str, int] | None", "dict[str, int]", "ResearchRequest | None"],
+)
+def test_summon_rejects_query_annotations_with_no_encoding(annotation):
+    """These used to reach FastAPI and crash build_app() during startup."""
+    namespace = {"ResearchRequest": ResearchRequest, "Pot": Pot}
+    source = (
+        f"def endpoint(payload: {annotation} = None) -> str:\n"
+        "    '''Look something up.'''\n"
+        "    return ''\n"
+    )
+    exec(source, namespace)
+    pot = Pot("svc")
+
+    with pytest.raises(TypeError, match="has no query encoding"):
+        pot.summon("/lookup", method="GET")(namespace["endpoint"])
+
+
+@pytest.mark.parametrize("annotation", ["list[int] | None", "int | str", "str"])
+def test_summon_accepts_query_representable_annotations(annotation):
+    namespace = {"Pot": Pot}
+    source = (
+        f"def endpoint(value: {annotation} = None) -> str:\n"
+        "    '''Look something up.'''\n"
+        "    return ''\n"
+    )
+    exec(source, namespace)
+    pot = Pot("svc")
+
+    pot.summon("/lookup", method="GET")(namespace["endpoint"])
+
+    assert pot.endpoints[0].method == "GET"

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import logging
 import inspect
+import logging
 from typing import TYPE_CHECKING, Any
 
 from summonpot import __version__

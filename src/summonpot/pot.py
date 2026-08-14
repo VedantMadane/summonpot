@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import inspect
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import replace
-from typing import Any
+from types import UnionType
+from typing import Any, Union, get_args, get_origin
 
 from pydantic import BaseModel
 
@@ -203,6 +204,18 @@ class Pot:
                     "POST."
                 )
 
+            if normalized_method in BODYLESS_METHODS:
+                for parameter in parameters:
+                    if _is_query_representable(parameter.annotation):
+                        continue
+                    raise TypeError(
+                        f"Endpoint {endpoint_name!r} uses {normalized_method}, so "
+                        f"parameter {parameter.name!r} has to travel in the query "
+                        f"string, and {parameter.type_annotation!r} has no query "
+                        "encoding. Use a scalar or a sequence of scalars, or use "
+                        "POST so it can be sent in the request body."
+                    )
+
             # Return type
             return_hint = hints.get("return", sig.return_annotation)
             reject_unresolved(
@@ -285,6 +298,42 @@ class Pot:
 
         app = build_app(self)
         uvicorn.run(app, host=host, port=port)  # type: ignore[arg-type]
+
+
+def _is_query_scalar(annotation: Any) -> bool:
+    """Report whether a single value can travel in a query string."""
+    if annotation is Any:
+        return True
+    if get_origin(annotation) is not None:
+        # A nested generic, e.g. dict[str, int] or list[list[int]].
+        return False
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return False
+    return not (isinstance(annotation, type) and issubclass(annotation, Mapping))
+
+
+def _is_query_representable(annotation: Any) -> bool:
+    """Report whether an annotation can be expressed as a query parameter.
+
+    A query string carries scalars and repeated scalars. Mappings and nested models
+    have no agreed encoding, so they belong in a request body.
+    """
+    if annotation is None or annotation is inspect.Parameter.empty:
+        return True
+    origin = get_origin(annotation)
+    if origin is Union or origin is UnionType:
+        return all(
+            _is_query_representable(argument)
+            for argument in get_args(annotation)
+            if argument is not type(None)
+        )
+    if origin in (list, set, frozenset, tuple):
+        return all(
+            _is_query_scalar(argument)
+            for argument in get_args(annotation)
+            if argument is not Ellipsis
+        )
+    return _is_query_scalar(annotation)
 
 
 BODYLESS_METHODS = frozenset({"GET", "DELETE", "HEAD"})
