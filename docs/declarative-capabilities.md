@@ -42,7 +42,7 @@ The public endpoint declaration stays the same. The fixed docstring goal and val
 
 Dependency parameters are declaration-only. They do not appear in the HTTP request body or OpenAPI request schema, and the decorated function body is never executed.
 
-## Closed boundary
+## What the boundary does and does not cover
 
 The endpoint agent receives its declared dependencies and no ambient application access. An operation can contain deterministic business logic or a safe database adapter. Raw database sessions, connections, cursors, ORM registries, shells, and arbitrary SQL execution should not be exposed.
 
