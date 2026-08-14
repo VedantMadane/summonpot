@@ -207,6 +207,8 @@ def test_async_callable_object_capability_is_awaited():
     assert definition.name == "AsyncRepository"
     assert result == "primary:7"
     assert not inspect.isawaitable(result)
+
+
 class CapabilityService:
     """Capabilities reached through a class, used by the receiver tests."""
 
