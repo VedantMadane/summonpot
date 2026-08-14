@@ -35,17 +35,32 @@ def test_tool_decorator_uses_function_metadata_and_defaults():
     assert transform.parameters[1].default is None
 
 
-def test_build_tool_skips_method_receiver_from_schema():
-    def combine(self: Any, value: int, enabled: bool = True) -> dict[str, Any]:
-        """Combine exact inputs."""
-        return {"value": value, "enabled": enabled}
+def test_unbound_method_capability_is_rejected():
+    """Nothing can supply `self`, so this must fail at registration, not at call."""
 
-    definition = build_tool_from_func(combine)
+    class Service:
+        def lookup(self, key: str) -> str:
+            """Look up a key."""
+            return key
 
-    assert [parameter.name for parameter in definition.parameters] == [
-        "value",
-        "enabled",
-    ]
+    with pytest.raises(TypeError, match="unbound method"):
+        build_tool_from_func(Service.lookup)
+
+
+def test_bound_method_capability_is_accepted():
+    class Service:
+        def __init__(self, prefix: str) -> None:
+            self.prefix = prefix
+
+        def lookup(self, key: str) -> str:
+            """Look up a key."""
+            return f"{self.prefix}:{key}"
+
+    definition = build_tool_from_func(Service("accounts").lookup)
+
+    assert definition.name == "lookup"
+    assert [parameter.name for parameter in definition.parameters] == ["key"]
+    assert asyncio.run(definition.call(key="7")) == "accounts:7"
 
 
 def test_tooldef_executes_sync_function():

@@ -132,6 +132,41 @@ def test_runtime_executes_tools_through_provider_neutral_agent_loop():
     assert result == ResearchResponse(summary="Grounded result", confidence=1.0)
 
 
+def test_declared_parameters_match_the_schema_the_model_receives():
+    """ToolDef.parameters is the documented contract; the schema must agree."""
+
+    def archive_record(identifier: str, force: bool = False) -> str:
+        """Archive one approved record."""
+        return identifier
+
+    pot = Pot("svc", tools=[archive_record])
+    _register_endpoint(pot)
+    observed: dict[str, object] = {}
+
+    def model_function(messages, info: AgentInfo):
+        schema = info.function_tools[0].parameters_json_schema
+        observed["properties"] = sorted(schema["properties"])
+        observed["required"] = sorted(schema.get("required", []))
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    info.output_tools[0].name,
+                    {"summary": "done", "confidence": 1.0},
+                )
+            ]
+        )
+
+    asyncio.run(
+        Runtime(model=FunctionModel(model_function)).call(
+            pot.endpoints[0], {"query": "agents"}
+        )
+    )
+
+    declared = pot.endpoints[0].tools[0].parameters
+    assert observed["properties"] == sorted(p.name for p in declared)
+    assert observed["required"] == sorted(p.name for p in declared if p.required)
+
+
 @pytest.mark.parametrize("capability_kind", ["partial", "callable_object"])
 def test_runtime_exposes_capabilities_that_are_not_plain_functions(capability_kind):
     """Partials and callable instances are how a capability carries state."""

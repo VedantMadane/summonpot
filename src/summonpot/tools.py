@@ -31,11 +31,10 @@ def tool(
         tool_name = name or capability_name(func)
         tool_desc = description or inspect.getdoc(_unwrap_partials(func)) or ""
         sig = inspect.signature(func)
+        _reject_unbound_receiver(func, sig)
         hints = _safe_get_type_hints(_annotation_source(func))
         params: list[ParamDef] = []
         for pname, param in sig.parameters.items():
-            if pname in ("self", "cls"):
-                continue
             type_str = _get_type_str(pname, param, hints)
             is_required = param.default is inspect.Parameter.empty
             description_text = ""
@@ -98,6 +97,22 @@ def _annotation_source(func: Callable[..., Any]) -> Any:
     return target
 
 
+def _reject_unbound_receiver(func: Callable[..., Any], sig: inspect.Signature) -> None:
+    """Reject a capability whose first parameter is an unfilled ``self``/``cls``.
+
+    Nothing can supply that argument at call time, so the model would be asked to
+    invent a receiver. Silently hiding it from the schema is worse: the model then
+    calls the operation and the call fails on a missing argument.
+    """
+    first = next(iter(sig.parameters), None)
+    if first in ("self", "cls"):
+        raise TypeError(
+            f"Capability {capability_name(func)!r} declares {first!r} as its first "
+            "parameter, so it is an unbound method and cannot be called. Pass a "
+            "bound method (instance.method) or a callable object instead."
+        )
+
+
 def build_tool_from_func(func: Callable[..., Any]) -> ToolDef:
     """Build a ToolDef from a raw function (no decorator)."""
     tool_name = capability_name(func)
@@ -105,11 +120,10 @@ def build_tool_from_func(func: Callable[..., Any]) -> ToolDef:
     # describe itself to the model with functools.partial's own docstring.
     tool_desc = inspect.getdoc(_unwrap_partials(func)) or ""
     sig = inspect.signature(func)
+    _reject_unbound_receiver(func, sig)
     hints = _safe_get_type_hints(_annotation_source(func))
     params: list[ParamDef] = []
     for pname, param in sig.parameters.items():
-        if pname in ("self", "cls"):
-            continue
         type_str = _get_type_str(pname, param, hints)
         is_required = param.default is inspect.Parameter.empty
         params.append(
