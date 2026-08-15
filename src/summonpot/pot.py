@@ -241,24 +241,12 @@ class Pot:
             # Keyed on the pair, not the path alone: GET /orders and POST /orders
             # are different routes, while a second GET /orders would be dispatched
             # to the first and silently become dead code.
-            route = (path, method.upper())
+            route = (path, normalized_method)
             existing_name = self._routes.get(route)
             if existing_name is not None:
                 raise ValueError(
-                    f"{route[1]} {path} is already registered by "
-                    f"{existing_name!r}. Only the first registration is reachable, "
-            existing = next(
-                (
-                    e
-                    for e in self._endpoints
-                    if e.path == path and e.method == normalized_method
-                ),
-                None,
-            )
-            if existing is not None:
-                raise ValueError(
                     f"{normalized_method} {path} is already registered by "
-                    f"{existing.name!r}. Only the first registration is reachable, "
+                    f"{existing_name!r}. Only the first registration is reachable, "
                     "so the second would be silently dead code."
                 )
 
