@@ -461,6 +461,8 @@ def test_runtime_supports_every_callable_capability_form(
     # A positional-only parameter is still offered to the model by name.
     assert observed["properties"] == ["identifier"]
     assert result.summary == "done"
+
+
 def test_default_model_is_resolved_lazily(monkeypatch):
     """Setting SUMMONPOT_MODEL after the pot is built must still take effect."""
     monkeypatch.delenv("SUMMONPOT_MODEL", raising=False)
