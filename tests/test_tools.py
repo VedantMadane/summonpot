@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import inspect
 import threading
 from typing import Any
+
+import pytest
 
 from summonpot.models import ToolDef
 from summonpot.tools import build_tool_from_func, tool
@@ -95,6 +98,46 @@ def test_tooldef_awaits_callable_objects_with_async_call():
     assert not inspect.isawaitable(result)
 
 
+def test_partial_capability_uses_the_wrapped_function_name_and_docstring():
+    def fetch_record(table: str, identifier: str) -> str:
+        """Fetch one record from an approved table."""
+        return f"{table}:{identifier}"
+
+    definition = build_tool_from_func(functools.partial(fetch_record, "accounts"))
+
+    assert definition.name == "fetch_record"
+    assert definition.description == "Fetch one record from an approved table."
+    # The bound argument must not be offered to the model again.
+    assert [parameter.name for parameter in definition.parameters] == ["identifier"]
+    assert asyncio.run(definition.call(identifier="7")) == "accounts:7"
+
+
+def test_callable_object_capability_is_named_after_its_class():
+    class LookupAccount:
+        """Look up an account through a framework-owned connection."""
+
+        def __init__(self, connection: str) -> None:
+            self.connection = connection
+
+        def __call__(self, identifier: str) -> str:
+            return f"{self.connection}:{identifier}"
+
+    definition = build_tool_from_func(LookupAccount("primary"))
+
+    assert definition.name == "LookupAccount"
+    assert definition.description == (
+        "Look up an account through a framework-owned connection."
+    )
+    assert [parameter.name for parameter in definition.parameters] == ["identifier"]
+    assert definition.parameters[0].type_annotation == "str"
+    assert asyncio.run(definition.call(identifier="7")) == "primary:7"
+
+
+def test_non_callable_capability_raises_a_clear_error():
+    with pytest.raises(TypeError, match="Capability must be callable, got 'int'"):
+        build_tool_from_func(42)  # pyright: ignore[reportArgumentType]
+
+
 def test_unannotated_parameters_default_to_string_type():
     def lookup(value):
         return value
@@ -102,3 +145,24 @@ def test_unannotated_parameters_default_to_string_type():
     definition = build_tool_from_func(lookup)
 
     assert definition.parameters[0].type_annotation == "str"
+
+
+def test_async_callable_object_capability_is_awaited():
+    """The async form must not hand an un-awaited coroutine back as the result."""
+
+    class AsyncRepository:
+        """Look up an account asynchronously."""
+
+        def __init__(self, connection: str) -> None:
+            self.connection = connection
+
+        async def __call__(self, identifier: str) -> str:
+            return f"{self.connection}:{identifier}"
+
+    definition = build_tool_from_func(AsyncRepository("primary"))
+
+    result = asyncio.run(definition.call(identifier="7"))
+
+    assert definition.name == "AsyncRepository"
+    assert result == "primary:7"
+    assert not inspect.isawaitable(result)
