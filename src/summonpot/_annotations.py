@@ -7,6 +7,7 @@ signature, so the answers live here once rather than in two copies that can drif
 from __future__ import annotations
 
 import inspect
+import typing
 from collections.abc import Callable
 from typing import Any
 
@@ -43,9 +44,60 @@ def get_type_str(
     return "str"
 
 
-def safe_get_type_hints(func: Callable[..., Any]) -> dict[str, Any]:
-    """Resolve a callable's annotations, falling back to the unevaluated strings."""
+def _resolve_annotation(annotation: Any, globalns: dict[str, Any]) -> Any:
+    """Resolve an annotation, including forward references nested inside it.
+
+    Under ``from __future__ import annotations`` an annotation is stored as source
+    text, and a quoted reference may sit *inside* an otherwise resolvable type:
+    ``list["Request"]`` evaluates to ``list['Request']``, whose argument is still a
+    string. ``typing.get_type_hints`` applies the same recursive treatment the type
+    system uses, so containers, unions and optionals all resolve.
+
+    Returns the resolved object, or the name that failed to resolve so the caller can
+    report it.
+    """
+
+    def holder() -> None: ...
+
+    holder.__annotations__ = {"value": annotation}
     try:
-        return inspect.get_annotations(func, eval_str=True)
+        # include_extras keeps Annotated metadata, which carries the parameter's
+        # validation constraints; dropping it would silently weaken the contract.
+        return typing.get_type_hints(holder, globalns, include_extras=True)["value"]
+    except NameError as exc:
+        # `NameError.name` is the single name that could not be resolved, which reads
+        # far better than the whole annotation source.
+        return exc.name or annotation
     except Exception:
-        return inspect.get_annotations(func, eval_str=False)
+        return annotation
+
+
+def safe_get_type_hints(func: Callable[..., Any]) -> dict[str, Any]:
+    """Resolve a callable's annotations.
+
+    Each annotation is resolved independently: one unresolvable name would otherwise
+    fail the whole call and make every healthy annotation beside it look broken too,
+    so the error would name the wrong parameter.
+    """
+    globalns = getattr(func, "__globals__", {})
+    return {
+        name: _resolve_annotation(annotation, globalns)
+        for name, annotation in inspect.get_annotations(func, eval_str=False).items()
+    }
+
+
+def reject_unresolved(annotation: Any, *, where: str, endpoint: str) -> None:
+    """Fail loudly when an annotation could not be resolved to a type.
+
+    An unresolved annotation is still a string, so nothing downstream can tell a
+    Pydantic model from a plain value. Degrading to an untyped endpoint would discard
+    exactly the contract the framework exists to enforce.
+    """
+    if isinstance(annotation, str):
+        raise TypeError(
+            f"Could not resolve the annotation {annotation!r} for {where} of "
+            f"endpoint {endpoint!r}. summonpot builds the request and response "
+            "contracts from these annotations and will not fall back to an untyped "
+            "endpoint. Import the type at runtime rather than only under "
+            "TYPE_CHECKING, and declare it at module scope."
+        )

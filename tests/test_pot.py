@@ -59,6 +59,59 @@ def test_summon_registers_pydantic_input_and_output_contracts():
     assert endpoint.return_type == "ResearchResponse"
 
 
+def _register_with_unresolvable_annotations(source: str):
+    """Register an endpoint whose annotations cannot be evaluated at runtime."""
+    namespace: dict = {}
+    # exec keeps the caller's `from __future__ import annotations`, which is what
+    # leaves these annotations unevaluated at registration time.
+    exec(source, namespace)
+
+
+def test_summon_rejects_an_unresolvable_parameter_annotation():
+    """Silently dropping the contract is what this must never do again."""
+    with pytest.raises(TypeError, match="Could not resolve the annotation"):
+        _register_with_unresolvable_annotations(
+            "from summonpot import Pot\n"
+            "pot = Pot('svc')\n"
+            "@pot.summon('/research')\n"
+            "def research(request: OnlyUnderTypeChecking) -> str:\n"
+            "    '''Research a topic.'''\n"
+            "    raise NotImplementedError\n"
+        )
+
+
+def test_summon_rejects_an_unresolvable_return_annotation():
+    with pytest.raises(TypeError, match="the return type"):
+        _register_with_unresolvable_annotations(
+            "from summonpot import Pot\n"
+            "pot = Pot('svc')\n"
+            "@pot.summon('/research')\n"
+            "def research(query: str) -> MissingResponseModel:\n"
+            "    '''Research a topic.'''\n"
+            "    raise NotImplementedError\n"
+        )
+
+
+def test_summon_rejects_a_model_defined_in_a_local_scope():
+    """A model built inside a factory is the realistic way to hit this."""
+
+    def build_pot():
+        class LocalRequest(BaseModel):
+            query: str
+
+        pot = Pot("svc")
+
+        @pot.summon("/research")
+        def research(request: LocalRequest) -> str:
+            """Research a topic."""
+            raise NotImplementedError
+
+        return pot
+
+    with pytest.raises(TypeError, match="Could not resolve the annotation"):
+        build_pot()
+
+
 def test_summon_rejects_mixed_pydantic_and_scalar_inputs():
     pot = Pot("svc")
 
@@ -182,3 +235,67 @@ def search_web_raw(query: str) -> list[dict]:
 def translate_raw(text: str, target: str = "es") -> str:
     """Translate text to a target language."""
     return text
+
+
+def test_summon_accepts_explicitly_quoted_forward_references():
+    """`request: "ResearchRequest"` is a valid annotation and must not be rejected.
+
+    Under PEP 563 the stored source is `'"ResearchRequest"'`, so evaluating it once
+    yields the string `'ResearchRequest'` rather than the class.
+    """
+    pot = Pot("svc")
+
+    @pot.summon("/research")
+    def research(request: "ResearchRequest") -> "ResearchResponse":  # noqa: UP037
+        """Research a topic."""
+        raise NotImplementedError
+
+    endpoint = pot.endpoints[0]
+    assert endpoint.input_model is ResearchRequest
+    assert endpoint.output_model is ResearchResponse
+
+
+def test_summon_still_rejects_a_quoted_name_that_does_not_exist():
+    with pytest.raises(TypeError, match="'StillMissing'"):
+        _register_with_unresolvable_annotations(
+            "from summonpot import Pot\n"
+            "pot = Pot('svc')\n"
+            "@pot.summon('/research')\n"
+            'def research(request: "StillMissing") -> str:\n'
+            "    '''Research a topic.'''\n"
+            "    raise NotImplementedError\n"
+        )
+
+
+def test_summon_resolves_forward_references_inside_container_annotations():
+    """`list["ResearchResponse"]` must resolve, not stay a container of strings."""
+    pot = Pot("svc")
+
+    @pot.summon("/research")
+    def research(request: "ResearchRequest") -> "ResearchResponse":  # noqa: UP037
+        """Research a topic."""
+        raise NotImplementedError
+
+    @pot.summon("/batch")
+    def batch(items: list["ResearchRequest"]) -> dict[str, "ResearchResponse"]:  # noqa: UP037
+        """Research several topics."""
+        raise NotImplementedError
+
+    assert pot.endpoints[0].input_model is ResearchRequest
+    # The container resolved to real classes, so it renders with their names rather
+    # than as a container of quoted strings.
+    batch_endpoint = pot.endpoints[1]
+    assert batch_endpoint.parameters[0].type_annotation == "list[ResearchRequest]"
+    assert batch_endpoint.return_type == "dict[str, ResearchResponse]"
+
+
+def test_summon_rejects_a_missing_name_nested_in_a_container():
+    with pytest.raises(TypeError, match="'MissingInside'"):
+        _register_with_unresolvable_annotations(
+            "from summonpot import Pot\n"
+            "pot = Pot('svc')\n"
+            "@pot.summon('/research')\n"
+            'def research(items: list["MissingInside"]) -> str:\n'
+            "    '''Research topics.'''\n"
+            "    raise NotImplementedError\n"
+        )
