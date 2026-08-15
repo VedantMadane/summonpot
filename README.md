@@ -571,6 +571,40 @@ not outlive its request an internal deadline of its own.
 
 Pydantic AI is an internal runtime dependency. Summonpot users do not construct Pydantic AI agents or provider clients; the stable public contract remains `Pot`, `@pot.summon`, declarative capabilities, and Pydantic endpoint models.
 
+## Agent skills
+
+summonpot's endpoint contract is unusual enough that a coding agent will get it wrong
+unless it is told: the signature *is* the contract, and the function body is never
+executed. Install the skill so your agent knows the rules before it writes an endpoint:
+
+```bash
+summonpot add skills
+```
+
+With no arguments it installs for every agent already configured in the project.
+Choose one explicitly with `--agent`:
+
+```bash
+summonpot add skills --agent claude      # .claude/skills/summonpot/SKILL.md
+summonpot add skills --agent cursor      # .cursor/rules/summonpot.mdc
+summonpot add skills --agent windsurf    # .windsurf/rules/summonpot.md
+summonpot add skills --agent copilot     # .github/copilot-instructions.md
+summonpot add skills --agent cline       # .clinerules/summonpot.md
+summonpot add skills --agent codex       # AGENTS.md
+```
+
+```bash
+summonpot add skills --path ./myproject/
+```
+
+Files the project also owns — `AGENTS.md` and `.github/copilot-instructions.md` — are
+edited in place inside a managed block, so your own instructions are preserved and a
+reinstall replaces the block rather than appending another copy.
+
+The skill covers the endpoint contract, what not to write, every rule enforced at
+registration, HTTP methods and query parameters, bounding a call, and what each failure
+status means.
+
 ## Development
 
 Requires [uv](https://docs.astral.sh/uv/).
