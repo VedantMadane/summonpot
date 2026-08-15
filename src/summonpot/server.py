@@ -109,6 +109,7 @@ async def _run_endpoint(pot: Any, endpoint: Any, params: dict[str, Any]) -> Any:
         ModelHTTPError,
         UnexpectedModelBehavior,
         UsageLimitExceeded,
+        UserError,
     )
 
     try:
@@ -139,6 +140,21 @@ async def _run_endpoint(pot: Any, endpoint: Any, params: dict[str, Any]) -> Any:
         raise HTTPException(
             status_code=status_code,
             detail=f"Model provider request failed with status {exc.status_code}.",
+        ) from exc
+    except UserError as exc:
+        # The provider rejected its own configuration - almost always a missing or
+        # wrong API key. That is an operator problem, not a caller problem, so the
+        # guidance goes to the log and the caller gets a stable 500.
+        logger.error(
+            "Endpoint %s is not configured; the model provider rejected the "
+            "configuration. This is usually a missing API key for the selected "
+            "model. Set SUMMONPOT_MODEL=test to run without a provider account.",
+            endpoint.path,
+            exc_info=exc,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Endpoint is not configured. See the server logs.",
         ) from exc
     except UnexpectedModelBehavior as exc:
         logger.warning(

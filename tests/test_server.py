@@ -540,3 +540,36 @@ def test_one_path_serves_both_methods(mock_runtime):
     assert set(operations) == {"get", "post"}
     assert client.get("/orders?status=open").status_code == 200
     assert client.post("/orders", json={"item": "widget"}).status_code == 200
+
+
+def test_provider_misconfiguration_is_reported_not_swallowed(caplog):
+    """A missing API key is the most likely first-run failure."""
+    from pydantic_ai.exceptions import UserError
+
+    pot = Pot("svc")
+
+    @pot.summon("/research")
+    def research(query: str) -> str:
+        """Research a topic."""
+        return ""
+
+    class UnconfiguredRuntime:
+        async def call(self, endpoint, params):
+            raise UserError("Set the `OPENAI_API_KEY` environment variable")
+
+    pot._runtime = UnconfiguredRuntime()
+    client = TestClient(build_app(pot), raise_server_exceptions=False)
+
+    with caplog.at_level(logging.ERROR, logger="summonpot.server"):
+        response = client.post("/research", json={"query": "agents"})
+
+    assert response.status_code == 500
+    # The caller gets a stable message, not the raw provider text.
+    assert (
+        response.json()["detail"] == "Endpoint is not configured. See the server logs."
+    )
+    assert "OPENAI_API_KEY" not in response.text
+    # The operator gets the diagnosis and a way forward.
+    assert "not configured" in caplog.text
+    assert "SUMMONPOT_MODEL=test" in caplog.text
+    assert "OPENAI_API_KEY" in caplog.text
