@@ -60,7 +60,7 @@ jobs:
           uv run pytest tests/ -v
           --cov=src/summonpot
           --cov-report=term-missing
-          --cov-fail-under=50
+          --cov-fail-under=85
 
   build:
     name: build
