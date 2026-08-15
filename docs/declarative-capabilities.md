@@ -42,7 +42,7 @@ The public endpoint declaration stays the same. The fixed docstring goal and val
 
 Dependency parameters are declaration-only. They do not appear in the HTTP request body or OpenAPI request schema, and the decorated function body is never executed.
 
-## Closed boundary
+## What the boundary does and does not cover
 
 The endpoint agent receives its declared dependencies and no ambient application access. An operation can contain deterministic business logic or a safe database adapter. Raw database sessions, connections, cursors, ORM registries, shells, and arbitrary SQL execution should not be exposed.
 
@@ -55,5 +55,19 @@ For databases, the target adapter API accepts exact prepared operations rather t
 - a framework-owned session or connection factory that is never agent-visible.
 
 The agent receives the operation's typed callable schema—not the statement, SQL text, ORM metadata, session, engine, connection, or cursor. It cannot edit the query or execute another one.
+
+### Arguments are not yet constrained
+
+The closed set covers *which* operations the agent may call. It does not yet cover *what it may pass to them*.
+
+Request data reaches the model as text, and the model chooses the arguments for every `Depends` and `Required` operation. So today:
+
+- an argument may be influenced by caller-supplied request content;
+- `Required(operation)` checks that the operation ran, not that it ran with request-derived values;
+- an operation can be called with values the caller never sent.
+
+Write each capability so it validates its own inputs and enforces its own authorization, exactly as you would for an operation reachable from an untrusted caller. Do not rely on the agent to pass only sensible arguments.
+
+Constraining argument sources—request data, prior operation results, framework context, or explicitly agent-controlled values—is milestone 1 on the [roadmap](../ROADMAP.md).
 
 Strict SQLAlchemy and SQLite operation objects are planned and not yet shipped. See the target API examples in the README and the implementation sequence in the roadmap.
