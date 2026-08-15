@@ -8,6 +8,7 @@ import sys
 from collections.abc import Callable
 from typing import Any
 
+from summonpot._annotations import get_type_str, safe_get_type_hints
 from summonpot.models import ParamDef, ToolDef
 
 
@@ -33,10 +34,10 @@ def tool(
         tool_desc = description or inspect.getdoc(_unwrap_partials(func)) or ""
         sig = inspect.signature(func)
         _reject_unbound_receiver(func, sig)
-        hints = _safe_get_type_hints(_annotation_source(func))
+        hints = safe_get_type_hints(_annotation_source(func))
         params: list[ParamDef] = []
         for pname, param in sig.parameters.items():
-            type_str = _get_type_str(pname, param, hints)
+            type_str = get_type_str(pname, param, hints)
             is_required = param.default is inspect.Parameter.empty
             description_text = ""
             # Try to get param description from docstring
@@ -172,10 +173,10 @@ def build_tool_from_func(func: Callable[..., Any]) -> ToolDef:
     tool_desc = inspect.getdoc(_unwrap_partials(func)) or ""
     sig = inspect.signature(func)
     _reject_unbound_receiver(func, sig)
-    hints = _safe_get_type_hints(_annotation_source(func))
+    hints = safe_get_type_hints(_annotation_source(func))
     params: list[ParamDef] = []
     for pname, param in sig.parameters.items():
-        type_str = _get_type_str(pname, param, hints)
+        type_str = get_type_str(pname, param, hints)
         is_required = param.default is inspect.Parameter.empty
         params.append(
             ParamDef(
@@ -192,41 +193,3 @@ def build_tool_from_func(func: Callable[..., Any]) -> ToolDef:
         parameters=params,
         fn=func,
     )
-
-
-def _get_type_str(
-    pname: str,
-    param: inspect.Parameter,
-    hints: dict[str, Any],
-) -> str:
-    if pname in hints:
-        return _type_name(hints[pname])
-    if param.annotation is not inspect.Parameter.empty:
-        return _type_name(param.annotation)
-    return "str"
-
-
-def _type_name(tp: Any) -> str:
-    """Convert a type annotation to a short string name."""
-    if hasattr(tp, "__origin__"):
-        origin = tp.__origin__
-        args = tp.__args__
-        if origin is list and args:
-            return f"list[{_type_name(args[0])}]"
-        if origin is dict and len(args) >= 2:
-            return f"dict[{_type_name(args[0])}, {_type_name(args[1])}]"
-        if origin is tuple:
-            return f"tuple[{', '.join(_type_name(a) for a in args)}]"
-        return _type_name(origin)
-    if tp is type(None):
-        return "None"
-    if hasattr(tp, "__name__"):
-        return tp.__name__
-    return str(tp)
-
-
-def _safe_get_type_hints(func: Callable[..., Any]) -> dict[str, Any]:
-    try:
-        return inspect.get_annotations(func, eval_str=True)
-    except Exception:
-        return inspect.get_annotations(func, eval_str=False)
