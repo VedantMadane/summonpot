@@ -414,6 +414,19 @@ pot.serve()                             # 0.0.0.0:8000
 pot.serve(host="127.0.0.1", port=9000)
 ```
 
+> **Binding and exposure:** `0.0.0.0` accepts connections on every interface. That is
+> the right default for a container, but it is wider than uvicorn's own `127.0.0.1`.
+> summonpot has no authentication layer yet, and every endpoint spends provider credit
+> on each call, so do not expose a pot directly to untrusted callers. Put
+> authentication in front of it and bound the runtime:
+
+```python
+from summonpot import Pot, UsageLimits
+from summonpot.runtime import Runtime
+
+pot = Pot("my-service", runtime=Runtime(usage_limits=UsageLimits(request_limit=8), timeout=30.0))
+```
+
 ## The Summoning Model
 
 | Concept | As summoning |
