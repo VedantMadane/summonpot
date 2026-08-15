@@ -51,6 +51,7 @@ class Pot:
         tools: list | None = None,
         *,
         model: str | None = None,
+        runtime: Runtime | None = None,
     ) -> None:
         """Create a pot.
 
@@ -58,7 +59,16 @@ class Pot:
             name: Service name, used as the OpenAPI title.
             tools: Capabilities available to every endpoint.
             model: Default model for every endpoint, overriding ``SUMMONPOT_MODEL``.
+            runtime: A configured runtime. Supply one to bound what a single call
+                may spend, via ``Runtime(usage_limits=..., timeout=...)``. A runtime
+                already carries its own model, so this is mutually exclusive with
+                ``model``.
         """
+        if runtime is not None and model is not None:
+            raise TypeError(
+                "Pass either model= or runtime=, not both. Set the model on the "
+                "runtime you supply instead."
+            )
         self.name = name or "summonpot"
         # Convert any raw functions to ToolDef objects
         self._pot_tools: list = []
@@ -71,7 +81,7 @@ class Pot:
         self._endpoints: list[EndpointDef] = []
         # (path, method) -> endpoint name, for duplicate-route detection.
         self._routes: dict[tuple[str, str], str] = {}
-        self._runtime = Runtime(model=model)
+        self._runtime = runtime if runtime is not None else Runtime(model=model)
 
     def __repr__(self) -> str:
         return f"Pot({self.name!r}, endpoints={len(self._endpoints)}, tools={len(self._pot_tools)})"
