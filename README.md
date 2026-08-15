@@ -11,9 +11,9 @@
 
 **One API framework for deterministic and agentic endpoints.**
 
-summonpot brings traditional exact API execution and bounded agent reasoning under one endpoint contract. You declare the request model, response model, fixed goal, and exact capabilities. When one complete legal path exists, the target runtime executes it deterministically. When a real choice remains, an agent may choose and order only the declared operations.
+summonpot defines typed HTTP endpoints from four things: a Pydantic request model, a fixed goal, a closed set of exact capabilities, and a Pydantic response model. Today, every `@pot.summon` request runs through the provider-neutral agent runtime. Application-owned operations can be optional or mandatory, and the runtime enforces mandatory use before accepting locally validated output.
 
-The public API stays the same in both modes: no separate handler implementation, agent graph, caller-provided `action`, or framework selector. The endpoint declaration defines what must happen; request JSON carries business data; summonpot chooses the least-powerful sufficient execution path.
+The target architecture keeps this public contract unchanged while adding a deterministic executor. When all operation arguments and result bindings resolve to one complete legal path, the framework will skip the model. When a real bounded choice remains, the agent runtime will choose and order only declared operations. Callers will never send an `action` or select the executor.
 
 **The function signature is the endpoint.** Its request model, docstring goal, declared capabilities, and response type form the complete executable contract. You do not write orchestration or business logic under the endpoint:
 
@@ -30,11 +30,11 @@ function body
 
 Summonpot inspects the declaration and never calls the decorated function body. Deterministic business logic lives inside the exact application-owned capabilities, not inside a hidden handler.
 
-> **Current status:** Pydantic contracts, provider-neutral agent execution, closed capabilities, and runtime-enforced required operations are shipped. Automatic deterministic endpoint execution and SQLAlchemy/SQLite capability adapters are the next implementation milestones.
+> **Current status:** Pydantic contracts, provider-neutral agent execution, closed capabilities, runtime-enforced required operations, HTTP methods, runtime limits, and redacted public errors are shipped. Typed capability bindings, automatic deterministic endpoint execution, and SQLAlchemy/SQLite capability adapters remain planned.
 
-You define routes with Pydantic request and response models, a docstring, and exact deterministic capabilities. The framework owns validation, capability orchestration, structured output, and the agent loop when one is needed. You define an endpoint. Summonpot decides whether it needs reasoning.
+You define an endpoint; you do not configure an agent graph or write orchestration under the decorator. The current runtime owns validation, capability orchestration, structured output, and the bounded model loop. The planned compiler will add no-model execution without changing the endpoint declaration.
 
-| Endpoint outcome | Execution path |
+| Target endpoint outcome | Execution path |
 |---|---|
 | Traditional exact API behavior with one legal path | Deterministic, without an LLM *(planned compiler)* |
 | Several valid declared paths require a bounded choice | Agentic, using only declared capabilities |
@@ -85,28 +85,28 @@ The imported functions are real, application-owned operations: `search_web` must
 
 ## Why another framework?
 
-Every existing approach to building agentic APIs has the same problem: you first learn an agent framework (LangChain, CrewAI, AutoGen), then bolt an HTTP server on top. The mental model is "configure an agent" — which is complex, brittle, and framework-y.
+Many approaches to building agentic APIs ask developers to learn an agent framework first—chains, planners, memory, callbacks—and then add an HTTP server around it. That makes the application responsible for both agent orchestration and API behavior.
 
-summonpot flips this: the **web framework IS the agent framework**. The routing is the agentic logic. The decorator is the incantation. The framework owns the smart parts.
+summonpot starts from the endpoint instead. The web framework owns routing, validation, the bounded model loop, capability enforcement, and serving. Developers declare the HTTP contract and exact application authority; they do not configure a separate agent framework.
 
-| | Existing frameworks | summonpot |
+| | Agent-first stacks | summonpot |
 |---|---|---|
 | Mental model | "Configure an agent" | "Define an endpoint" |
-| Surface area | Large (chains, agents, tools, memory, callbacks...) | Tiny (decorator + types + docstring) |
-| API exposure | Bolt-on HTTP wrapper | Native (routing IS the agent) |
-| Complexity | User manages the loop | Framework owns the loop, user provides intent |
-| Testability | Heavy mocking required | Test like a regular HTTP endpoint |
-| Onboarding | Learn the framework's ontology | If you know HTTP, you know this |
+| Surface area | Chains, agents, tools, memory, callbacks | Route, types, goal, capabilities |
+| API exposure | HTTP layer added around the agent | Routing and execution share one contract |
+| Orchestration | Application manages the loop | Framework owns the bounded loop |
+| Testing | Agent internals plus HTTP wrapper | Normal HTTP contract and capability tests |
+| Onboarding | Learn the stack's agent ontology | Start from HTTP and Python signatures |
 
 ## Project status
 
 The current foundation includes Pydantic request and response contracts, provider-neutral model selection, declarative optional and mandatory capabilities, runtime-enforced required use, HTTP/OpenAPI generation, and local output validation.
 
-Next milestones focus on typed operation inputs and outputs, strict SQLAlchemy and SQLite statement capabilities, deterministic-versus-agentic execution selection, proof-backed write receipts, stable error semantics, and optional larger execution harnesses. See the [roadmap](ROADMAP.md) for scope and ordering.
+Next milestones focus on typed capability inputs, outputs, and argument sources; strict SQLAlchemy and SQLite statement capabilities; deterministic-versus-agentic execution selection; proof-backed write receipts; broader typed operation failures; and optional larger execution harnesses. See the [roadmap](ROADMAP.md) for scope and ordering.
 
-## Deterministic and agentic execution
+## Target deterministic and current agentic execution
 
-A summonpot endpoint does not need a separate decorator or caller-provided `action` to become deterministic or agentic. It always declares the same four things:
+The target architecture does not introduce a second decorator or a caller-provided `action` for deterministic execution. Both executors use the same four-part declaration:
 
 ```text
 request model
@@ -127,7 +127,7 @@ The capabilities themselves remain deterministic in both modes. Agentic executio
 
 > **Current status:** declarative capabilities and required-use enforcement are shipped. Automatic deterministic endpoint execution is a planned milestone. Today, `@pot.summon` requests still run through the provider-neutral agent runtime.
 
-### Deterministic example
+### Target deterministic example (currently model-backed)
 
 This endpoint has one fixed result path: load the account, calculate the exact balance, and return it. Once every input and output binding is declared, the planned compiler can execute it without an LLM.
 
@@ -357,14 +357,14 @@ Choose a model with an explicit `provider:model` identifier and set that provide
 
 ```bash
 export SUMMONPOT_MODEL=anthropic:claude-sonnet-4-5
-export ANTHROPIC_API_KEY=...
+export ANTHROPIC_API_KEY='<your key>'
 ```
 
 OpenRouter keeps the upstream provider and model in the portion after the first colon:
 
 ```bash
 export SUMMONPOT_MODEL=openrouter:anthropic/claude-sonnet-4
-export OPENROUTER_API_KEY=...
+export OPENROUTER_API_KEY='<your key>'
 ```
 
 The endpoint API does not change between providers. Unprefixed legacy model names such as `gpt-4o-mini` continue to resolve as `openai:gpt-4o-mini`.
@@ -543,8 +543,7 @@ def research_topic(
 
 ## Bounding a call
 
-Every endpoint is an operator-funded model call, so the runtime accepts a cap on what
-one request may spend and how long it may take:
+Every production `@pot.summon` request currently runs through the configured model, so the runtime accepts a cap on what one request may spend and how long it may take:
 
 ```python
 from summonpot import Pot, UsageLimits

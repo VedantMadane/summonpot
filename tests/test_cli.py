@@ -23,6 +23,15 @@ def test_version_option_reads_installed_package_metadata():
     assert result.stdout.startswith("summonpot ")
 
 
+def test_help_describes_the_endpoint_framework_not_an_agent_framework():
+    result = runner.invoke(app, ["--help"])
+    normalized_help = " ".join(result.stdout.split())
+
+    assert result.exit_code == 0
+    assert "typed endpoints and bounded agentic execution" in normalized_help
+    assert "every endpoint is an agent" not in normalized_help.lower()
+
+
 def test_load_pot_reports_missing_file(tmp_path: Path, capsys):
     missing = tmp_path / "missing.py"
 

@@ -5,12 +5,12 @@ build-backend = "hatchling.build"
 [project]
 name = "summonpot"
 version = "0.3.0"
-description = "A signature-first API framework for deterministic and agentic endpoints."
+description = "A signature-first API framework for typed endpoints and bounded agentic execution."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
 authors = [{ name = "Tugrul Guner" }]
-keywords = ["ai", "api", "agent", "framework", "fastapi", "django", "llm", "agentic"]
+keywords = ["ai", "api", "agentic", "framework", "http", "llm", "openapi", "pydantic", "structured-output", "tool-calling"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "License :: OSI Approved :: MIT License",

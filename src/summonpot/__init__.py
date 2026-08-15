@@ -1,4 +1,4 @@
-"""summonpot — An API framework where every endpoint is an agent."""
+"""A signature-first API framework for typed endpoints and bounded agentic execution."""
 
 from importlib.metadata import PackageNotFoundError, version
 
