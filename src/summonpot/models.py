@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 from dataclasses import dataclass, field
 from typing import Any
@@ -18,6 +19,10 @@ class ParamDef:
     description: str = ""
     required: bool = True
     default: Any = None
+    # The resolved annotation object. `type_annotation` is a display string and
+    # cannot round-trip a union or a generic's element type, so the HTTP layer
+    # builds its request model from this instead.
+    annotation: Any = None
 
 
 @dataclass
@@ -31,10 +36,21 @@ class ToolDef:
     required: bool = False
 
     async def call(self, *args: Any, **kwargs: Any) -> Any:
-        """Execute the tool with the given arguments."""
+        """Execute the tool with the given arguments.
+
+        Synchronous capabilities run in a worker thread so that one slow operation
+        cannot stall every other request sharing the event loop.
+        """
         if inspect.iscoroutinefunction(self.fn):
             return await self.fn(*args, **kwargs)
-        return self.fn(*args, **kwargs)
+
+        result = await asyncio.to_thread(self.fn, *args, **kwargs)
+        # A callable object whose __call__ is async is not caught by
+        # iscoroutinefunction; calling it merely builds the coroutine, so it still
+        # has to be awaited rather than handed back to the model as a result.
+        if inspect.isawaitable(result):
+            return await result
+        return result
 
 
 @dataclass
