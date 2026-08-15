@@ -1,0 +1,134 @@
+# Summonpot examples
+
+These examples grow from one typed endpoint to a multi-file service with bounded agentic orchestration. Every endpoint uses the same executable contract:
+
+```text
+request model + fixed docstring goal + declared capabilities + response model
+```
+
+The function body stays declarative:
+
+```python
+raise NotImplementedError
+```
+
+## Before running
+
+Install Summonpot with the provider and server extras you need. For OpenRouter:
+
+```bash
+pip install "summonpot[serve,cli,openrouter]"
+export OPENROUTER_API_KEY='<your key>'
+export SUMMONPOT_MODEL="openrouter:google/gemini-3.7-flash"
+```
+
+Keep secrets in your environment or secret manager—never in an example file. Start any example through the CLI:
+
+```bash
+summonpot serve examples/basic_app.py --host 127.0.0.1 --port 8000
+```
+
+Then open `http://127.0.0.1:8000/docs` or call it with `curl`.
+
+## Progression
+
+### 1. Minimal typed endpoint
+
+File: `basic_app.py`
+
+Shows a Pydantic request, fixed endpoint goal, and typed structured response without capabilities.
+
+```bash
+curl -X POST http://127.0.0.1:8000/review \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"The setup was quick and the API is clear."}'
+```
+
+### 2. Required exact capability
+
+File: `02_required_capability.py`
+
+Shows `Required(...)`. The runtime rejects a final response until `calculate_quote` succeeds.
+
+```bash
+curl -X POST http://127.0.0.1:8000/quotes \
+  -H 'Content-Type: application/json' \
+  -d '{"unit_price_cents":1299,"quantity":3,"tax_rate_percent":"8.25"}'
+```
+
+`calculate_quote` is deterministic application code, but current `@pot.summon` requests still use the configured model runtime. Automatic no-model deterministic endpoint execution is planned, not shipped.
+
+### 3. Bounded agentic order fulfillment
+
+File: `03_agentic_order.py`
+
+Shows a bounded choice among `Depends(...)` capabilities followed by the required `create_order` write. The executor receives only these exact operations; it receives no filesystem, shell, database connection, or arbitrary code tool.
+
+```bash
+export SUMMONPOT_ORDER_LOG=/tmp/my-orders.jsonl
+summonpot serve examples/03_agentic_order.py --host 127.0.0.1 --port 8000
+
+curl -X POST http://127.0.0.1:8000/orders \
+  -H 'Content-Type: application/json' \
+  -d '{"customer_id":"customer-7","sku":"red-mug","quantity":2,"allow_substitute":true}'
+```
+
+The endpoint checks inventory, may choose an approved substitute, and must persist exactly one order before returning success.
+
+### 4. HTTP methods and query parameters
+
+File: `04_http_methods.py`
+
+Shows GET and POST sharing `/products`. Route identity is the normalized `(path, method)` pair.
+
+```bash
+curl 'http://127.0.0.1:8000/products?category=stationery&max_price_cents=1500'
+
+curl -X POST http://127.0.0.1:8000/products \
+  -H 'Content-Type: application/json' \
+  -d '{"customer_id":"customer-7","sku":"notebook"}'
+```
+
+Capability dependencies do not appear as request fields or OpenAPI parameters.
+
+### 5. Bounded runtime and model override
+
+File: `05_bounded_runtime.py`
+
+Shows retries, usage limits, a request timeout, and a route-level model override. `/summaries` uses `SUMMONPOT_MODEL`; `/summaries/fast` explicitly uses `openai:gpt-4o-mini` and therefore needs `OPENAI_API_KEY`.
+
+```bash
+curl -X POST http://127.0.0.1:8000/summaries \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"Summonpot turns a typed endpoint declaration into an executable API while keeping its capability set closed.","max_sentences":2}'
+```
+
+Usage-limit, timeout, and provider failures are mapped to stable public HTTP errors while details remain in operator logs.
+
+### 6. Multi-file support service
+
+Directory: `06_support_service/`
+
+Shows models, application operations, runtime configuration, optional policy selection, required customer lookup, and a required persisted ticket split across normal Python modules.
+
+```bash
+export SUMMONPOT_TICKET_LOG=/tmp/my-support-tickets.jsonl
+summonpot serve examples/06_support_service/app.py --host 127.0.0.1 --port 8000
+
+curl -X POST http://127.0.0.1:8000/support \
+  -H 'Content-Type: application/json' \
+  -d '{"customer_id":"customer-1","message":"Our production API is unavailable in every region."}'
+```
+
+The CLI adds the application directory for normal local imports without putting it ahead of the standard library.
+
+## What is intentionally not shown as shipped
+
+The examples do not claim these planned features exist:
+
+- automatic no-model deterministic endpoint execution;
+- SQLAlchemy or SQLite operation adapters;
+- streaming responses;
+- built-in authentication.
+
+For local development, bind to `127.0.0.1`. Before exposing a service, put authentication in front of it and configure runtime limits because every reachable request can spend provider credit.
