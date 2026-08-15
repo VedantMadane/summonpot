@@ -283,6 +283,15 @@ class Pot:
 
         Starts a FastAPI + uvicorn server.
         Requires the ``serve`` extra: ``pip install summonpot[serve]``
+
+        Warning:
+            ``host`` defaults to ``0.0.0.0``, which accepts connections on every
+            interface. That suits the container deployments summonpot targets, but
+            it is wider than uvicorn's own ``127.0.0.1`` default. Endpoints carry no
+            authentication yet and each call spends provider credit, so anything
+            reachable from outside your network needs both a bound runtime
+            (``Runtime(usage_limits=..., timeout=...)``) and authentication in front
+            of it. Pass ``host="127.0.0.1"`` for local development.
         """
         self._serve_api(host, port)
 

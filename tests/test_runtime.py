@@ -580,3 +580,159 @@ def test_timeout_bounds_a_slow_synchronous_capability():
     # Documented boundary: the thread is not killed, so the side effect still lands
     # after the caller has already seen TimeoutError.
     assert finished.is_set() or finished.wait(timeout=2.0)
+
+
+def test_agent_is_built_once_per_endpoint():
+    pot = Pot("svc")
+    _register_endpoint(pot)
+
+    def model_function(messages, info: AgentInfo):
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    info.output_tools[0].name,
+                    {"summary": "done", "confidence": 1.0},
+                )
+            ]
+        )
+
+    runtime = Runtime(model=FunctionModel(model_function))
+    endpoint = pot.endpoints[0]
+
+    asyncio.run(runtime.call(endpoint, {"query": "a"}))
+    first = runtime._agent_for(endpoint)
+    asyncio.run(runtime.call(endpoint, {"query": "b"}))
+
+    assert runtime._agent_for(endpoint) is first
+
+
+def test_required_capability_state_does_not_leak_between_calls():
+    """The agent is now shared, so run state must not be."""
+    turns = 0
+
+    def load_sources(query: str) -> str:
+        """Load sources."""
+        return "loaded"
+
+    pot = Pot("svc")
+
+    @pot.summon("/research")
+    def research(
+        request: ResearchRequest, sources=Required(load_sources)
+    ) -> ResearchResponse:
+        """Research a topic."""
+        raise NotImplementedError
+
+    def model_function(messages, info: AgentInfo):
+        nonlocal turns
+        turns += 1
+        # Call the required capability only on the very first run.
+        if turns == 1:
+            return ModelResponse(parts=[ToolCallPart("load_sources", {"query": "a"})])
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    info.output_tools[0].name,
+                    {"summary": "done", "confidence": 1.0},
+                )
+            ]
+        )
+
+    runtime = Runtime(model=FunctionModel(model_function), retries=0)
+    endpoint = pot.endpoints[0]
+
+    assert asyncio.run(runtime.call(endpoint, {"query": "a"})).summary == "done"
+
+    # A second call must not inherit the first call's completed capability.
+    with pytest.raises(UnexpectedModelBehavior, match="maximum output retries"):
+        asyncio.run(runtime.call(endpoint, {"query": "b"}))
+
+
+def test_concurrent_calls_track_required_capabilities_independently():
+    def load_sources(query: str) -> str:
+        """Load sources."""
+        return "loaded"
+
+    pot = Pot("svc")
+
+    @pot.summon("/research")
+    def research(
+        request: ResearchRequest, sources=Required(load_sources)
+    ) -> ResearchResponse:
+        """Research a topic."""
+        raise NotImplementedError
+
+    async def model_function(messages, info: AgentInfo):
+        called = any(
+            part.part_kind == "tool-return" for m in messages for part in m.parts
+        )
+        if not called:
+            await asyncio.sleep(0)
+            return ModelResponse(parts=[ToolCallPart("load_sources", {"query": "a"})])
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    info.output_tools[0].name,
+                    {"summary": "done", "confidence": 1.0},
+                )
+            ]
+        )
+
+    runtime = Runtime(model=FunctionModel(model_function))
+    endpoint = pot.endpoints[0]
+
+    async def run_all():
+        return await asyncio.gather(
+            *(runtime.call(endpoint, {"query": str(n)}) for n in range(4))
+        )
+
+    assert [r.summary for r in asyncio.run(run_all())] == ["done"] * 4
+
+
+def test_capability_may_declare_a_business_field_named_ctx():
+    """The injected run context must not collide with a real capability field."""
+
+    def inspect_context(ctx: str) -> str:
+        """Inspect an application context value."""
+        return f"seen:{ctx}"
+
+    pot = Pot("svc")
+
+    @pot.summon("/research")
+    def research(
+        request: ResearchRequest, dep=Depends(inspect_context)
+    ) -> ResearchResponse:
+        """Research a topic."""
+        raise NotImplementedError
+
+    observed: dict[str, object] = {}
+    turns = 0
+
+    def model_function(messages, info: AgentInfo):
+        nonlocal turns
+        turns += 1
+        if turns == 1:
+            observed["properties"] = sorted(
+                info.function_tools[0].parameters_json_schema["properties"]
+            )
+            return ModelResponse(
+                parts=[ToolCallPart("inspect_context", {"ctx": "production"})]
+            )
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    info.output_tools[0].name,
+                    {"summary": "done", "confidence": 1.0},
+                )
+            ]
+        )
+
+    result = asyncio.run(
+        Runtime(model=FunctionModel(model_function)).call(
+            pot.endpoints[0], {"query": "agents"}
+        )
+    )
+
+    # The business field survives; the run context is not exposed to the model.
+    assert observed["properties"] == ["ctx"]
+    assert result.summary == "done"
