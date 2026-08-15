@@ -35,17 +35,58 @@ def test_tool_decorator_uses_function_metadata_and_defaults():
     assert transform.parameters[1].default is None
 
 
-def test_build_tool_skips_method_receiver_from_schema():
-    def combine(self: Any, value: int, enabled: bool = True) -> dict[str, Any]:
-        """Combine exact inputs."""
-        return {"value": value, "enabled": enabled}
+def test_unbound_method_capability_is_rejected():
+    """Nothing can supply the receiver, so this fails at registration, not at call."""
+    with pytest.raises(TypeError, match="unbound method"):
+        build_tool_from_func(CapabilityService.lookup)
 
-    definition = build_tool_from_func(combine)
+
+def test_unbound_method_is_detected_whatever_the_receiver_is_called():
+    """Detection reads the owning class, not the first parameter's spelling."""
+    with pytest.raises(TypeError, match="'receiver'"):
+        build_tool_from_func(CapabilityService.lookup_oddly_named)
+
+
+def test_plain_function_with_a_self_field_is_accepted():
+    """`self` is a legal business field name on a function that is not a method."""
+
+    def render(self: str, template: str) -> str:
+        """Render a template for a self-describing entity."""
+        return self + template
+
+    definition = build_tool_from_func(render)
 
     assert [parameter.name for parameter in definition.parameters] == [
-        "value",
-        "enabled",
+        "self",
+        "template",
     ]
+
+
+def test_staticmethod_and_classmethod_capabilities_are_accepted():
+    """Both are callable as reached, so neither is an unbound method."""
+    static_definition = build_tool_from_func(CapabilityService.normalize)
+    class_definition = build_tool_from_func(CapabilityService.describe)
+
+    assert [p.name for p in static_definition.parameters] == ["value"]
+    assert [p.name for p in class_definition.parameters] == ["value"]
+    assert asyncio.run(static_definition.call(value="v")) == "v"
+    assert asyncio.run(class_definition.call(value="v")) == "CapabilityService:v"
+
+
+def test_bound_method_capability_is_accepted():
+    class Service:
+        def __init__(self, prefix: str) -> None:
+            self.prefix = prefix
+
+        def lookup(self, key: str) -> str:
+            """Look up a key."""
+            return f"{self.prefix}:{key}"
+
+    definition = build_tool_from_func(Service("accounts").lookup)
+
+    assert definition.name == "lookup"
+    assert [parameter.name for parameter in definition.parameters] == ["key"]
+    assert asyncio.run(definition.call(key="7")) == "accounts:7"
 
 
 def test_tooldef_executes_sync_function():
@@ -166,3 +207,70 @@ def test_async_callable_object_capability_is_awaited():
     assert definition.name == "AsyncRepository"
     assert result == "primary:7"
     assert not inspect.isawaitable(result)
+
+
+class CapabilityService:
+    """Capabilities reached through a class, used by the receiver tests."""
+
+    def __init__(self, prefix: str = "svc") -> None:
+        self.prefix = prefix
+
+    def lookup(self, key: str) -> str:
+        """Look up a key."""
+        return f"{self.prefix}:{key}"
+
+    def lookup_oddly_named(receiver, key: str) -> str:  # pyright: ignore[reportSelfClsParameterName]
+        """Look up a key through a receiver that is not called self."""
+        return key
+
+    @staticmethod
+    def normalize(value: str) -> str:
+        """Normalize a value."""
+        return value
+
+    @classmethod
+    def describe(cls, value: str) -> str:
+        """Describe a value."""
+        return f"{cls.__name__}:{value}"
+
+
+def test_unbound_method_of_a_locally_defined_class_is_rejected():
+    """App factories and fixtures commonly declare service classes inside a function."""
+
+    class LocalService:
+        def lookup(receiver, key: str) -> str:  # pyright: ignore[reportSelfClsParameterName]
+            """Look up a key."""
+            return key
+
+    with pytest.raises(TypeError, match="unbound method"):
+        build_tool_from_func(LocalService.lookup)
+
+
+def test_bound_method_of_a_locally_defined_class_is_accepted():
+    class LocalService:
+        def __init__(self, prefix: str) -> None:
+            self.prefix = prefix
+
+        def lookup(self, key: str) -> str:
+            """Look up a key."""
+            return f"{self.prefix}:{key}"
+
+    definition = build_tool_from_func(LocalService("accounts").lookup)
+
+    assert [parameter.name for parameter in definition.parameters] == ["key"]
+    assert asyncio.run(definition.call(key="7")) == "accounts:7"
+
+
+def test_nested_plain_function_with_a_self_field_is_accepted():
+    """A function defined in a function body has no receiver, whatever its fields."""
+
+    def render(self: str, template: str) -> str:
+        """Render a template for a self-describing entity."""
+        return self + template
+
+    definition = build_tool_from_func(render)
+
+    assert [parameter.name for parameter in definition.parameters] == [
+        "self",
+        "template",
+    ]

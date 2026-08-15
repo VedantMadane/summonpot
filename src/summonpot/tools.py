@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import functools
 import inspect
+import sys
 from collections.abc import Callable
 from typing import Any
 
@@ -31,11 +32,10 @@ def tool(
         tool_name = name or capability_name(func)
         tool_desc = description or inspect.getdoc(_unwrap_partials(func)) or ""
         sig = inspect.signature(func)
+        _reject_unbound_receiver(func, sig)
         hints = _safe_get_type_hints(_annotation_source(func))
         params: list[ParamDef] = []
         for pname, param in sig.parameters.items():
-            if pname in ("self", "cls"):
-                continue
             type_str = _get_type_str(pname, param, hints)
             is_required = param.default is inspect.Parameter.empty
             description_text = ""
@@ -98,6 +98,72 @@ def _annotation_source(func: Callable[..., Any]) -> Any:
     return target
 
 
+def _owning_class(func: Callable[..., Any], parent_path: str) -> type | None:
+    """Return the class ``func`` was defined in, if it can be looked up."""
+    module = sys.modules.get(getattr(func, "__module__", ""))
+    if module is None:
+        return None
+    owner: Any = module
+    for part in parent_path.split("."):
+        if part == "<locals>":
+            # Declared inside a function; the class is not reachable by name.
+            return None
+        owner = getattr(owner, part, None)
+        if owner is None:
+            return None
+    return owner if isinstance(owner, type) else None
+
+
+def _is_unbound_method(func: Callable[..., Any]) -> bool:
+    """Report whether ``func`` is a plain function reached through its class.
+
+    Read from the qualified name rather than the first parameter's spelling: a
+    receiver may be named anything, and a plain function is free to have a business
+    field called ``self``.
+    """
+    if inspect.ismethod(func):
+        # Already bound to an instance or a class; the receiver is supplied.
+        return False
+
+    qualname = getattr(func, "__qualname__", "")
+    parent_path, _, name = qualname.rpartition(".")
+    if not parent_path or parent_path.endswith("<locals>"):
+        # A module-level function, or one defined directly in a function body.
+        # Neither has a receiver.
+        return False
+
+    owner = _owning_class(func, parent_path)
+    if owner is not None:
+        # getattr_static returns the descriptor, so a staticmethod or classmethod -
+        # both callable exactly as reached - is not mistaken for an unbound method.
+        return inspect.isfunction(inspect.getattr_static(owner, name, None))
+
+    # The class was declared inside a function, so the descriptor cannot be
+    # inspected. It is defined in a class body and takes arguments, so treat it as a
+    # method: wrongly rejecting a local staticmethod fails loudly at registration,
+    # while wrongly accepting an unbound method fails confusingly mid-run.
+    return bool(inspect.signature(func).parameters)
+
+
+def _reject_unbound_receiver(func: Callable[..., Any], sig: inspect.Signature) -> None:
+    """Reject a capability reached through its class rather than an instance.
+
+    Nothing can supply the receiver at call time, so the model would be asked to
+    invent one. Silently hiding it from the schema is worse: the model then calls the
+    operation and the call fails on a missing argument.
+    """
+    if not _is_unbound_method(func):
+        return
+    receiver = next(iter(sig.parameters), "its first parameter")
+    raise TypeError(
+        f"Capability {capability_name(func)!r} is an unbound method, so its "
+        f"receiver {receiver!r} cannot be supplied and it cannot be called. Pass a "
+        "bound method (instance.method) or a callable object instead. If this is a "
+        "staticmethod on a class declared inside a function, move the class to "
+        "module scope so it can be recognised as one."
+    )
+
+
 def build_tool_from_func(func: Callable[..., Any]) -> ToolDef:
     """Build a ToolDef from a raw function (no decorator)."""
     tool_name = capability_name(func)
@@ -105,11 +171,10 @@ def build_tool_from_func(func: Callable[..., Any]) -> ToolDef:
     # describe itself to the model with functools.partial's own docstring.
     tool_desc = inspect.getdoc(_unwrap_partials(func)) or ""
     sig = inspect.signature(func)
+    _reject_unbound_receiver(func, sig)
     hints = _safe_get_type_hints(_annotation_source(func))
     params: list[ParamDef] = []
     for pname, param in sig.parameters.items():
-        if pname in ("self", "cls"):
-            continue
         type_str = _get_type_str(pname, param, hints)
         is_required = param.default is inspect.Parameter.empty
         params.append(
