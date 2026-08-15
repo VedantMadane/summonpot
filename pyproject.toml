@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "summonpot"
-version = "0.2.0"
+version = "0.3.0"
 description = "A signature-first API framework for deterministic and agentic endpoints."
 readme = "README.md"
 license = "MIT"
