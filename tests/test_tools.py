@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
+import threading
 from typing import Any
 
+from summonpot.models import ToolDef
 from summonpot.tools import build_tool_from_func, tool
 
 
@@ -59,6 +62,37 @@ def test_tooldef_executes_async_function():
     definition = build_tool_from_func(fetch)
 
     assert asyncio.run(definition.call(identifier="123")) == "record:123"
+
+
+def test_sync_capabilities_run_concurrently_off_the_event_loop():
+    """A slow synchronous capability must not stall the other requests."""
+    # The barrier only releases if all three calls are in flight at once; if they
+    # are serialised onto the event loop the first wait() times out instead.
+    barrier = threading.Barrier(3, timeout=10)
+
+    def gated(value: str) -> str:
+        barrier.wait()
+        return value
+
+    definition = build_tool_from_func(gated)
+
+    async def run_all():
+        return await asyncio.gather(*(definition.call(value=str(n)) for n in range(3)))
+
+    assert asyncio.run(run_all()) == ["0", "1", "2"]
+
+
+def test_tooldef_awaits_callable_objects_with_async_call():
+    class Repository:
+        async def __call__(self, key: str) -> str:
+            return f"value:{key}"
+
+    definition = ToolDef(name="repository", description="", fn=Repository())
+
+    result = asyncio.run(definition.call(key="k"))
+
+    assert result == "value:k"
+    assert not inspect.isawaitable(result)
 
 
 def test_unannotated_parameters_default_to_string_type():
