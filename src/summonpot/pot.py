@@ -59,6 +59,8 @@ class Pot:
                 else:
                     self._pot_tools.append(build_tool_from_func(t))
         self._endpoints: list[EndpointDef] = []
+        # (path, method) -> endpoint name, for duplicate-route detection.
+        self._routes: dict[tuple[str, str], str] = {}
         self._runtime = Runtime()
 
     def __repr__(self) -> str:
@@ -175,6 +177,18 @@ class Pot:
             if duplicate_names:
                 raise TypeError(f"Duplicate capability name: {duplicate_names[0]}")
 
+            # Keyed on the pair, not the path alone: GET /orders and POST /orders
+            # are different routes, while a second GET /orders would be dispatched
+            # to the first and silently become dead code.
+            route = (path, method.upper())
+            existing_name = self._routes.get(route)
+            if existing_name is not None:
+                raise ValueError(
+                    f"{route[1]} {path} is already registered by "
+                    f"{existing_name!r}. Only the first registration is reachable, "
+                    "so the second would be silently dead code."
+                )
+
             endpoint = EndpointDef(
                 path=path,
                 name=endpoint_name,
@@ -187,6 +201,7 @@ class Pot:
                 stream=stream,
                 model=model,
             )
+            self._routes[route] = endpoint_name
             self._endpoints.append(endpoint)
             return func
 
