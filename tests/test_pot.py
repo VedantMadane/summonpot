@@ -322,3 +322,15 @@ def test_summon_rejects_a_missing_name_nested_in_a_container():
             "    '''Research topics.'''\n"
             "    raise NotImplementedError\n"
         )
+
+
+def test_summon_rejects_a_path_without_a_leading_slash():
+    """Such a path registers and builds, but no request can ever reach it."""
+    pot = Pot("svc")
+
+    with pytest.raises(ValueError, match="must start with '/'"):
+
+        @pot.summon("research")
+        def research(request: ResearchRequest) -> ResearchResponse:
+            """Research a topic."""
+            raise NotImplementedError
