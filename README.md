@@ -506,6 +506,15 @@ Summonpot uses provider-qualified model identifiers. Provider SDKs, authenticati
 | OpenRouter | `summonpot[openrouter]` | `openrouter:anthropic/claude-sonnet-4` | `OPENROUTER_API_KEY` |
 | xAI | `summonpot[xai]` | `xai:grok-4` | `XAI_API_KEY` |
 
+To try summonpot without a provider account, use the built-in keyless model:
+
+```bash
+export SUMMONPOT_MODEL=test
+```
+
+It answers every endpoint with schema-valid placeholder data, so routing,
+validation, and capability wiring can all be exercised before any key exists.
+
 `SUMMONPOT_MODEL` sets the default for every endpoint:
 
 ```bash

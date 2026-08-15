@@ -736,3 +736,28 @@ def test_capability_may_declare_a_business_field_named_ctx():
     # The business field survives; the run context is not exposed to the model.
     assert observed["properties"] == ["ctx"]
     assert result.summary == "done"
+
+
+def test_keyless_test_model_is_not_given_a_provider_prefix():
+    """`test` needs no provider; prefixing it demands credentials it never uses."""
+    assert Runtime(model="test").default_model == "test"
+
+
+def test_keyless_test_model_works_through_the_environment(monkeypatch):
+    monkeypatch.setenv("SUMMONPOT_MODEL", "test")
+
+    assert Runtime().default_model == "test"
+
+
+def test_legacy_openai_names_are_still_prefixed():
+    assert Runtime(model="gpt-4o-mini").default_model == "openai:gpt-4o-mini"
+
+
+def test_endpoint_runs_on_the_keyless_test_model():
+    """The end-to-end path a new user takes before they have an API key."""
+    pot = Pot("svc", model="test")
+    _register_endpoint(pot)
+
+    result = asyncio.run(pot._runtime.call(pot.endpoints[0], {"query": "agents"}))
+
+    assert isinstance(result, ResearchResponse)

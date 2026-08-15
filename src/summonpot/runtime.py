@@ -227,8 +227,16 @@ def _resolved_signature(target: Any) -> tuple[inspect.Signature, dict[str, Any]]
     return signature, annotations
 
 
+# Built-in models that need no provider and no API key. Prefixing these would
+# send them to a provider that then demands credentials, which is what made
+# SUMMONPOT_MODEL=test unusable for trying summonpot out.
+PROVIDERLESS_MODELS = frozenset({"test"})
+
+
 def _normalize_model(model: ModelSpec) -> ModelSpec:
     """Keep explicit providers and preserve legacy OpenAI model names."""
     if not isinstance(model, str) or ":" in model:
+        return model
+    if model in PROVIDERLESS_MODELS:
         return model
     return f"openai:{model}"
