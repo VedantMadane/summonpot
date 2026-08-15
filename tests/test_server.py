@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 import pytest
 from fastapi.testclient import TestClient
@@ -304,3 +304,239 @@ def test_runtime_exception_text_is_not_returned_to_the_caller(raised, caplog):
     assert "PRIVATE_CUSTOMER_RECORD_123" not in response.text
     # The operator still gets the detail.
     assert "PRIVATE_CUSTOMER_RECORD_123" in caplog.text
+
+
+def test_get_endpoint_is_registered_as_get_with_query_parameters(mock_runtime):
+    """method= used to be accepted and discarded, always producing a POST route."""
+    pot = mock_runtime(mock_response="Berlin is sunny.")
+
+    @pot.summon("/forecast", method="GET")
+    def forecast(city: str, days: int = 3) -> str:
+        """Report the forecast."""
+        return ""
+
+    client = TestClient(build_app(pot))
+    operation = client.get("/openapi.json").json()["paths"]["/forecast"]
+
+    assert set(operation) == {"get"}
+    parameters = {p["name"]: p for p in operation["get"]["parameters"]}
+    assert set(parameters) == {"city", "days"}
+    assert parameters["city"]["in"] == "query"
+    assert parameters["city"]["required"] is True
+    assert parameters["days"]["required"] is False
+    assert "requestBody" not in operation["get"]
+
+    response = client.get("/forecast?city=Berlin&days=5")
+    assert response.status_code == 200
+    assert response.json() == "Berlin is sunny."
+    pot._runtime.call.assert_awaited_once_with(
+        pot.endpoints[0], {"city": "Berlin", "days": 5}
+    )
+
+
+def test_get_endpoint_rejects_a_post(mock_runtime):
+    pot = mock_runtime(mock_response="ok")
+
+    @pot.summon("/forecast", method="GET")
+    def forecast(city: str) -> str:
+        """Report the forecast."""
+        return ""
+
+    client = TestClient(build_app(pot))
+
+    assert client.post("/forecast", json={"city": "Berlin"}).status_code == 405
+
+
+def test_put_and_delete_methods_are_registered(mock_runtime):
+    pot = mock_runtime(mock_response="ok")
+
+    @pot.summon("/records", method="PUT")
+    def replace_record(record_id: str, payload: str) -> str:
+        """Replace a record."""
+        return ""
+
+    @pot.summon("/records/purge", method="DELETE")
+    def purge_record(record_id: str) -> str:
+        """Purge a record."""
+        return ""
+
+    paths = TestClient(build_app(pot)).get("/openapi.json").json()["paths"]
+
+    # PUT keeps a JSON body; DELETE takes query parameters.
+    assert set(paths["/records"]) == {"put"}
+    assert "requestBody" in paths["/records"]["put"]
+    assert set(paths["/records/purge"]) == {"delete"}
+    assert "requestBody" not in paths["/records/purge"]["delete"]
+
+
+def test_query_parameters_keep_their_resolved_type_contract(mock_runtime):
+    """A GET must honour the signature, not a lossy display-string approximation."""
+    pot = mock_runtime(mock_response="ok")
+
+    @pot.summon("/lookup", method="GET")
+    def lookup(
+        value: int | str,
+        count: int = 1,
+        tags: list[int] | None = None,
+    ) -> str:
+        """Look up a record."""
+        return ""
+
+    client = TestClient(build_app(pot))
+    operation = client.get("/openapi.json").json()["paths"]["/lookup"]["get"]
+    assert {p["name"]: p["in"] for p in operation["parameters"]} == {
+        "value": "query",
+        "count": "query",
+        "tags": "query",
+    }
+
+    # A union member that is not the first one is accepted.
+    assert client.get("/lookup?value=customer-alpha").status_code == 200
+    # A scalar is still coerced to its declared type.
+    assert client.get("/lookup?value=x&count=7").status_code == 200
+    # A generic keeps its element type: repeated values parse, wrong ones are rejected.
+    assert client.get("/lookup?value=x&tags=1&tags=2").status_code == 200
+    assert client.get("/lookup?value=x&tags=a").status_code == 422
+    # Required-ness survives.
+    assert client.get("/lookup").status_code == 422
+
+    pot._runtime.call.assert_any_await(
+        pot.endpoints[0], {"value": "x", "count": 1, "tags": [1, 2]}
+    )
+
+
+def test_query_route_uses_the_shared_runtime_error_mapping():
+    """A parameterised GET must get the same stable statuses as a body route."""
+    pot = Pot("svc")
+
+    @pot.summon("/forecast", method="GET")
+    def forecast(city: str) -> str:
+        """Report the forecast."""
+        return ""
+
+    class FailingRuntime:
+        async def call(self, endpoint, params):
+            raise UnexpectedModelBehavior("invalid output: PRIVATE_SENTINEL_123")
+
+    pot._runtime = FailingRuntime()
+    client = TestClient(build_app(pot), raise_server_exceptions=False)
+
+    response = client.get("/forecast?city=Berlin")
+
+    assert response.status_code == 502
+    assert "PRIVATE_SENTINEL_123" not in response.text
+
+
+def test_build_app_never_raises_for_a_registered_endpoint(mock_runtime):
+    """Unsupported query shapes are refused at registration, not inside FastAPI."""
+    pot = mock_runtime(mock_response="ok")
+
+    @pot.summon("/forecast", method="GET")
+    def forecast(city: str, days: list[int] | None = None) -> str:
+        """Report the forecast."""
+        return ""
+
+    assert build_app(pot) is not None
+
+
+def test_literal_query_parameter_enforces_its_allowed_values(mock_runtime):
+    """A Literal is a valid query contract: accepted in-set, 422 out of set."""
+    pot = mock_runtime(mock_response="ok")
+
+    @pot.summon("/tickets", method="GET")
+    def tickets(status: Literal["open", "closed"] = "open") -> str:
+        """List tickets by status."""
+        return ""
+
+    client = TestClient(build_app(pot))
+    parameter = client.get("/openapi.json").json()["paths"]["/tickets"]["get"][
+        "parameters"
+    ][0]
+
+    assert parameter["in"] == "query"
+    assert client.get("/tickets?status=open").status_code == 200
+    assert client.get("/tickets?status=closed").status_code == 200
+    assert client.get("/tickets?status=banana").status_code == 422
+
+
+def test_annotated_query_parameter_enforces_its_constraint(mock_runtime):
+    pot = mock_runtime(mock_response="ok")
+
+    @pot.summon("/search", method="GET")
+    def search(term: Annotated[str, Field(min_length=3)]) -> str:
+        """Search for a term."""
+        return ""
+
+    client = TestClient(build_app(pot))
+
+    assert client.get("/search?term=abc").status_code == 200
+    assert client.get("/search?term=ab").status_code == 422
+
+
+def test_sequence_query_parameter_keeps_its_own_constraint(mock_runtime):
+    """The query marker must not replace the annotation's declared FieldInfo."""
+    pot = mock_runtime(mock_response="ok")
+
+    @pot.summon("/batch", method="GET")
+    def batch(ids: Annotated[list[int], Field(min_length=2)]) -> str:
+        """Look up several records."""
+        return ""
+
+    client = TestClient(build_app(pot))
+
+    assert client.get("/batch?ids=1&ids=2").status_code == 200
+    # One value violates min_length=2, which the signature declares.
+    assert client.get("/batch?ids=1").status_code == 422
+
+
+def test_sequence_query_parameter_keeps_its_element_constraint(mock_runtime):
+    pot = mock_runtime(mock_response="ok")
+
+    @pot.summon("/batch", method="GET")
+    def batch(ids: list[Annotated[int, Field(ge=1)]] | None = None) -> str:
+        """Look up several records."""
+        return ""
+
+    client = TestClient(build_app(pot))
+
+    assert client.get("/batch?ids=1&ids=2").status_code == 200
+    # 0 violates the element constraint ge=1.
+    assert client.get("/batch?ids=0&ids=2").status_code == 422
+
+
+def test_unconstrained_sequence_query_parameter_still_binds(mock_runtime):
+    """The marker is still required for a sequence to bind at all."""
+    pot = mock_runtime(mock_response="ok")
+
+    @pot.summon("/batch", method="GET")
+    def batch(ids: list[int] | None = None) -> str:
+        """Look up several records."""
+        return ""
+
+    client = TestClient(build_app(pot))
+
+    assert client.get("/batch?ids=1&ids=2").status_code == 200
+    pot._runtime.call.assert_any_await(pot.endpoints[0], {"ids": [1, 2]})
+    assert client.get("/batch?ids=a").status_code == 422
+
+
+def test_one_path_serves_both_methods(mock_runtime):
+    """The pair must reach FastAPI as two operations on a single path."""
+    pot = mock_runtime(mock_response="ok")
+
+    @pot.summon("/orders", method="GET")
+    def list_orders(status: str = "open") -> str:
+        """List orders."""
+        return ""
+
+    @pot.summon("/orders", method="POST")
+    def place_order(item: str) -> str:
+        """Place an order."""
+        return ""
+
+    client = TestClient(build_app(pot))
+    operations = client.get("/openapi.json").json()["paths"]["/orders"]
+
+    assert set(operations) == {"get", "post"}
+    assert client.get("/orders?status=open").status_code == 200
+    assert client.post("/orders", json={"item": "widget"}).status_code == 200

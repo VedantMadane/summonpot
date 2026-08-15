@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from typing import Annotated, Literal
+
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from summonpot import Depends, Pot, Required
 from summonpot.tools import tool
@@ -449,3 +451,135 @@ def test_pot_rejects_both_model_and_runtime():
 
     with pytest.raises(TypeError, match="not both"):
         Pot("svc", model="openai:gpt-4o-mini", runtime=Runtime())
+
+
+def test_summon_normalizes_and_records_the_method():
+    pot = Pot("svc")
+
+    @pot.summon("/forecast", method="get")
+    def forecast(city: str) -> str:
+        """Report the forecast."""
+        return ""
+
+    assert pot.endpoints[0].method == "GET"
+
+
+def test_summon_rejects_an_unsupported_method():
+    pot = Pot("svc")
+
+    with pytest.raises(ValueError, match="Unsupported HTTP method"):
+
+        @pot.summon("/forecast", method="TRACE")
+        def forecast(city: str) -> str:
+            """Report the forecast."""
+            return ""
+
+
+def test_summon_rejects_a_request_model_on_a_bodyless_method():
+    """A GET has no body to carry the model, so this must fail at registration."""
+    pot = Pot("svc")
+
+    with pytest.raises(TypeError, match="carries no request body"):
+
+        @pot.summon("/research", method="GET")
+        def research(request: ResearchRequest) -> ResearchResponse:
+            """Research a topic."""
+            raise NotImplementedError
+
+
+@pytest.mark.parametrize(
+    "annotation",
+    ["dict[str, int] | None", "dict[str, int]", "ResearchRequest | None"],
+)
+def test_summon_rejects_query_annotations_with_no_encoding(annotation):
+    """These used to reach FastAPI and crash build_app() during startup."""
+    namespace = {"ResearchRequest": ResearchRequest, "Pot": Pot}
+    source = (
+        f"def endpoint(payload: {annotation} = None) -> str:\n"
+        "    '''Look something up.'''\n"
+        "    return ''\n"
+    )
+    exec(source, namespace)
+    pot = Pot("svc")
+
+    with pytest.raises(TypeError, match="has no query encoding"):
+        pot.summon("/lookup", method="GET")(namespace["endpoint"])
+
+
+@pytest.mark.parametrize("annotation", ["list[int] | None", "int | str", "str"])
+def test_summon_accepts_query_representable_annotations(annotation):
+    namespace = {"Pot": Pot}
+    source = (
+        f"def endpoint(value: {annotation} = None) -> str:\n"
+        "    '''Look something up.'''\n"
+        "    return ''\n"
+    )
+    exec(source, namespace)
+    pot = Pot("svc")
+
+    pot.summon("/lookup", method="GET")(namespace["endpoint"])
+
+    assert pot.endpoints[0].method == "GET"
+
+
+@pytest.mark.parametrize(
+    "annotation",
+    [
+        "Literal['open', 'closed']",
+        "list[Literal['open', 'closed']] | None",
+        "Annotated[str, Field(min_length=3)]",
+        "Annotated[list[int], Field()] | None",
+    ],
+)
+def test_summon_accepts_constrained_scalar_query_annotations(annotation):
+    """Literal and Annotated wrap a scalar; they do not make it unrepresentable."""
+    namespace = {
+        "Annotated": Annotated,
+        "Literal": Literal,
+        "Field": Field,
+        "Pot": Pot,
+    }
+    source = (
+        f"def endpoint(value: {annotation} = None) -> str:\n"
+        "    '''Look something up.'''\n"
+        "    return ''\n"
+    )
+    exec(source, namespace)
+    pot = Pot("svc")
+
+    pot.summon("/lookup", method="GET")(namespace["endpoint"])
+
+    assert pot.endpoints[0].method == "GET"
+
+
+def test_summon_still_rejects_a_mapping_hidden_behind_annotated():
+    """Unwrapping Annotated must not open a hole for mappings."""
+    namespace = {"Annotated": Annotated, "Field": Field, "Pot": Pot}
+    source = (
+        "def endpoint(value: Annotated[dict[str, int], Field()] = None) -> str:\n"
+        "    '''Look something up.'''\n"
+        "    return ''\n"
+    )
+    exec(source, namespace)
+    pot = Pot("svc")
+
+    with pytest.raises(TypeError, match="has no query encoding"):
+        pot.summon("/lookup", method="GET")(namespace["endpoint"])
+
+
+def test_summon_rejects_the_same_path_and_method_twice():
+    pot = Pot("svc")
+
+    @pot.summon("/orders", method="GET")
+    def list_orders(status: str = "open") -> str:
+        """List orders."""
+        return ""
+
+    with pytest.raises(ValueError, match="GET /orders is already registered"):
+
+        @pot.summon("/orders", method="get")
+        def list_orders_again(status: str = "open") -> str:
+            """List orders differently."""
+            return ""
+
+    assert len(pot.endpoints) == 1

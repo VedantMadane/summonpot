@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
-from typing import TYPE_CHECKING, Any
+from types import UnionType
+from typing import TYPE_CHECKING, Annotated, Any, Union, get_args, get_origin
 
 from summonpot import __version__
+from summonpot.pot import BODYLESS_METHODS, _unwrap_annotated
 
 if TYPE_CHECKING:
     from summonpot.pot import Pot
@@ -25,9 +28,25 @@ def build_app(pot: Pot) -> Any:
 
     for endpoint in pot.endpoints:
         route_path = endpoint.path
-        method = "POST"
+        method = endpoint.method
 
-        if endpoint.parameters:
+        if endpoint.parameters and method in BODYLESS_METHODS:
+            # GET/DELETE/HEAD carry no request body, so the declared parameters
+            # become query parameters instead.
+            _handle_with_query = _make_query_handler(endpoint, pot)
+            app.add_api_route(
+                route_path,
+                _handle_with_query,
+                methods=[method],
+                response_model=endpoint.output_model,
+                summary=(
+                    endpoint.description.split("\n")[0]
+                    if endpoint.description
+                    else endpoint.name
+                ),
+                description=endpoint.description,
+            )
+        elif endpoint.parameters:
             if endpoint.input_model is not None:
                 RequestModel = endpoint.input_model
             else:
@@ -145,6 +164,60 @@ def _make_body_handler(endpoint: Any, pot: Any, request_model: type[Any]) -> Any
         return await _run_endpoint(pot, endpoint, params)
 
     handle.__annotations__["body"] = request_model
+    return handle
+
+
+def _needs_query_marker(annotation: Any) -> bool:
+    """Report whether FastAPI needs an explicit Query marker to bind this type."""
+    annotation = _unwrap_annotated(annotation)
+    origin = get_origin(annotation)
+    if origin is Union or origin is UnionType:
+        return any(
+            _needs_query_marker(argument)
+            for argument in get_args(annotation)
+            if argument is not type(None)
+        )
+    return origin in (list, set, frozenset, tuple)
+
+
+def _make_query_handler(endpoint: Any, pot: Any) -> Any:
+    """Create a handler whose parameters arrive as a query string."""
+
+    from fastapi import Query
+
+    async def handle(**kwargs: Any) -> Any:
+        return await _run_endpoint(pot, endpoint, kwargs)
+
+    parameters = []
+    annotations: dict[str, Any] = {}
+    for p in endpoint.parameters:
+        # Same resolved annotation the body path uses, so a union stays nullable and
+        # a generic keeps its element type instead of collapsing to its first member.
+        annotation = _field_type(p)
+        # A sequence is read as a request body unless it is marked as a query
+        # parameter, so it would silently arrive as None on a bodyless method. The
+        # marker goes *inside* Annotated rather than into the default: as a default
+        # it replaces whatever FieldInfo the annotation already carried, silently
+        # dropping the declared constraint.
+        if _needs_query_marker(annotation):
+            annotation = Annotated[annotation, Query()]
+
+        default = inspect.Parameter.empty if p.required else p.default
+
+        parameters.append(
+            inspect.Parameter(
+                p.name,
+                inspect.Parameter.KEYWORD_ONLY,
+                default=default,
+                annotation=annotation,
+            )
+        )
+        annotations[p.name] = annotation
+
+    # FastAPI reads __signature__, so this is what turns **kwargs into a documented
+    # set of query parameters.
+    handle.__signature__ = inspect.Signature(parameters)  # type: ignore[attr-defined]
+    handle.__annotations__ = annotations
     return handle
 
 

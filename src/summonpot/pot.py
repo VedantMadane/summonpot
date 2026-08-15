@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import inspect
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import replace
-from typing import Any
+from enum import Enum
+from types import UnionType
+from typing import Annotated, Any, Literal, Union, get_args, get_origin
 
 from pydantic import BaseModel
 
@@ -103,8 +105,15 @@ class Pot:
             stream: Not implemented. Passing ``True`` raises, rather than
                 silently returning a fully buffered response.
             model: LLM model override for this endpoint.
-            method: HTTP method (default POST).
+            method: HTTP method (default POST). Bodyless methods (GET, DELETE,
+                HEAD) take their parameters as a query string.
         """
+        normalized_method = method.upper()
+        if normalized_method not in SUPPORTED_METHODS:
+            raise ValueError(
+                f"Unsupported HTTP method {method!r}. Supported methods are "
+                f"{', '.join(sorted(SUPPORTED_METHODS))}."
+            )
 
         if stream:
             raise NotImplementedError(
@@ -188,6 +197,26 @@ class Pot:
                     "Pydantic endpoints must declare exactly one request parameter"
                 )
 
+            if input_model is not None and normalized_method in BODYLESS_METHODS:
+                raise TypeError(
+                    f"Endpoint {endpoint_name!r} uses {normalized_method}, which "
+                    "carries no request body, so it cannot take a Pydantic request "
+                    "model. Declare the fields as individual parameters, or use "
+                    "POST."
+                )
+
+            if normalized_method in BODYLESS_METHODS:
+                for parameter in parameters:
+                    if _is_query_representable(parameter.annotation):
+                        continue
+                    raise TypeError(
+                        f"Endpoint {endpoint_name!r} uses {normalized_method}, so "
+                        f"parameter {parameter.name!r} has to travel in the query "
+                        f"string, and {parameter.type_annotation!r} has no query "
+                        "encoding. Use a scalar or a sequence of scalars, or use "
+                        "POST so it can be sent in the request body."
+                    )
+
             # Return type
             return_hint = hints.get("return", sig.return_annotation)
             reject_unresolved(
@@ -212,11 +241,11 @@ class Pot:
             # Keyed on the pair, not the path alone: GET /orders and POST /orders
             # are different routes, while a second GET /orders would be dispatched
             # to the first and silently become dead code.
-            route = (path, method.upper())
+            route = (path, normalized_method)
             existing_name = self._routes.get(route)
             if existing_name is not None:
                 raise ValueError(
-                    f"{route[1]} {path} is already registered by "
+                    f"{normalized_method} {path} is already registered by "
                     f"{existing_name!r}. Only the first registration is reachable, "
                     "so the second would be silently dead code."
                 )
@@ -232,6 +261,7 @@ class Pot:
                 tools=endpoint_tools,
                 stream=stream,
                 model=model,
+                method=normalized_method,
             )
             self._routes[route] = endpoint_name
             self._endpoints.append(endpoint)
@@ -278,6 +308,65 @@ class Pot:
 
         app = build_app(self)
         uvicorn.run(app, host=host, port=port)  # type: ignore[arg-type]
+
+
+def _unwrap_annotated(annotation: Any) -> Any:
+    """Return the underlying type of an ``Annotated``, leaving anything else alone."""
+    while get_origin(annotation) is Annotated:
+        annotation = get_args(annotation)[0]
+    return annotation
+
+
+def _is_query_scalar(annotation: Any) -> bool:
+    """Report whether a single value can travel in a query string."""
+    annotation = _unwrap_annotated(annotation)
+    if annotation is Any:
+        return True
+
+    origin = get_origin(annotation)
+    if origin is Literal:
+        # A constrained scalar: every member still arrives as one query value.
+        return all(
+            isinstance(member, str | int | float | bool | bytes | Enum)
+            or member is None
+            for member in get_args(annotation)
+        )
+    if origin is not None:
+        # A nested generic, e.g. dict[str, int] or list[list[int]].
+        return False
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return False
+    return not (isinstance(annotation, type) and issubclass(annotation, Mapping))
+
+
+def _is_query_representable(annotation: Any) -> bool:
+    """Report whether an annotation can be expressed as a query parameter.
+
+    A query string carries scalars and repeated scalars. Mappings and nested models
+    have no agreed encoding, so they belong in a request body.
+    """
+    if annotation is None or annotation is inspect.Parameter.empty:
+        return True
+
+    annotation = _unwrap_annotated(annotation)
+    origin = get_origin(annotation)
+    if origin is Union or origin is UnionType:
+        return all(
+            _is_query_representable(argument)
+            for argument in get_args(annotation)
+            if argument is not type(None)
+        )
+    if origin in (list, set, frozenset, tuple):
+        return all(
+            _is_query_scalar(argument)
+            for argument in get_args(annotation)
+            if argument is not Ellipsis
+        )
+    return _is_query_scalar(annotation)
+
+
+BODYLESS_METHODS = frozenset({"GET", "DELETE", "HEAD"})
+SUPPORTED_METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"})
 
 
 def _is_pydantic_model(annotation: Any) -> bool:
