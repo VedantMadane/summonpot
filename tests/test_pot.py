@@ -386,6 +386,8 @@ def test_summon_normalizes_the_method_when_detecting_duplicates():
         def list_orders_again(status: str = "open") -> str:
             """List orders again."""
             return ""
+
+
 def test_summon_rejects_unimplemented_streaming():
     """The flag shipped in 0.2.0 but was never read by the runtime or the server."""
     pot = Pot("svc")
