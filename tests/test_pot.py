@@ -345,7 +345,7 @@ def test_summon_rejects_a_duplicate_path():
         """Research a topic."""
         raise NotImplementedError
 
-    with pytest.raises(ValueError, match="already registered by 'research'"):
+    with pytest.raises(ValueError, match="POST /research is already registered"):
 
         @pot.summon("/research")
         def research_again(request: ResearchRequest) -> ResearchResponse:
@@ -353,3 +353,36 @@ def test_summon_rejects_a_duplicate_path():
             raise NotImplementedError
 
     assert len(pot.endpoints) == 1
+
+
+def test_summon_allows_one_path_to_carry_different_methods():
+    """GET /orders and POST /orders are distinct routes."""
+    pot = Pot("svc")
+
+    @pot.summon("/orders", method="GET")
+    def list_orders(status: str = "open") -> str:
+        """List orders."""
+        return ""
+
+    @pot.summon("/orders", method="POST")
+    def place_order(item: str) -> str:
+        """Place an order."""
+        return ""
+
+    assert len(pot.endpoints) == 2
+
+
+def test_summon_normalizes_the_method_when_detecting_duplicates():
+    pot = Pot("svc")
+
+    @pot.summon("/orders", method="GET")
+    def list_orders(status: str = "open") -> str:
+        """List orders."""
+        return ""
+
+    with pytest.raises(ValueError, match="GET /orders is already registered"):
+
+        @pot.summon("/orders", method="get")
+        def list_orders_again(status: str = "open") -> str:
+            """List orders again."""
+            return ""
