@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import os
-from functools import wraps
 from typing import Any
 
 from pydantic_ai import Agent, ModelRetry, Tool
@@ -46,13 +46,21 @@ class Runtime:
         completed_required: set[str] = set()
 
         def tracked_operation(tool: Any) -> Any:
-            @wraps(tool.fn)
             async def execute(*args: Any, **kwargs: Any) -> Any:
                 result = await tool.call(*args, **kwargs)
                 if tool.required:
                     completed_required.add(tool.name)
                 return result
 
+            # Describe the capability explicitly rather than with functools.wraps.
+            # wraps only produces a usable schema when the target is a plain
+            # function: for a partial or a callable instance it leaves the model
+            # reading this wrapper's own annotations against the wrong module.
+            signature, annotations = _resolved_signature(tool.fn)
+            execute.__name__ = tool.name
+            execute.__doc__ = tool.description or None
+            execute.__signature__ = signature  # type: ignore[attr-defined]
+            execute.__annotations__ = annotations
             return execute
 
         tools = [
@@ -110,6 +118,28 @@ class Runtime:
             for key, value in params.items():
                 parts.append(f"  {key}: {json.dumps(value, default=str)}")
         return "\n".join(parts)
+
+
+def _resolved_signature(target: Any) -> tuple[inspect.Signature, dict[str, Any]]:
+    """Return a capability's signature and annotations as real type objects.
+
+    Resolving here means the wrapper carries no string annotations for the provider
+    layer to evaluate, so a capability keeps its schema regardless of which module
+    it was defined in or whether it is a function, a partial, or a callable object.
+    """
+    try:
+        signature = inspect.signature(target, eval_str=True)
+    except (TypeError, NameError):
+        signature = inspect.signature(target)
+
+    annotations: dict[str, Any] = {
+        name: parameter.annotation
+        for name, parameter in signature.parameters.items()
+        if parameter.annotation is not inspect.Parameter.empty
+    }
+    if signature.return_annotation is not inspect.Signature.empty:
+        annotations["return"] = signature.return_annotation
+    return signature, annotations
 
 
 def _normalize_model(model: ModelSpec) -> ModelSpec:
