@@ -427,6 +427,10 @@ from summonpot.runtime import Runtime
 pot = Pot("my-service", runtime=Runtime(usage_limits=UsageLimits(request_limit=8), timeout=30.0))
 ```
 
+## Examples
+
+See [`examples/`](examples/) for executable applications arranged by complexity: a minimal typed endpoint, required exact calculations, bounded agentic order fulfillment, GET and POST routing, runtime limits, and a multi-file support service with a required persisted ticket.
+
 ## The Summoning Model
 
 | Concept | As summoning |
