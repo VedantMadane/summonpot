@@ -386,3 +386,28 @@ def test_summon_normalizes_the_method_when_detecting_duplicates():
         def list_orders_again(status: str = "open") -> str:
             """List orders again."""
             return ""
+
+
+def test_summon_rejects_unimplemented_streaming():
+    """The flag shipped in 0.2.0 but was never read by the runtime or the server."""
+    pot = Pot("svc")
+
+    with pytest.raises(NotImplementedError, match="stream=True is not implemented"):
+
+        @pot.summon("/research", stream=True)
+        def research(request: ResearchRequest) -> ResearchResponse:
+            """Research a topic."""
+            raise NotImplementedError
+
+    assert pot.endpoints == []
+
+
+def test_summon_still_accepts_the_default_non_streaming_endpoint():
+    pot = Pot("svc")
+
+    @pot.summon("/research")
+    def research(request: ResearchRequest) -> ResearchResponse:
+        """Research a topic."""
+        raise NotImplementedError
+
+    assert pot.endpoints[0].stream is False
