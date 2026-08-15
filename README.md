@@ -515,6 +515,34 @@ def research_topic(
     raise NotImplementedError
 ```
 
+## Bounding a call
+
+Every endpoint is an operator-funded model call, so the runtime accepts a cap on what
+one request may spend and how long it may take:
+
+```python
+from summonpot import Pot, UsageLimits
+from summonpot.runtime import Runtime
+
+pot = Pot(
+    "my-service",
+    runtime=Runtime(
+        usage_limits=UsageLimits(request_limit=8, total_tokens_limit=40_000),
+        timeout=30.0,
+    ),
+)
+```
+
+Every endpoint on that pot is bounded by those limits. Exceeding a usage limit raises
+`UsageLimitExceeded`; exceeding the timeout raises `TimeoutError`. Both default to
+`None`, which leaves the provider engine's own limits in place — set them explicitly
+for anything reachable from outside your network.
+
+The timeout bounds how long summonpot *waits*. It cannot terminate a synchronous
+capability already running in a worker thread, so a write started before the deadline
+still completes after the caller sees `TimeoutError`. Give any capability that must
+not outlive its request an internal deadline of its own.
+
 Pydantic AI is an internal runtime dependency. Summonpot users do not construct Pydantic AI agents or provider clients; the stable public contract remains `Pot`, `@pot.summon`, declarative capabilities, and Pydantic endpoint models.
 
 ## Development

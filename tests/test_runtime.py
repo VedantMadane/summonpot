@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import threading
+import time
 
 import pytest
 from pydantic import BaseModel
-from pydantic_ai import UnexpectedModelBehavior
+from pydantic_ai import UnexpectedModelBehavior, UsageLimitExceeded
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
-from summonpot import Depends, Pot, Required
+from summonpot import Depends, Pot, Required, UsageLimits
 from summonpot.runtime import Runtime
 
 
@@ -481,3 +483,100 @@ def test_explicit_model_beats_the_environment(monkeypatch):
     assert Runtime(model="groq:llama-3.3-70b-versatile").default_model == (
         "groq:llama-3.3-70b-versatile"
     )
+
+
+def test_usage_limits_bound_a_runaway_agent_loop():
+    """An endpoint is an operator-funded call; it must be cappable."""
+    calls = 0
+
+    def search_web(query: str) -> str:
+        """Search the web."""
+        nonlocal calls
+        calls += 1
+        return "result"
+
+    pot = Pot("svc", tools=[search_web])
+    _register_endpoint(pot)
+
+    def model_function(messages, info: AgentInfo):
+        # Never finishes on its own.
+        return ModelResponse(parts=[ToolCallPart("search_web", {"query": "agents"})])
+
+    runtime = Runtime(
+        model=FunctionModel(model_function),
+        usage_limits=UsageLimits(request_limit=2),
+    )
+
+    with pytest.raises(UsageLimitExceeded):
+        asyncio.run(runtime.call(pot.endpoints[0], {"query": "agents"}))
+    assert calls <= 2
+
+
+def test_timeout_bounds_a_single_endpoint_call():
+    async def slow_model(messages, info: AgentInfo):
+        await asyncio.sleep(5)
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    info.output_tools[0].name,
+                    {"summary": "late", "confidence": 1.0},
+                )
+            ]
+        )
+
+    pot = Pot("svc")
+    _register_endpoint(pot)
+    runtime = Runtime(model=FunctionModel(slow_model), timeout=0.05)
+
+    with pytest.raises(TimeoutError):
+        asyncio.run(runtime.call(pot.endpoints[0], {"query": "agents"}))
+
+
+def test_runtime_is_unbounded_by_default():
+    runtime = Runtime(model="openai:gpt-4o-mini")
+
+    assert runtime.usage_limits is None
+    assert runtime.timeout is None
+
+
+def test_timeout_bounds_a_slow_synchronous_capability():
+    """The deadline must apply to sync capabilities, which run in a worker thread."""
+    finished = threading.Event()
+
+    def slow_write(query: str) -> str:
+        """Perform a slow synchronous write."""
+        time.sleep(0.30)
+        finished.set()
+        return "written"
+
+    pot = Pot("svc")
+
+    @pot.summon("/research")
+    def research(
+        request: ResearchRequest, sources=Required(slow_write)
+    ) -> ResearchResponse:
+        """Research a topic."""
+        raise NotImplementedError
+
+    def model_function(messages, info: AgentInfo):
+        return ModelResponse(parts=[ToolCallPart("slow_write", {"query": "a"})])
+
+    runtime = Runtime(model=FunctionModel(model_function), timeout=0.05)
+
+    async def scenario() -> float:
+        # Measured inside the loop: this is what one request waits. Measuring around
+        # asyncio.run would instead time the loop teardown, which joins the
+        # abandoned worker thread.
+        started = time.perf_counter()
+        with pytest.raises(TimeoutError):
+            await runtime.call(pot.endpoints[0], {"query": "agents"})
+        return time.perf_counter() - started
+
+    elapsed = asyncio.run(scenario())
+
+    # The caller is released on the deadline, not when the capability finishes.
+    assert elapsed < 0.25, f"the request waited {elapsed:.3f}s for the capability"
+
+    # Documented boundary: the thread is not killed, so the side effect still lands
+    # after the caller has already seen TimeoutError.
+    assert finished.is_set() or finished.wait(timeout=2.0)
