@@ -24,11 +24,21 @@ class Runtime:
         *,
         retries: int = 1,
     ) -> None:
-        configured_model = model or os.environ.get(
+        self._model = model
+        self.retries = retries
+
+    @property
+    def default_model(self) -> ModelSpec:
+        """Resolve the default model at call time.
+
+        Resolved lazily so that setting ``SUMMONPOT_MODEL`` after the module
+        defining the ``Pot`` is imported still takes effect. Reading it in
+        ``__init__`` made the variable silently useless in that very common case.
+        """
+        configured = self._model or os.environ.get(
             "SUMMONPOT_MODEL", "openai:gpt-4o-mini"
         )
-        self.default_model = _normalize_model(configured_model)
-        self.retries = retries
+        return _normalize_model(configured)
 
     def model_for(self, endpoint: EndpointDef) -> ModelSpec:
         """Resolve an endpoint override or the runtime's default model."""

@@ -435,3 +435,17 @@ def test_pot_level_capabilities_are_not_shared_between_endpoints():
 
     assert second.required is False
     assert pot._pot_tools[0].required is False
+
+
+def test_pot_accepts_a_default_model():
+    pot = Pot("svc", model="anthropic:claude-sonnet-4-5")
+
+    assert pot._runtime.default_model == "anthropic:claude-sonnet-4-5"
+
+
+def test_pot_rejects_both_model_and_runtime():
+    """A supplied runtime already carries its own model."""
+    from summonpot.runtime import Runtime
+
+    with pytest.raises(TypeError, match="not both"):
+        Pot("svc", model="openai:gpt-4o-mini", runtime=Runtime())

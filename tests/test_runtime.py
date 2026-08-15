@@ -461,3 +461,23 @@ def test_runtime_supports_every_callable_capability_form(
     # A positional-only parameter is still offered to the model by name.
     assert observed["properties"] == ["identifier"]
     assert result.summary == "done"
+
+
+def test_default_model_is_resolved_lazily(monkeypatch):
+    """Setting SUMMONPOT_MODEL after the pot is built must still take effect."""
+    monkeypatch.delenv("SUMMONPOT_MODEL", raising=False)
+    runtime = Runtime()
+
+    assert runtime.default_model == "openai:gpt-4o-mini"
+
+    monkeypatch.setenv("SUMMONPOT_MODEL", "anthropic:claude-sonnet-4-5")
+
+    assert runtime.default_model == "anthropic:claude-sonnet-4-5"
+
+
+def test_explicit_model_beats_the_environment(monkeypatch):
+    monkeypatch.setenv("SUMMONPOT_MODEL", "anthropic:claude-sonnet-4-5")
+
+    assert Runtime(model="groq:llama-3.3-70b-versatile").default_model == (
+        "groq:llama-3.3-70b-versatile"
+    )
