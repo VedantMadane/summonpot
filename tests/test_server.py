@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi.testclient import TestClient
 from pydantic import BaseModel, Field
@@ -98,6 +98,52 @@ def test_dependency_parameters_do_not_leak_into_http_contract(mock_runtime):
         "sentiment": "positive",
         "topics": ["capabilities"],
     }
+
+
+def test_request_schema_preserves_unions_generics_and_any(mock_runtime):
+    """The HTTP contract must match the signature, not a parsed display string."""
+    pot = mock_runtime(mock_response="ok")
+
+    @pot.summon("/typed")
+    def typed(
+        q: str,
+        limit: int | None = None,
+        payload: Any = None,
+        items: list[int] | None = None,
+    ) -> str:
+        """Typed endpoint."""
+        return ""
+
+    client = TestClient(build_app(pot))
+    properties = client.get("/openapi.json").json()["components"]["schemas"][
+        "typedRequest"
+    ]["properties"]
+
+    # A nullable parameter stays nullable instead of collapsing to its first member.
+    assert properties["limit"]["anyOf"] == [{"type": "integer"}, {"type": "null"}]
+    # Any imposes no constraint instead of silently becoming a string.
+    assert "type" not in properties["payload"]
+
+    assert client.post("/typed", json={"q": "x", "limit": None}).status_code == 200
+    assert (
+        client.post("/typed", json={"q": "x", "payload": {"a": 1}}).status_code == 200
+    )
+    assert client.post("/typed", json={"q": "x", "limit": 5}).status_code == 200
+
+
+def test_request_schema_validates_generic_element_types(mock_runtime):
+    """list[int] used to fail open, handing the agent the wrong types."""
+    pot = mock_runtime(mock_response="ok")
+
+    @pot.summon("/items")
+    def items(values: list[int]) -> str:
+        """Items endpoint."""
+        return ""
+
+    client = TestClient(build_app(pot))
+
+    assert client.post("/items", json={"values": [1, 2]}).status_code == 200
+    assert client.post("/items", json={"values": ["a", "b"]}).status_code == 422
 
 
 def test_build_app_requires_body_fields(mock_runtime):

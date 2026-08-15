@@ -19,6 +19,10 @@ class ParamDef:
     description: str = ""
     required: bool = True
     default: Any = None
+    # The resolved annotation object. `type_annotation` is a display string and
+    # cannot round-trip a union or a generic's element type, so the HTTP layer
+    # builds its request model from this instead.
+    annotation: Any = None
 
 
 @dataclass
