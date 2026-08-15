@@ -247,6 +247,18 @@ class Pot:
                 raise ValueError(
                     f"{route[1]} {path} is already registered by "
                     f"{existing_name!r}. Only the first registration is reachable, "
+            existing = next(
+                (
+                    e
+                    for e in self._endpoints
+                    if e.path == path and e.method == normalized_method
+                ),
+                None,
+            )
+            if existing is not None:
+                raise ValueError(
+                    f"{normalized_method} {path} is already registered by "
+                    f"{existing.name!r}. Only the first registration is reachable, "
                     "so the second would be silently dead code."
                 )
 

@@ -563,3 +563,41 @@ def test_summon_still_rejects_a_mapping_hidden_behind_annotated():
 
     with pytest.raises(TypeError, match="has no query encoding"):
         pot.summon("/lookup", method="GET")(namespace["endpoint"])
+
+
+def test_summon_allows_one_path_to_carry_different_methods():
+    """GET /orders and POST /orders are distinct routes."""
+    pot = Pot("svc")
+
+    @pot.summon("/orders", method="GET")
+    def list_orders(status: str = "open") -> str:
+        """List orders."""
+        return ""
+
+    @pot.summon("/orders", method="POST")
+    def place_order(item: str) -> str:
+        """Place an order."""
+        return ""
+
+    assert [(e.path, e.method) for e in pot.endpoints] == [
+        ("/orders", "GET"),
+        ("/orders", "POST"),
+    ]
+
+
+def test_summon_rejects_the_same_path_and_method_twice():
+    pot = Pot("svc")
+
+    @pot.summon("/orders", method="GET")
+    def list_orders(status: str = "open") -> str:
+        """List orders."""
+        return ""
+
+    with pytest.raises(ValueError, match="GET /orders is already registered"):
+
+        @pot.summon("/orders", method="get")
+        def list_orders_again(status: str = "open") -> str:
+            """List orders differently."""
+            return ""
+
+    assert len(pot.endpoints) == 1

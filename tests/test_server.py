@@ -518,3 +518,25 @@ def test_unconstrained_sequence_query_parameter_still_binds(mock_runtime):
     assert client.get("/batch?ids=1&ids=2").status_code == 200
     pot._runtime.call.assert_any_await(pot.endpoints[0], {"ids": [1, 2]})
     assert client.get("/batch?ids=a").status_code == 422
+
+
+def test_one_path_serves_both_methods(mock_runtime):
+    """The pair must reach FastAPI as two operations on a single path."""
+    pot = mock_runtime(mock_response="ok")
+
+    @pot.summon("/orders", method="GET")
+    def list_orders(status: str = "open") -> str:
+        """List orders."""
+        return ""
+
+    @pot.summon("/orders", method="POST")
+    def place_order(item: str) -> str:
+        """Place an order."""
+        return ""
+
+    client = TestClient(build_app(pot))
+    operations = client.get("/openapi.json").json()["paths"]["/orders"]
+
+    assert set(operations) == {"get", "post"}
+    assert client.get("/orders?status=open").status_code == 200
+    assert client.post("/orders", json={"item": "widget"}).status_code == 200
