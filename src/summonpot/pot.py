@@ -86,6 +86,15 @@ class Pot:
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             endpoint_name = func.__name__
             description = inspect.getdoc(func) or ""
+            if not description.strip():
+                # The docstring is the endpoint's goal, not documentation. Without
+                # it the agent is given an empty system prompt and told nothing
+                # about what the endpoint is for.
+                raise TypeError(
+                    f"Endpoint {endpoint_name!r} has no docstring. The docstring is "
+                    "the endpoint's goal and becomes the agent's instructions, so "
+                    "it is required."
+                )
 
             # Merge pot-level tools with endpoint-specific tools
             all_tools = list(self._pot_tools)
