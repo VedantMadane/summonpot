@@ -96,7 +96,15 @@ def _upsert_managed_block(path: Path, content: str) -> None:
     start = existing.find(_MANAGED_START)
     end = existing.find(_MANAGED_END)
     if start != -1 and end != -1 and end > start:
-        updated = existing[:start] + block + existing[end + len(_MANAGED_END) + 1 :]
+        # Resume immediately after the marker, consuming a line ending only when one
+        # is actually there. Assuming a trailing newline eats the first character of
+        # whatever follows the block.
+        after = end + len(_MANAGED_END)
+        for ending in ("\r\n", "\n"):
+            if existing.startswith(ending, after):
+                after += len(ending)
+                break
+        updated = existing[:start] + block + existing[after:]
     elif existing.strip():
         updated = existing.rstrip() + "\n\n" + block
     else:
@@ -118,7 +126,9 @@ _MARKERS: dict[Agent, tuple[str, ...]] = {
     Agent.claude: (".claude",),
     Agent.cursor: (".cursor",),
     Agent.windsurf: (".windsurf",),
-    Agent.copilot: (".github/copilot-instructions.md", ".github"),
+    # Not bare .github/: that exists for workflows and Dependabot in almost every
+    # repository, and is no evidence that Copilot instructions are in use.
+    Agent.copilot: (".github/copilot-instructions.md",),
     Agent.cline: (".clinerules",),
     Agent.codex: ("AGENTS.md",),
 }

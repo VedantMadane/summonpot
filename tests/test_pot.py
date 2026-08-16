@@ -583,3 +583,32 @@ def test_summon_rejects_the_same_path_and_method_twice():
             return ""
 
     assert len(pot.endpoints) == 1
+
+
+def test_summon_accepts_a_local_model_passed_as_a_live_annotation():
+    """A function-scoped model resolves when the annotation is the class itself.
+
+    Only a postponed or quoted annotation has to look the name up again, which is
+    what fails when the defining scope is gone.
+    """
+    source = (
+        "from pydantic import BaseModel\n"
+        "from summonpot import Pot\n"
+        "def build():\n"
+        "    class LocalRequest(BaseModel):\n"
+        "        query: str\n"
+        "    pot = Pot('svc')\n"
+        "    @pot.summon('/research')\n"
+        "    def research(request: LocalRequest) -> str:\n"
+        '        """Research a topic."""\n'
+        "        raise NotImplementedError\n"
+        "    return pot\n"
+    )
+    # dont_inherit: this module uses postponed annotations, and exec would
+    # otherwise pass that flag on -- the very condition being excluded here.
+    namespace: dict = {}
+    exec(compile(source, "<local-model>", "exec", dont_inherit=True), namespace)
+
+    pot = namespace["build"]()
+
+    assert pot.endpoints[0].input_model.__name__ == "LocalRequest"

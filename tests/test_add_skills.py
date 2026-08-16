@@ -90,3 +90,51 @@ def test_install_with_nothing_to_detect_explains_the_choices(tmp_path: Path):
     assert result.exit_code == 1
     assert "--agent" in result.output
     assert "claude" in result.output
+
+
+@pytest.mark.parametrize(
+    ("trailing", "expected_tail"),
+    [
+        ("AFTER", "AFTER"),  # marker followed directly by content
+        ("\nAFTER", "AFTER"),  # marker followed by LF
+        ("\r\nAFTER", "AFTER"),  # marker followed by CRLF
+        ("", ""),  # marker at end of file
+    ],
+)
+def test_reinstall_keeps_content_that_follows_the_block(
+    trailing, expected_tail, tmp_path: Path
+):
+    """Assuming a trailing newline eats the first character after the block."""
+    agents = tmp_path / "AGENTS.md"
+    agents.write_text(
+        "<!-- summonpot:managed:start -->\nold\n<!-- summonpot:managed:end -->"
+        + trailing
+    )
+
+    runner.invoke(app, ["add", "skills", "--agent", "codex", "--path", str(tmp_path)])
+    text = agents.read_text()
+
+    # Ending with the exact trailing text is what proves no character was eaten:
+    # the old code turned "AFTER" into "FTER".
+    assert text.count("summonpot:managed:start") == 1
+    assert text.endswith(expected_tail)
+
+
+def test_a_bare_github_directory_is_not_copilot_configuration(tmp_path: Path):
+    """.github exists for workflows and Dependabot in almost every repository."""
+    (tmp_path / ".github").mkdir()
+
+    assert detect_agents(tmp_path) == []
+
+    result = runner.invoke(app, ["add", "skills", "--path", str(tmp_path)])
+
+    assert result.exit_code == 1
+    assert not (tmp_path / ".github/copilot-instructions.md").exists()
+
+
+def test_an_existing_copilot_instructions_file_is_detected(tmp_path: Path):
+    instructions = tmp_path / ".github" / "copilot-instructions.md"
+    instructions.parent.mkdir(parents=True)
+    instructions.write_text("# House rules\n")
+
+    assert detect_agents(tmp_path) == [Agent.copilot]
