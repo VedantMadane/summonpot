@@ -9,7 +9,7 @@
 [![Python versions](https://img.shields.io/pypi/pyversions/summonpot)](https://pypi.org/project/summonpot/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**One API framework for deterministic and agentic endpoints.**
+**One API framework for typed endpoints with bounded agentic execution.**
 
 summonpot defines typed HTTP endpoints from four things: a Pydantic request model, a fixed goal, a closed set of exact capabilities, and a Pydantic response model. Today, every `@pot.summon` request runs through the provider-neutral agent runtime. Application-owned operations can be optional or mandatory, and the runtime enforces mandatory use before accepting locally validated output.
 
@@ -123,7 +123,7 @@ Summonpot's target execution compiler will choose the mode for each validated re
 | A bounded choice remains | Agentic |
 | No legal path exists | Typed deterministic error |
 
-The capabilities themselves remain deterministic in both modes. Agentic execution means the model chooses or orders only those declared operations; it does not gain arbitrary application access.
+The set of capabilities is fixed in both modes. A capability is exact application-owned code, so what it does is whatever you implemented — summonpot does not make a web search or a provider call behave deterministically. What the framework fixes is authority: agentic execution means the model chooses or orders only those declared operations, and never gains arbitrary application access.
 
 > **Current status:** declarative capabilities and required-use enforcement are shipped. Automatic deterministic endpoint execution is a planned milestone. Today, `@pot.summon` requests still run through the provider-neutral agent runtime.
 
