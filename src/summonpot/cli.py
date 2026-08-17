@@ -9,6 +9,7 @@ from pathlib import Path
 
 import typer
 
+from summonpot.commands.add_skills import add_skills
 from summonpot.pot import Pot
 
 
@@ -39,6 +40,11 @@ def main(
     ),
 ) -> None:
     """Define and serve typed endpoints with bounded agentic execution."""
+
+
+add_app = typer.Typer(help="Add summonpot support to a project.", no_args_is_help=True)
+app.add_typer(add_app, name="add")
+add_app.command("skills")(add_skills)
 
 
 @app.command("serve")

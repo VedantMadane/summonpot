@@ -1,0 +1,192 @@
+# summonpot
+
+summonpot is an API framework where an endpoint's **signature is its execution
+contract**. You declare the request model, the goal, the exact capabilities, and the
+response model. The framework owns the agent loop. **The decorated function body is
+never executed** — it exists only to carry the declaration.
+
+## The endpoint shape
+
+```python
+from pydantic import BaseModel, Field
+from summonpot import Depends, Pot, Required
+
+from my_service.operations import record_research, search_web
+
+
+class ResearchRequest(BaseModel):
+    query: str = Field(min_length=3)
+    depth: int = Field(default=3, ge=1, le=5)
+
+
+class ResearchResponse(BaseModel):
+    summary: str
+    sources: list[str]
+
+
+pot = Pot("my-service")
+
+
+@pot.summon("/research")
+def research_topic(
+    request: ResearchRequest,
+    sources=Depends(search_web),
+    receipt=Required(record_research),
+) -> ResearchResponse:
+    """Research this topic thoroughly and return a sourced report."""
+    raise NotImplementedError
+```
+
+Four parts, all load-bearing:
+
+| Part | Becomes |
+|---|---|
+| Pydantic request model | the JSON body, its validation, and the OpenAPI input schema |
+| docstring | the endpoint's goal — the agent's instructions |
+| `Depends` / `Required` | the complete set of operations the agent may call |
+| return model | the structured-output schema, validated locally before responding |
+
+`Depends(op)` — the agent *may* call it. `Required(op)` — a final response is rejected
+until it has completed successfully. Required use is checked from runtime state, not
+asked for in the prompt.
+
+## Do not write these
+
+These are the mistakes to avoid, because they contradict the framework's model:
+
+- **Do not implement the function body.** Use `raise NotImplementedError`. Business
+  logic lives in the capabilities passed to `Depends`/`Required`.
+- **Do not build an agent, chain, graph, or planner.** There is no agent object to
+  configure. You declare an endpoint; the runtime owns whatever execution it needs.
+- **Do not add an `action` field** to the request model. The endpoint's goal is fixed
+  by its docstring; request JSON carries business data only.
+- **Do not expose raw database sessions, engines, connections, cursors, or arbitrary
+  SQL** as capabilities. Pass exact, prepared operations.
+
+## Rules enforced at registration
+
+summonpot raises when the pot is imported, not at request time. Each of these is a
+hard error:
+
+- **Every endpoint needs a docstring.** It is the goal, so it cannot be empty.
+- **Paths start with `/`.**
+- **One endpoint per `(path, method)`.** `GET /orders` and `POST /orders` may coexist;
+  two `GET /orders` may not.
+- **Annotations must resolve at runtime.** Under `from __future__ import annotations`,
+  or with a quoted annotation, the name is looked up when the endpoint registers — so a
+  `TYPE_CHECKING`-only import, or a model defined in a function scope that is no longer
+  reachable, is rejected rather than silently degraded to an untyped body. A live class
+  object passed directly as the annotation resolves fine. Declaring models at module
+  scope and importing them normally avoids the question entirely.
+- **Exactly one Pydantic request parameter.** Put every incoming field inside it.
+  Capability parameters are declaration-only and never become HTTP fields.
+- **Capabilities must be callable and bound.** A plain function, a `functools.partial`,
+  a bound method, or an object with `__call__`. An unbound method is rejected, because
+  nothing can supply its receiver.
+- **Capability names must be unique** within an endpoint.
+- **`stream=True` is not implemented** and raises.
+
+## HTTP methods
+
+`method=` defaults to `POST`. `GET`, `DELETE` and `HEAD` carry no body, so their
+parameters become **query-string parameters** and a Pydantic request model is rejected:
+
+```python
+from typing import Literal
+
+
+@pot.summon("/tickets", method="GET")
+def list_tickets(
+    status: Literal["open", "closed"] = "open",
+    ids: list[int] | None = None,
+) -> TicketPage:
+    """List tickets matching the given status."""
+    raise NotImplementedError
+```
+
+Query parameters must be scalars or sequences of scalars. A mapping such as
+`dict[str, int]` has no query encoding and is rejected — use `POST` for that.
+
+## Running it
+
+```python
+pot.serve()  # 0.0.0.0:8000
+pot.serve(host="127.0.0.1", port=9000)
+```
+
+```bash
+summonpot serve app.py                   # the pot must be named `pot`
+```
+
+To run with no provider account at all — useful for checking routing, validation and
+capability wiring before any key exists:
+
+```bash
+export SUMMONPOT_MODEL=test
+```
+
+Otherwise choose a provider-qualified model and set that provider's key:
+
+```bash
+export SUMMONPOT_MODEL=anthropic:claude-sonnet-4-5
+export ANTHROPIC_API_KEY=...
+```
+
+## Bounding a call
+
+An endpoint served against a configured provider spends the operator's credit on every
+request, so cap it:
+
+```python
+from summonpot import Pot, UsageLimits
+from summonpot.runtime import Runtime
+
+pot = Pot(
+    "my-service",
+    runtime=Runtime(
+        usage_limits=UsageLimits(request_limit=8, total_tokens_limit=40_000),
+        timeout=30.0,
+    ),
+)
+```
+
+`Pot(model=...)` sets the default model instead; the two are mutually exclusive,
+because a supplied runtime already carries its own.
+
+The timeout releases the caller on the deadline, but it **cannot interrupt a
+synchronous capability already running in a worker thread** — a write started before
+the deadline still completes. Give such a capability its own internal deadline.
+
+## Failure responses
+
+| Status | Meaning |
+|---|---|
+| `422` | request failed validation against the declared models |
+| `429` | the endpoint exceeded its configured usage limit |
+| `502` | the model failed to satisfy the contract, or the provider failed |
+| `504` | the endpoint exceeded its timeout |
+| `500` | provider misconfiguration, or an error inside a capability |
+
+Response bodies never carry model output or provider text; details go to the server log.
+
+## Writing capabilities
+
+A capability is an ordinary function. It runs for real — summonpot never replaces its
+implementation.
+
+```python
+def search_web(query: str) -> list[str]:
+    """Search approved sources for the query."""
+    return client.search(query)
+```
+
+The docstring becomes the operation's description for the model, and the annotations
+become its schema, so both are worth writing carefully.
+
+Two things to know:
+
+- **Synchronous capabilities run in a worker thread.** Do not capture a thread-affine
+  resource such as a default SQLite connection; open one per call.
+- **The agent currently chooses the arguments.** The closed set governs *which*
+  operations may run, not what they receive, so validate inputs and enforce
+  authorization inside each capability as you would for any untrusted caller.
