@@ -24,6 +24,10 @@ The current release line provides:
 - A closed endpoint capability set: undeclared operations are unavailable.
 - Declarative dependency parameters that never become HTTP fields.
 - Bounded retries when model output is invalid or required use is missing.
+- Configurable request, token, cost, and timeout limits for each endpoint call.
+- Redacted HTTP mappings for usage limits, timeouts, provider failures, and unsatisfied model contracts.
+- GET, POST, PUT, PATCH, DELETE, and HEAD routing with validated body or query contracts.
+- A keyless test model for exercising routing and capability wiring without provider credentials.
 - Python 3.11–3.13 CI, package builds, and expanded runtime/CLI coverage.
 
 ## Next milestones
@@ -102,14 +106,14 @@ The public declaration remains `@pot.summon` in every mode. Endpoint authors wil
 - The same order endpoint can use the direct agent runtime when several declared substitutions are valid and a semantic choice remains.
 - No executor may add capabilities, weaken validation, or change the response contract.
 
-### 4. Receipts and stable failures
+### 4. Receipts and broader stable failures
 
-Make authoritative success claims depend on deterministic evidence:
+Extend the current redacted HTTP handling so authoritative success claims and operation failures depend on deterministic evidence:
 
 - Typed write receipts.
 - Successful-write requirements before accepting success responses.
 - Idempotency and transaction policies.
-- Stable HTTP mapping for validation, authorization, missing records, conflicts, provider failures, database failures, and exhausted model retries.
+- Typed mappings for authorization, missing records, conflicts, database failures, and exhausted recovery paths, building on the shipped 429/502/504 mappings for usage limits, provider failures, and timeouts.
 - Declared recovery paths that cannot expand endpoint authority.
 
 ### 5. Optional execution harnesses

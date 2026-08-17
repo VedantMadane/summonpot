@@ -22,7 +22,7 @@ def build_app(pot: Pot) -> Any:
 
     app = FastAPI(
         title=pot.name,
-        description="An AI-native API framework. Every endpoint is an agent that runs automatically.",
+        description="Signature-first API framework for typed endpoints and bounded agentic execution.",
         version=__version__,
     )
 

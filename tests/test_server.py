@@ -43,6 +43,15 @@ def test_build_app_creates_route(mock_runtime):
     assert response.json() == "Hello, world!"
 
 
+def test_openapi_describes_the_endpoint_framework_not_an_agent_framework(mock_runtime):
+    schema = TestClient(build_app(mock_runtime())).get("/openapi.json").json()
+
+    assert schema["info"]["description"] == (
+        "Signature-first API framework for typed endpoints and bounded agentic execution."
+    )
+    assert "every endpoint is an agent" not in schema["info"]["description"].lower()
+
+
 def test_build_app_uses_pydantic_request_and_response_models(mock_runtime):
     pot = mock_runtime(
         mock_response={"sentiment": "positive", "topics": ["agents", "apis"]}
