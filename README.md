@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  A signature-first Python API framework for typed endpoints with bounded agentic execution.
+  A contract-first Python framework for turning typed endpoint declarations into executable APIs.
 </p>
 
 <p align="center">
@@ -94,7 +94,7 @@ not accepted until every `Required(...)` operation has completed successfully.
 
 ## What ships today
 
-- **Signature-first endpoints** with a required goal and typed request/response contracts.
+- **Contract-first endpoints** with a required goal and typed request/response contracts.
 - **Closed capability sets** made from exact application-owned callables.
 - **Optional and mandatory operations** through `Depends(...)` and `Required(...)`.
 - **Runtime-enforced required use**, tracked per request rather than trusted to a prompt.
