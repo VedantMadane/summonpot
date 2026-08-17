@@ -1,377 +1,135 @@
 # summonpot
 
 <p align="center">
-  <img src="summonpot.png" alt="SummonPot" width="600">
+  <img src="summonpot.png" alt="Summonpot" width="600">
 </p>
 
-[![CI](https://github.com/tugrulguner/summonpot/actions/workflows/ci.yml/badge.svg)](https://github.com/tugrulguner/summonpot/actions/workflows/ci.yml)
-[![PyPI version](https://img.shields.io/pypi/v/summonpot)](https://pypi.org/project/summonpot/)
-[![Python versions](https://img.shields.io/pypi/pyversions/summonpot)](https://pypi.org/project/summonpot/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+<p align="center">
+  <strong>Declare the contract. Bound the authority. Serve the endpoint.</strong>
+</p>
 
-**One API framework for typed endpoints with bounded agentic execution.**
+<p align="center">
+  A signature-first Python API framework for typed endpoints with bounded agentic execution.
+</p>
 
-summonpot defines typed HTTP endpoints from four things: a Pydantic request model, a fixed goal, a closed set of exact capabilities, and a Pydantic response model. Today, every `@pot.summon` request runs through the provider-neutral agent runtime. Application-owned operations can be optional or mandatory, and the runtime enforces mandatory use before accepting locally validated output.
+<p align="center">
+  <a href="https://github.com/tugrulguner/summonpot/actions/workflows/ci.yml"><img src="https://github.com/tugrulguner/summonpot/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://pypi.org/project/summonpot/"><img src="https://img.shields.io/pypi/v/summonpot" alt="PyPI version"></a>
+  <a href="https://pypi.org/project/summonpot/"><img src="https://img.shields.io/pypi/pyversions/summonpot" alt="Python versions"></a>
+  <a href="https://github.com/tugrulguner/summonpot/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License"></a>
+  <a href="https://github.com/tugrulguner/summonpot"><img src="https://img.shields.io/github/stars/tugrulguner/summonpot?style=social" alt="GitHub stars"></a>
+</p>
 
-The target architecture keeps this public contract unchanged while adding a deterministic executor. When all operation arguments and result bindings resolve to one complete legal path, the framework will skip the model. When a real bounded choice remains, the agent runtime will choose and order only declared operations. Callers will never send an `action` or select the executor.
+<p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#why-summonpot">Why summonpot</a> ·
+  <a href="#exact-capabilities-not-ambient-authority">Capabilities</a> ·
+  <a href="#how-it-works-today">How it works</a> ·
+  <a href="#examples">Examples</a> ·
+  <a href="#contributing">Contributing</a>
+</p>
 
-**The function signature is the endpoint.** Its request model, docstring goal, declared capabilities, and response type form the complete executable contract. You do not write orchestration or business logic under the endpoint:
+Summonpot turns four declarations into a live HTTP endpoint:
 
 ```text
-request model
+Pydantic request model
 + fixed goal in the docstring
-+ Depends(...) / Required(...) capabilities
-+ response model
++ exact Depends(...) / Required(...) capabilities
++ Pydantic response model
 = executable endpoint
 
 function body
 = raise NotImplementedError
 ```
 
-Summonpot inspects the declaration and never calls the decorated function body. Deterministic business logic lives inside the exact application-owned capabilities, not inside a hidden handler.
+The signature is the execution contract. There is no handler body to implement, agent
+graph to configure, or caller-provided `action` to interpret. Summonpot owns routing,
+validation, the bounded model loop, capability enforcement, structured output, and
+OpenAPI generation.
 
-> **Current status:** Pydantic contracts, provider-neutral agent execution, closed capabilities, runtime-enforced required operations, HTTP methods, runtime limits, and redacted public errors are shipped. Typed capability bindings, automatic deterministic endpoint execution, and SQLAlchemy/SQLite capability adapters remain planned.
+> [!IMPORTANT]
+> Every current production `@pot.summon` request runs through the configured model.
+> Automatic no-model execution for contracts with one fully resolved operation path is
+> on the [roadmap](ROADMAP.md), not shipped behavior.
 
-You define an endpoint; you do not configure an agent graph or write orchestration under the decorator. The current runtime owns validation, capability orchestration, structured output, and the bounded model loop. The planned compiler will add no-model execution without changing the endpoint declaration.
+## Why summonpot?
 
-| Target endpoint outcome | Execution path |
-|---|---|
-| Traditional exact API behavior with one legal path | Deterministic, without an LLM *(planned compiler)* |
-| Several valid declared paths require a bounded choice | Agentic, using only declared capabilities |
-| No declared legal path | Typed deterministic error *(planned compiler)* |
+A conventional API asks you to write a handler. An agent-first stack asks you to
+configure an agent and then wrap it in HTTP. Summonpot starts from the endpoint contract
+instead:
 
 ```python
-from my_service.operations import record_research, search_web
-from pydantic import BaseModel, Field
-from summonpot import Depends, Pot, Required
-
-
-class ResearchRequest(BaseModel):
-    query: str = Field(min_length=3)
-    depth: int = Field(default=3, ge=1, le=5)
-
-
-class ResearchResponse(BaseModel):
-    summary: str
-    key_findings: list[str]
-    sources: list[str]
-
-
-pot = Pot("my-service")
-
-
 @pot.summon("/research")
-def research_topic(
+def research(
     request: ResearchRequest,
     sources=Depends(search_web),
-    receipt=Required(record_research),
+    receipt=Required(save_report),
 ) -> ResearchResponse:
-    """Research this topic thoroughly and return a sourced report."""
+    """Research the topic and return a sourced report."""
     raise NotImplementedError
-
-
-pot.serve()
 ```
 
-Call it like any API:
+That declaration answers the questions an API framework needs to answer:
 
-```bash
-curl -X POST http://localhost:8000/research \
-  -H "Content-Type: application/json" \
-  -d '{"query": "quantum computing", "depth": 5}'
-```
+| Question | Declared by |
+|---|---|
+| What may the caller send? | `ResearchRequest` |
+| What must the endpoint achieve? | The docstring |
+| What application authority may execution use? | `Depends(...)` and `Required(...)` |
+| What may the endpoint return? | `ResearchResponse` |
+| Where is orchestration code? | Owned by summonpot |
 
-The imported functions are real, application-owned operations: `search_web` must query the approved source service, and `record_research` must perform the actual write. Summonpot does not replace their implementations with generated behavior. It exposes only those exact operations to the endpoint agent, rejects a final response until `record_research` has completed, validates the Pydantic output locally, and never executes the decorated function body.
-
-## Why another framework?
-
-Many approaches to building agentic APIs ask developers to learn an agent framework first—chains, planners, memory, callbacks—and then add an HTTP server around it. That makes the application responsible for both agent orchestration and API behavior.
-
-summonpot starts from the endpoint instead. The web framework owns routing, validation, the bounded model loop, capability enforcement, and serving. Developers declare the HTTP contract and exact application authority; they do not configure a separate agent framework.
+The request carries business data only. The endpoint goal is fixed in code. The model
+can call only the application operations attached to that endpoint, and a response is
+not accepted until every `Required(...)` operation has completed successfully.
 
 | | Agent-first stacks | summonpot |
 |---|---|---|
-| Mental model | "Configure an agent" | "Define an endpoint" |
-| Surface area | Chains, agents, tools, memory, callbacks | Route, types, goal, capabilities |
-| API exposure | HTTP layer added around the agent | Routing and execution share one contract |
-| Orchestration | Application manages the loop | Framework owns the bounded loop |
-| Testing | Agent internals plus HTTP wrapper | Normal HTTP contract and capability tests |
-| Onboarding | Learn the stack's agent ontology | Start from HTTP and Python signatures |
-
-## Project status
-
-The current foundation includes Pydantic request and response contracts, provider-neutral model selection, declarative optional and mandatory capabilities, runtime-enforced required use, HTTP/OpenAPI generation, and local output validation.
-
-Next milestones focus on typed capability inputs, outputs, and argument sources; strict SQLAlchemy and SQLite statement capabilities; deterministic-versus-agentic execution selection; proof-backed write receipts; broader typed operation failures; and optional larger execution harnesses. See the [roadmap](ROADMAP.md) for scope and ordering.
-
-## Target deterministic and current agentic execution
-
-The target architecture does not introduce a second decorator or a caller-provided `action` for deterministic execution. Both executors use the same four-part declaration:
-
-```text
-request model
-+ fixed endpoint goal
-+ exact capabilities
-+ response model
-```
-
-Summonpot's target execution compiler will choose the mode for each validated request:
-
-| Resolved contract | Execution |
-|---|---|
-| One complete legal operation path | Deterministic |
-| A bounded choice remains | Agentic |
-| No legal path exists | Typed deterministic error |
-
-The set of capabilities is fixed in both modes. A capability is exact application-owned code, so what it does is whatever you implemented — summonpot does not make a web search or a provider call behave deterministically. What the framework fixes is authority: agentic execution means the model chooses or orders only those declared operations, and never gains arbitrary application access.
-
-> **Current status:** declarative capabilities and required-use enforcement are shipped. Automatic deterministic endpoint execution is a planned milestone. Today, `@pot.summon` requests still run through the provider-neutral agent runtime.
-
-### Target deterministic example (currently model-backed)
-
-This endpoint has one fixed result path: load the account, calculate the exact balance, and return it. Once every input and output binding is declared, the planned compiler can execute it without an LLM.
-
-```python
-from accounts.operations import calculate_balance, load_account
-from pydantic import BaseModel
-from summonpot import Pot, Required
-
-
-class BalanceRequest(BaseModel):
-    account_id: str
-
-
-class BalanceResponse(BaseModel):
-    account_id: str
-    balance: str
-    currency: str
-
-
-pot = Pot("accounts")
-
-
-@pot.summon("/balance")
-def get_balance(
-    request: BalanceRequest,
-    account=Required(load_account),
-    balance=Required(calculate_balance),
-) -> BalanceResponse:
-    """Return the exact current balance for this account."""
-    raise NotImplementedError
-```
-
-```json
-{
-  "account_id": "acc_123"
-}
-```
-
-There is no action to interpret and no valid alternative to choose. Hard rules and money calculations remain inside the declared operations.
-
-### Agentic example
-
-This endpoint has a fixed goal, but inventory results may leave several legal fulfilment paths. The agent may compare only the declared options and must complete the real order operation before returning success.
-
-```python
-from orders.operations import check_inventory, create_order, find_substitutes
-from pydantic import BaseModel
-from summonpot import Depends, Pot, Required
-
-
-class OrderItem(BaseModel):
-    sku: str
-    quantity: int
-
-
-class OrderRequest(BaseModel):
-    customer_id: str
-    items: list[OrderItem]
-
-
-class OrderResponse(BaseModel):
-    order_id: str
-    selected_items: list[OrderItem]
-    status: str
-
-
-pot = Pot("orders")
-
-
-@pot.summon("/orders")
-def fulfil_order(
-    request: OrderRequest,
-    inventory=Depends(check_inventory),
-    substitutes=Depends(find_substitutes),
-    creation=Required(create_order),
-) -> OrderResponse:
-    """Fulfil the order using the best valid available option."""
-    raise NotImplementedError
-```
-
-```json
-{
-  "customer_id": "123",
-  "items": [{"sku": "A", "quantity": 1}]
-}
-```
-
-The endpoint declaration supplies the fixed goal: fulfil the order using the best valid option. The request supplies business data only. If inventory leaves one complete path, the planned compiler can run it deterministically. If several valid substitutions remain, the agent chooses among those bounded results. It cannot call undeclared operations or grant itself a stronger runtime.
-
-## Restricted database operations
-
-Database access follows the same capability rule: pass exact prepared operations, never database authority.
-
-> **Target API — planned, not shipped yet:** the SQLAlchemy and SQLite adapters below show the intended security boundary. Final names may change during implementation.
-
-### SQLAlchemy ORM statement
-
-The developer prepares one exact `Select` using an ORM model. The framework binds `customer_id` from validated request data, opens the session internally, executes the statement, and validates the projected result. The agent sees `load_customer(customer_id) -> CustomerView`; it never receives the statement, ORM registry, session, or engine.
-
-```python
-from orders.database import Customer, orders_session
-from pydantic import BaseModel
-from sqlalchemy import bindparam, select
-from summonpot import FromRequest, Pot, Required, SQLAlchemyOperation
-
-
-class CustomerRequest(BaseModel):
-    customer_id: str
-
-
-class CustomerView(BaseModel):
-    customer_id: str
-    tier: str
-    active: bool
-
-
-customer_statement = (
-    select(
-        Customer.id.label("customer_id"),
-        Customer.tier,
-        Customer.active,
-    )
-    .where(Customer.id == bindparam("customer_id"))
-)
-
-load_customer = SQLAlchemyOperation(
-    name="load_customer",
-    statement=customer_statement,
-    session_factory=orders_session,
-    bind={"customer_id": FromRequest("customer_id")},
-    output=CustomerView,
-)
-
-pot = Pot("customers")
-
-
-@pot.summon("/customers/resolve")
-def resolve_customer(
-    request: CustomerRequest,
-    customer=Required(load_customer),
-) -> CustomerView:
-    """Return the exact approved customer projection."""
-    raise NotImplementedError
-```
-
-Only the predefined `SELECT` can run. The model cannot change the table, columns, predicate, join, or SQL text.
-
-### SQLite operation
-
-The SQLite adapter receives one fixed parameterized statement. The framework owns the connection and parameter binding; the agent cannot access a connection, cursor, or generic SQL executor.
-
-```python
-from orders.database import orders_database
-from pydantic import BaseModel
-from summonpot import FromRequest, Pot, Required, SQLiteOperation
-
-
-class CancelRequest(BaseModel):
-    order_id: str
-
-
-class CancelReceipt(BaseModel):
-    order_id: str
-    rows_affected: int
-    status: str
-
-
-cancel_order = SQLiteOperation(
-    name="cancel_order",
-    database=orders_database,
-    sql="""
-        UPDATE orders
-        SET status = 'cancelled'
-        WHERE id = :order_id AND status = 'pending'
-    """,
-    bind={"order_id": FromRequest("order_id")},
-    output=CancelReceipt,
-    exactly_one_row=True,
-)
-
-pot = Pot("orders")
-
-
-@pot.summon("/orders/cancel")
-def cancel(
-    request: CancelRequest,
-    receipt=Required(cancel_order),
-) -> CancelReceipt:
-    """Cancel this order only when the declared operation permits it."""
-    raise NotImplementedError
-```
-
-The endpoint can execute only that parameterized `UPDATE`. It cannot issue another query, interpolate SQL, inspect unrelated tables, or claim success without the validated receipt.
-
-The planned adapters will enforce these boundaries outside the model:
-
-- only developer-declared `Select`, `Insert`, `Update`, or `Delete` objects and fixed SQLite statements;
-- explicit argument sources such as validated request fields or prior operation results;
-- typed input, projection, and receipt validation;
-- framework-owned sessions, connections, transactions, and serialization;
-- affected-row, call-count, ordering, and once-only constraints;
-- no raw `Session`, `Engine`, `Connection`, cursor, model registry, arbitrary SQL, shell, or filesystem access.
-
-## Installation
+| Mental model | Configure an agent | Define an endpoint |
+| Public surface | Agents, chains, graphs, memory, callbacks | Route, types, goal, capabilities |
+| HTTP | Added around the agent | Generated from the same contract |
+| Application authority | Often assembled separately from the route | Closed by the route declaration |
+| Final output | Provider or framework convention | Locally validated response model |
+| Orchestration | Application-managed | Framework-managed bounded loop |
+
+## What ships today
+
+- **Signature-first endpoints** with a required goal and typed request/response contracts.
+- **Closed capability sets** made from exact application-owned callables.
+- **Optional and mandatory operations** through `Depends(...)` and `Required(...)`.
+- **Runtime-enforced required use**, tracked per request rather than trusted to a prompt.
+- **Provider-neutral model selection** for OpenAI, Anthropic, Google, Groq, Mistral,
+  OpenRouter, and xAI.
+- **Generated HTTP and OpenAPI contracts** for body and query endpoints.
+- **GET, POST, PUT, PATCH, DELETE, and HEAD routes**, keyed by `(path, method)`.
+- **Local response validation**, bounded retries, usage limits, timeouts, and redacted
+  public failures.
+- **A keyless test model** for exercising routes and schemas before adding provider
+  credentials.
+- **Coding-agent skills** for Claude Code, Cursor, Windsurf, GitHub Copilot, Cline, and
+  OpenAI Codex.
+
+## Quick start
+
+### 1. Install
 
 ```bash
-pip install summonpot            # core
-pip install summonpot[serve]     # + HTTP server (FastAPI/uvicorn)
-pip install summonpot[cli]       # + Typer CLI
-pip install summonpot[all]       # everything
+pip install "summonpot[serve,cli]"
 ```
 
-Install the provider you want to use:
+Start without a provider account by selecting the built-in test model:
 
 ```bash
-pip install "summonpot[openai]"       # OpenAI
-pip install "summonpot[anthropic]"    # Anthropic
-pip install "summonpot[google]"       # Google Gemini
-pip install "summonpot[groq]"         # Groq
-pip install "summonpot[mistral]"      # Mistral
-pip install "summonpot[openrouter]"   # OpenRouter
-pip install "summonpot[xai]"          # xAI
-pip install "summonpot[all]"          # serving, CLI, and every provider
+export SUMMONPOT_MODEL=test
 ```
 
-Choose a model with an explicit `provider:model` identifier and set that provider's standard API-key environment variable:
+The test model is keyless, not side-effect-free. An endpoint with capabilities may call
+them using generated placeholder arguments. Use harmless capabilities when testing
+wiring; do not attach destructive operations or treat the model as a dry-run sandbox.
 
-```bash
-export SUMMONPOT_MODEL=anthropic:claude-sonnet-4-5
-export ANTHROPIC_API_KEY='<your key>'
-```
+### 2. Declare an endpoint
 
-OpenRouter keeps the upstream provider and model in the portion after the first colon:
-
-```bash
-export SUMMONPOT_MODEL=openrouter:anthropic/claude-sonnet-4
-export OPENROUTER_API_KEY='<your key>'
-```
-
-The endpoint API does not change between providers. Unprefixed legacy model names such as `gpt-4o-mini` continue to resolve as `openai:gpt-4o-mini`.
-
-## Quick Start
-
-Create a file `app.py`:
+Create `app.py`:
 
 ```python
 from typing import Literal
@@ -380,125 +138,187 @@ from pydantic import BaseModel, Field
 from summonpot import Pot
 
 
-class AnalyzeRequest(BaseModel):
-    text: str = Field(min_length=1)
-    max_topics: int = Field(default=5, ge=1, le=20)
+class ReviewRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=2_000)
 
 
-class AnalyzeResponse(BaseModel):
+class ReviewResponse(BaseModel):
     sentiment: Literal["positive", "negative", "neutral"]
-    topics: list[str]
-    explanation: str
+    summary: str
 
 
-pot = Pot("my-service")
+pot = Pot("review-api")
 
 
-@pot.summon("/analyze")
-def analyze(request: AnalyzeRequest) -> AnalyzeResponse:
-    """Analyze the text and return its sentiment, topics, and explanation."""
+@pot.summon("/review")
+def review(request: ReviewRequest) -> ReviewResponse:
+    """Classify the text's sentiment and summarize it in one short sentence."""
     raise NotImplementedError
 ```
 
-Serve it:
+The function body is intentionally empty. Summonpot never calls it.
+
+### 3. Serve it
 
 ```bash
-summonpot serve app.py                  # serves on 0.0.0.0:8000
-summonpot serve app.py --port 9000
+summonpot serve app.py --host 127.0.0.1 --port 8000
 ```
 
-Or from Python:
+Open the generated API documentation at
+[`http://127.0.0.1:8000/docs`](http://127.0.0.1:8000/docs), or call the endpoint directly:
 
-```python
-pot.serve()                             # 0.0.0.0:8000
-pot.serve(host="127.0.0.1", port=9000)
+```bash
+curl -X POST http://127.0.0.1:8000/review \
+  -H 'Content-Type: application/json' \
+  -d '{"text":"The endpoint contract is surprisingly small."}'
 ```
 
-> **Binding and exposure:** `0.0.0.0` accepts connections on every interface. That is
-> the right default for a container, but it is wider than uvicorn's own `127.0.0.1`.
-> summonpot has no authentication layer yet, and every endpoint spends provider credit
-> on each call, so do not expose a pot directly to untrusted callers. Put
-> authentication in front of it and bound the runtime:
+The test model returns schema-valid placeholder data. To receive a real model-generated
+answer, install a provider extra and select a provider-qualified model:
 
-```python
-from summonpot import Pot, UsageLimits
-from summonpot.runtime import Runtime
-
-pot = Pot("my-service", runtime=Runtime(usage_limits=UsageLimits(request_limit=8), timeout=30.0))
+```bash
+pip install "summonpot[serve,cli,anthropic]"
+export SUMMONPOT_MODEL=anthropic:claude-sonnet-4-5
+export ANTHROPIC_API_KEY='<your key>'
 ```
 
-## Examples
+The endpoint code and HTTP contract do not change when the provider changes.
 
-See [`examples/`](examples/) for executable applications arranged by complexity: a minimal typed endpoint, required exact calculations, bounded agentic order fulfillment, GET and POST routing, runtime limits, and a multi-file support service with a required persisted ticket.
+## Exact capabilities, not ambient authority
 
-## The Summoning Model
-
-| Concept | As summoning |
-|---|---|
-| Route definition | "At this path, I summon..." |
-| Docstring | The incantation (system prompt) |
-| Capabilities | Exact operations placed in the circle |
-| Request model | What the summoner brings |
-| Return type | What appears |
-
-## Declarative dependencies
-
-An endpoint signature can combine one Pydantic request model, exact deterministic dependencies, and one Pydantic response model:
+A capability is ordinary application code. It runs for real; summonpot never replaces
+its implementation.
 
 ```python
-from my_service.operations import check_capacity, load_constraints
-from pydantic import BaseModel, Field
-from summonpot import Depends, Required
+def calculate_quote(
+    unit_price_cents: int,
+    quantity: int,
+    tax_rate_percent: str,
+) -> dict[str, int]:
+    """Calculate an exact quote using the service's approved pricing rules."""
+    return pricing_service.calculate(
+        unit_price_cents=unit_price_cents,
+        quantity=quantity,
+        tax_rate_percent=tax_rate_percent,
+    )
+```
+
+Attach it to one endpoint:
+
+```python
+from summonpot import Required
 
 
-class PlanRequest(BaseModel):
-    goal: str
-    constraints: list[str] = Field(default_factory=list)
-
-
-class PlanResponse(BaseModel):
-    steps: list[str]
-    risks: list[str]
-
-
-@pot.summon("/plan")
-def plan(
-    request: PlanRequest,
-    stored_constraints=Depends(load_constraints),
-    capacity=Required(check_capacity),
-) -> PlanResponse:
-    """Create an actionable plan that respects every constraint."""
+@pot.summon("/quotes")
+def create_quote(
+    request: QuoteRequest,
+    calculation=Required(calculate_quote),
+) -> QuoteResponse:
+    """Calculate and return the exact approved quote."""
     raise NotImplementedError
 ```
 
-The signature is the complete execution contract. The decorated function is declarative—the runtime does not execute its body.
+| Declaration | Runtime contract |
+|---|---|
+| `Depends(operation)` | The operation is available to the endpoint and may be called. |
+| `Required(operation)` | Final output is rejected until the operation succeeds. |
 
-- The request model alone defines and validates incoming JSON.
-- The response model defines OpenAPI output and validates the final result.
-- `Depends(operation)` gives the agent an exact deterministic operation it may call.
-- `Required(operation)` rejects final output until the exact operation has run successfully.
-- Dependencies never become HTTP request fields.
-- The agent receives no undeclared application operations.
-- Provider output is retried within a bounded budget when it violates the response contract or skips a required operation.
+`Required(...)` proves that the operation returned successfully at least once during
+that request. It does not prove correct arguments, exactly-once execution, ordering,
+idempotency, or that every final claim matches the operation result.
 
-A Pydantic endpoint has exactly one request parameter plus any declarative dependencies. Put all incoming fields inside the request model so there is one clear JSON body.
+Capabilities do not become request-body fields or OpenAPI parameters. Their docstrings
+and annotations define the tool schema visible to the model, while their implementations
+define the real application behavior.
 
-## How it works
+The capability set is closed, but capability inputs are currently model-selected. Treat
+them like input from an untrusted caller: validate arguments and enforce authorization
+inside each operation. Pass exact operations, never raw database sessions, engines,
+connections, cursors, arbitrary SQL, shell access, or ambient filesystem authority.
 
-summonpot inspects your endpoint function:
+See the complete executable
+[`Required(...)` quote example](examples/02_required_capability.py).
 
-- **Docstring** → becomes the fixed endpoint goal
-- **Pydantic request model** → becomes the validated JSON request body and OpenAPI input schema
-- **Pydantic response model** → becomes the provider's structured-output schema, runtime validator, and OpenAPI response schema
-- **Dependencies** → become the endpoint's closed set of optional or mandatory deterministic capabilities
+## How it works today
 
-The framework owns the agent loop, capability orchestration, required-operation enforcement, and structured-output validation. The endpoint body contains no handler code.
+```text
+HTTP request
+    |
+    v
+Pydantic request validation + OpenAPI contract
+    |
+    v
+Runtime.call(...)
+    |
+    v
+Configured provider-neutral model
+    |
+    +---- may call only declared capabilities
+    |          |
+    |          +---- successful Required(...) calls recorded per request
+    |
+    v
+Required-operation gate
+    |
+    v
+Local Pydantic response validation
+    |
+    v
+HTTP response
+```
 
-See [Declarative capability endpoints](docs/declarative-capabilities.md) for the execution and security contract.
+The endpoint docstring becomes the fixed goal. Request data becomes the user message.
+Capabilities become the complete set of callable operations. The response model becomes
+both the structured-output schema and the final local validator.
+
+Pydantic AI is an internal runtime dependency. Applications use `Pot`, `@pot.summon`,
+Pydantic models, and declarative capabilities; they do not construct provider clients or
+Pydantic AI agents.
+
+### The contract stays stable as execution evolves
+
+The roadmap adds a no-model executor without adding a second endpoint API:
+
+| Contract state | Target execution |
+|---|---|
+| One complete operation path with every binding resolved | Execute directly without a model |
+| A bounded semantic choice remains | Use the agent runtime with declared capabilities |
+| No legal path exists | Return a typed deterministic error |
+
+This compiler, typed capability bindings, SQLAlchemy/SQLite operation adapters, write
+receipts, streaming, and built-in authentication are **planned, not shipped**. See
+[ROADMAP.md](ROADMAP.md) for the design boundaries and implementation order.
+
+## HTTP methods and OpenAPI
+
+`POST` is the default. Body endpoints take one Pydantic request model. Bodyless methods
+such as `GET`, `DELETE`, and `HEAD` declare scalar or scalar-sequence query parameters:
+
+```python
+from typing import Literal
+
+from pydantic import BaseModel
+
+
+class TicketPage(BaseModel):
+    tickets: list[str]
+
+
+@pot.summon("/tickets", method="GET")
+def list_tickets(
+    status: Literal["open", "closed"] = "open",
+    ids: list[int] | None = None,
+) -> TicketPage:
+    """List tickets matching the requested filters."""
+    raise NotImplementedError
+```
+
+`GET /tickets` and `POST /tickets` may coexist. Registering the same normalized
+`(path, method)` twice fails at import time, as do missing docstrings, unresolved type
+annotations, invalid capability callables, duplicate capability names, unsupported query
+types, and `stream=True`.
 
 ## Provider and model configuration
-
-Summonpot uses provider-qualified model identifiers. Provider SDKs, authentication, tool calling, structured-output negotiation, and model-specific behavior are handled internally by the provider-agnostic runtime.
 
 | Provider | Install extra | Model example | API-key variable |
 |---|---|---|---|
@@ -510,119 +330,166 @@ Summonpot uses provider-qualified model identifiers. Provider SDKs, authenticati
 | OpenRouter | `summonpot[openrouter]` | `openrouter:anthropic/claude-sonnet-4` | `OPENROUTER_API_KEY` |
 | xAI | `summonpot[xai]` | `xai:grok-4` | `XAI_API_KEY` |
 
-To try summonpot without a provider account, use the built-in keyless model:
-
-```bash
-export SUMMONPOT_MODEL=test
-```
-
-It answers every endpoint with schema-valid placeholder data, so routing,
-validation, and capability wiring can all be exercised before any key exists.
-
-`SUMMONPOT_MODEL` sets the default for every endpoint:
-
-```bash
-export SUMMONPOT_MODEL=openrouter:anthropic/claude-sonnet-4
-```
-
-An endpoint can override it without changing its request, response, or capabilities:
+Set one default for the pot through `SUMMONPOT_MODEL` or in Python:
 
 ```python
-@pot.summon(
-    "/research",
-    model="anthropic:claude-sonnet-4-5",
-)
-def research_topic(
-    request: ResearchRequest,
-    sources=Depends(search_web),
-    receipt=Required(record_research),
-) -> ResearchResponse:
-    """Research this topic."""
+pot = Pot("research-api", model="openrouter:anthropic/claude-sonnet-4")
+```
+
+Override it for one endpoint without changing that endpoint's HTTP contract:
+
+```python
+@pot.summon("/research", model="anthropic:claude-sonnet-4-5")
+def research(request: ResearchRequest) -> ResearchResponse:
+    """Research the topic and return a sourced report."""
     raise NotImplementedError
 ```
 
+OpenRouter keeps the upstream provider and model after the first colon. Legacy
+unprefixed model names resolve through OpenAI for backward compatibility.
+
 ## Bounding a call
 
-Every production `@pot.summon` request currently runs through the configured model, so the runtime accepts a cap on what one request may spend and how long it may take:
+**Binding and exposure:** A reachable endpoint can spend the operator's provider credit,
+so set explicit usage limits and a timeout:
 
 ```python
 from summonpot import Pot, UsageLimits
 from summonpot.runtime import Runtime
 
+
 pot = Pot(
     "my-service",
     runtime=Runtime(
-        usage_limits=UsageLimits(request_limit=8, total_tokens_limit=40_000),
+        usage_limits=UsageLimits(
+            request_limit=8,
+            total_tokens_limit=40_000,
+        ),
         timeout=30.0,
     ),
 )
 ```
 
-Every endpoint on that pot is bounded by those limits. Exceeding a usage limit raises
-`UsageLimitExceeded`; exceeding the timeout raises `TimeoutError`. Both default to
-`None`, which leaves the provider engine's own limits in place — set them explicitly
-for anything reachable from outside your network.
+| HTTP status | Public meaning |
+|---|---|
+| `422` | Request validation failed. |
+| `429` | The configured usage limit or provider rate limit was exceeded. |
+| `502` | The provider failed or the model did not satisfy the endpoint contract. |
+| `504` | The endpoint exceeded its timeout. |
+| `500` | Provider configuration or application capability failed. |
 
-The timeout bounds how long summonpot *waits*. It cannot terminate a synchronous
-capability already running in a worker thread, so a write started before the deadline
-still completes after the caller sees `TimeoutError`. Give any capability that must
-not outlive its request an internal deadline of its own.
+Provider text, model output, and capability details stay in operator logs rather than
+public error bodies.
 
-Pydantic AI is an internal runtime dependency. Summonpot users do not construct Pydantic AI agents or provider clients; the stable public contract remains `Pot`, `@pot.summon`, declarative capabilities, and Pydantic endpoint models.
+The timeout bounds how long summonpot waits. It cannot terminate a synchronous capability
+already running in a worker thread, so give irreversible or long-running operations an
+internal deadline and idempotency policy of their own. Open thread-affine resources such
+as default SQLite connections inside the capability call rather than capturing them
+outside it.
 
-## Agent skills
+Summonpot currently has no authentication layer. Bind local development to `127.0.0.1`.
+Before exposing a service, put authentication in front of it and configure runtime limits.
 
-summonpot's endpoint contract is unusual enough that a coding agent will get it wrong
-unless it is told: the signature *is* the contract, and the function body is never
-executed. Install the skill so your agent knows the rules before it writes an endpoint:
+## Examples
+
+The [`examples/`](examples/) directory grows from one endpoint to a multi-file service:
+
+| Level | Example | What it demonstrates |
+|---|---|---|
+| 1 | [`basic_app.py`](examples/basic_app.py) | Minimal typed request and response |
+| 2 | [`02_required_capability.py`](examples/02_required_capability.py) | Required exact calculation |
+| 3 | [`03_agentic_order.py`](examples/03_agentic_order.py) | Bounded choice plus a required write |
+| 4 | [`04_http_methods.py`](examples/04_http_methods.py) | GET/POST routing and query parameters |
+| 5 | [`05_bounded_runtime.py`](examples/05_bounded_runtime.py) | Limits, timeout, and model override |
+| 6 | [`06_support_service/`](examples/06_support_service/) | Multi-file operations and persisted ticket |
+
+The [examples guide](examples/README.md) includes a real HTTP call for every level and
+explains what runs today and what remains planned.
+
+## Give your coding agent the contract
+
+Summonpot's function body is declarative, which is easy for a coding agent to mistake for
+a normal handler. Install the bundled skill so the agent knows the endpoint shape,
+registration rules, capability boundary, HTTP behavior, and runtime caveats:
 
 ```bash
 summonpot add skills
 ```
 
-With no arguments it installs for every agent already configured in the project.
-Choose one explicitly with `--agent`:
+With no arguments, summonpot detects agent configuration already present in the project.
+Choose one explicitly when needed:
 
 ```bash
-summonpot add skills --agent claude      # .claude/skills/summonpot/SKILL.md
-summonpot add skills --agent cursor      # .cursor/rules/summonpot.mdc
-summonpot add skills --agent windsurf    # .windsurf/rules/summonpot.md
-summonpot add skills --agent copilot     # .github/copilot-instructions.md
-summonpot add skills --agent cline       # .clinerules/summonpot.md
-summonpot add skills --agent codex       # AGENTS.md
+summonpot add skills --agent claude
+summonpot add skills --agent cursor
+summonpot add skills --agent windsurf
+summonpot add skills --agent copilot
+summonpot add skills --agent cline
+summonpot add skills --agent codex
 ```
 
-```bash
-summonpot add skills --path ./myproject/
-```
+Use `--path ./myproject` to target another project directory. Shared files such as
+`AGENTS.md` and `.github/copilot-instructions.md` are updated inside a managed block so
+surrounding project instructions remain intact.
 
-Files the project also owns — `AGENTS.md` and `.github/copilot-instructions.md` — are
-edited in place inside a managed block, so your own instructions are preserved and a
-reinstall replaces the block rather than appending another copy.
+## Contributing
 
-The skill covers the endpoint contract, what not to write, every rule enforced at
-registration, HTTP methods and query parameters, bounding a call, and what each failure
-status means.
+Summonpot is early enough that a focused contribution can still shape the framework, not
+just polish its edges.
 
-## Development
+Useful places to contribute include:
 
-Requires [uv](https://docs.astral.sh/uv/).
+- executable examples for real application workflows;
+- provider and HTTP acceptance coverage;
+- clearer errors, safer defaults, and API ergonomics;
+- typed capability contracts and result validation;
+- exact database-operation adapters;
+- the deterministic execution compiler described in the roadmap;
+- documentation, diagrams, and reproducible bug reports.
+
+For substantial behavior or architecture changes, open an
+[issue](https://github.com/tugrulguner/summonpot/issues/new/choose) first so the public
+contract and security boundary stay coherent.
+
+Development uses [uv](https://docs.astral.sh/uv/):
 
 ```bash
 git clone https://github.com/tugrulguner/summonpot.git
 cd summonpot
 uv sync --all-extras
+make check
 ```
 
-```bash
-make check    # lint + typecheck + test
-make lint     # ruff check + format check
-make test     # pytest
-make format   # auto-format
+Every user-facing change needs a numbered Towncrier fragment. Read
+[CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
+
+## Roadmap
+
+The long-term goal is one stable endpoint declaration with the least-powerful sufficient
+executor behind it:
+
+```text
+one fully resolved operation path  -> no-model deterministic executor
+bounded semantic choice remains    -> model-backed agentic executor
+no legal path                      -> typed deterministic error
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for pull-request and single-source release instructions.
+The ordering, security constraints, non-goals, and shipped foundation live in
+[ROADMAP.md](ROADMAP.md).
+
+## Help summonpot grow
+
+If the endpoint-first model is useful to you:
+
+- [Star the repository](https://github.com/tugrulguner/summonpot) so more Python
+  developers can find it.
+- Build one small endpoint and
+  [report the friction](https://github.com/tugrulguner/summonpot/issues/new/choose).
+- Share a real use case, add an executable example, or contribute to a roadmap milestone.
+
+Early feedback is especially valuable because the public contract is small and the next
+execution layers are being designed around it now.
 
 ## License
 
-MIT
+[MIT](LICENSE)
