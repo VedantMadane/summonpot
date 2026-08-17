@@ -22,7 +22,7 @@ def _version_callback(value: bool) -> None:
 
 app = typer.Typer(
     name="summonpot",
-    help="An AI-native API framework. Every endpoint is an agent that runs automatically.",
+    help="Signature-first API framework for typed endpoints and bounded agentic execution.",
     no_args_is_help=True,
 )
 
@@ -38,7 +38,7 @@ def main(
         help="Show version and exit.",
     ),
 ) -> None:
-    """An API framework where every endpoint is an agent."""
+    """Define and serve typed endpoints with bounded agentic execution."""
 
 
 @app.command("serve")
