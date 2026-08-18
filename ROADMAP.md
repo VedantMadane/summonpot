@@ -28,6 +28,7 @@ The current release line provides:
 - Redacted HTTP mappings for usage limits, timeouts, provider failures, and unsatisfied model contracts.
 - GET, POST, PUT, PATCH, DELETE, and HEAD routing with validated body or query contracts.
 - A keyless test model for exercising routing and capability wiring without provider credentials.
+- Installable coding-agent skills describing the endpoint contract, for Claude Code, Cursor, Windsurf, GitHub Copilot, Cline, and OpenAI Codex.
 - Python 3.11–3.13 CI, package builds, and expanded runtime/CLI coverage.
 
 ## Next milestones
