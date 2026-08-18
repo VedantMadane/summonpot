@@ -10,6 +10,19 @@ release assembles them here — run `make changelog-draft` to preview them.
 
 <!-- towncrier release notes start -->
 
+## [0.4.0] - 2026-08-17
+
+### Added
+
+- Add `summonpot add skills`, which installs a summonpot skill into Claude Code, Cursor, Windsurf, Copilot, Cline, or Codex so a coding agent knows the endpoint contract. ([#45](https://github.com/tugrulguner/summonpot/pull/45))
+
+### Changed
+
+- Aligned README, CLI, OpenAPI, roadmap, and package metadata with the shipped provider-neutral agent runtime while clearly labeling deterministic endpoint execution as planned. ([#44](https://github.com/tugrulguner/summonpot/pull/44))
+- Redesigned the README around the executable endpoint contract with a faster quick start, clearer shipped-versus-planned boundaries, an execution diagram, example progression, and contributor and project-support entry points. ([#46](https://github.com/tugrulguner/summonpot/pull/46))
+- Clarified the public positioning from signature-first to contract-first: typed endpoint declarations become executable APIs. ([#47](https://github.com/tugrulguner/summonpot/pull/47))
+
+
 ## [0.3.0] - 2026-08-15
 
 ### Upgrading from 0.2.0
