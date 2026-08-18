@@ -13,6 +13,10 @@ updates:
       include: "scope"
     labels:
       - "dependencies"
+      # Dependabot cannot write a towncrier fragment, and the changelog check is
+      # required. A dependency change worth announcing reads better as one
+      # deliberate line at release time than as a fragment per bump.
+      - "skip-changelog"
 
   - package-ecosystem: "uv"
     directory: "/"
@@ -24,6 +28,10 @@ updates:
       include: "scope"
     labels:
       - "dependencies"
+      # Dependabot cannot write a towncrier fragment, and the changelog check is
+      # required. A dependency change worth announcing reads better as one
+      # deliberate line at release time than as a fragment per bump.
+      - "skip-changelog"
     groups:
       dev-dependencies:
         patterns:
