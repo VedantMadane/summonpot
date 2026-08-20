@@ -77,6 +77,8 @@ summonpot = "summonpot.cli:app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/summonpot"]
+# Contributor guidance, not runtime data: it must not ship to users.
+exclude = ["**/AGENTS.md"]
 
 [tool.towncrier]
 directory = "changelog.d"
