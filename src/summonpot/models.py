@@ -9,6 +9,8 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from summonpot.contracts import CallBounds, Operation
+
 
 @dataclass
 class ParamDef:
@@ -34,10 +36,12 @@ class ToolDef:
     parameters: list[ParamDef] = field(default_factory=list)
     fn: Any = None  # the callable
     required: bool = False
-    # The typed contract, when the endpoint declared one. Carried here so the graph
-    # builder and the runtime can read it; nothing consumes it yet.
-    contract: Any = None
-    bounds: Any = None
+    # The typed contract, when the endpoint declared one, and the call bounds the
+    # declaration resolved to. Carried here so the graph builder and the runtime can
+    # read them; nothing consumes them yet. Typed rather than Any: this is the new
+    # contract boundary, and it is the wrong place to drop type checking.
+    contract: Operation | None = None
+    bounds: CallBounds | None = None
 
     async def call(self, *args: Any, **kwargs: Any) -> Any:
         """Execute the tool with the given arguments.

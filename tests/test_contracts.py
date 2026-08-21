@@ -14,6 +14,8 @@ from summonpot import (
     AgentChoice,
     AtLeast,
     AtMost,
+    Between,
+    CallBounds,
     Depends,
     Exactly,
     FromContext,
@@ -23,7 +25,6 @@ from summonpot import (
     Pot,
     Required,
 )
-from summonpot.contracts import CallBounds
 
 
 class Customer(BaseModel):
@@ -207,3 +208,62 @@ def test_a_maximum_does_not_relax_required_below_once():
 
 def test_a_maximum_leaves_depends_optional():
     assert Depends(lookup_customer, calls=AtMost(3)).bounds == CallBounds(0, 3)
+
+
+# --- the bindings are the security boundary ----------------------------------
+
+
+def test_registered_bindings_cannot_be_changed_through_the_contract():
+    """`frozen=True` stops reassignment; it does not stop mutating the mapping.
+
+    The endpoint stores this exact object, so a writable mapping would let the
+    security boundary be moved after registration and after validation.
+    """
+    contract = Operation(
+        lookup_customer,
+        bind={"customer_id": FromRequest("customer_id")},
+        output=Customer,
+    )
+
+    with pytest.raises(TypeError):
+        contract.bind["customer_id"] = AgentChoice()  # type: ignore[index]
+
+
+def test_registered_bindings_cannot_be_changed_through_the_callers_mapping():
+    """The contract snapshots the mapping rather than storing it by reference."""
+    declared = {"customer_id": FromRequest("customer_id")}
+    contract = Operation(lookup_customer, bind=declared, output=Customer)
+    pot = Pot("svc")
+
+    @pot.summon("/orders")
+    def create_order(
+        request: OrderRequest, customer=Required(contract)
+    ) -> OrderResponse:
+        """Place an order for this customer."""
+        raise NotImplementedError
+
+    declared["customer_id"] = FromRequest("attacker_controlled")
+
+    registered = pot.endpoints[0].tools[0].contract
+    assert registered is not None
+    assert registered.bind == {"customer_id": FromRequest("customer_id")}
+
+
+def test_with_bind_returns_an_immutable_snapshot_too():
+    contract = Operation(
+        lookup_customer, bind={"customer_id": FromRequest("customer_id")}
+    )
+    derived = contract.with_bind(customer_id=FromRequest("account_id"))
+
+    with pytest.raises(TypeError):
+        derived.bind["customer_id"] = AgentChoice()  # type: ignore[index]
+    assert contract.bind == {"customer_id": FromRequest("customer_id")}
+
+
+# --- the public surface is complete ------------------------------------------
+
+
+def test_call_bounds_is_importable_from_the_package_root():
+    """The helpers cannot express every interval, so the type itself is public."""
+    assert CallBounds(minimum=2, maximum=3).describe() == "between 2 and 3"
+    assert Between(2, 3) == CallBounds(minimum=2, maximum=3)

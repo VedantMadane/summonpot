@@ -10,8 +10,9 @@ capability graph, and the runtime that fills bound arguments arrive in later cha
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
+from types import MappingProxyType
 from typing import Any
 
 # ---------------------------------------------------------------------------
@@ -55,9 +56,14 @@ class FromContext(ArgumentSource):
 class AgentChoice(ArgumentSource):
     """Let the model choose the value.
 
-    The only source that is not determined by the declaration, and therefore the only
-    reason an endpoint needs a model at all. An argument bound to any other source is
-    filled by the runtime and never offered to the model.
+    The only *argument source* a declaration does not determine: an argument bound to
+    any other source is filled by the runtime and never offered to the model.
+
+    This is a claim about one argument, not about an endpoint. An endpoint whose every
+    argument is bound may still need a model — for an unresolved ordering, a choice
+    between operations, or a response it cannot compose. Whether an endpoint can run
+    without a model is decided by the whole capability graph together with the
+    response binding, not by the absence of this source.
     """
 
     from_result: Operation | None = None
@@ -109,6 +115,11 @@ def AtMost(count: int) -> CallBounds:
     return CallBounds(maximum=count)
 
 
+def Between(minimum: int, maximum: int) -> CallBounds:
+    """Run this operation between ``minimum`` and ``maximum`` times."""
+    return CallBounds(minimum=minimum, maximum=maximum)
+
+
 # ---------------------------------------------------------------------------
 # Operation
 # ---------------------------------------------------------------------------
@@ -137,9 +148,18 @@ class Operation:
     """
 
     operation: Callable[..., Any]
-    bind: dict[str, ArgumentSource] | None = None
+    bind: Mapping[str, ArgumentSource] | None = None
     output: Any = None
     after: tuple[Operation, ...] = ()
+
+    def __post_init__(self) -> None:
+        # The bindings are the security boundary: they decide which arguments the
+        # model may choose. `frozen=True` only stops the attribute being reassigned,
+        # so without a snapshot the mapping stays writable through this attribute and
+        # through whatever dict the caller passed in - after registration, and after
+        # any validation the declaration has already passed.
+        if self.bind is not None:
+            object.__setattr__(self, "bind", MappingProxyType(dict(self.bind)))
 
     def with_bind(self, **bindings: ArgumentSource) -> Operation:
         """Return a copy of this operation with some bindings replaced.
@@ -157,6 +177,7 @@ __all__ = [
     "ArgumentSource",
     "AtLeast",
     "AtMost",
+    "Between",
     "CallBounds",
     "Exactly",
     "FromContext",
