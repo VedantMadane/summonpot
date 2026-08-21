@@ -708,3 +708,37 @@ def test_agent_choice_may_offer_a_scalar_result():
         raise NotImplementedError
 
     assert len(pot.endpoints[0].tools) == 2
+
+
+def test_the_unstructured_output_error_recommends_something_accepted():
+    """An error that names a rejected declaration sends the reader in a circle."""
+    producer = Operation(
+        scalar_lookup, bind={"customer_id": FromRequest("customer_id")}, output=str
+    )
+    pot = Pot("svc")
+
+    with pytest.raises(TypeError) as error:
+
+        @pot.summon("/orders")
+        def create_order(
+            request: OrderRequest,
+            tier=Required(producer),
+            order=Required(
+                Operation(
+                    place_order,
+                    bind={
+                        "customer_id": FromRequest("customer_id"),
+                        "tier": FromResult(producer, "anything"),
+                        "sku": FromRequest("sku"),
+                    },
+                    output=OrderResponse,
+                )
+            ),
+        ) -> OrderResponse:
+            """Place an order."""
+            raise NotImplementedError
+
+    message = str(error.value)
+    assert "Pydantic model" in message
+    # A dataclass output is refused, so recommending one would be a dead end.
+    assert "dataclass" not in message

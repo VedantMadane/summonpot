@@ -271,8 +271,7 @@ def _validate_result_field(
         raise TypeError(
             f"Endpoint {endpoint!r} binds {argument!r} of operation {operation!r} to "
             f"field {source.field!r} of a result typed {name}, whose fields cannot be "
-            "checked. Declare output= as a Pydantic model or a dataclass to read a "
-            "field from it."
+            "checked. Declare output= as a Pydantic model to read a field from it."
         )
     if source.field not in fields:
         raise TypeError(
