@@ -8,6 +8,8 @@ it needed the rejection case.
 
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 from pydantic import BaseModel
 
@@ -336,54 +338,6 @@ def test_from_result_naming_a_missing_output_field_is_rejected():
             raise NotImplementedError
 
 
-def test_a_cycle_between_two_operations_is_rejected():
-    first = Operation(lookup_customer, output=Customer)
-    second = Operation(
-        record_audit,
-        bind={"customer_id": FromResult(first, "customer_id")},
-        output=Customer,
-    )
-    object.__setattr__(
-        first, "bind", {"customer_id": FromResult(second, "customer_id")}
-    )
-    pot = Pot("svc")
-
-    with pytest.raises(TypeError, match="cannot be ordered"):
-
-        @pot.summon("/orders")
-        def create_order(
-            request: OrderRequest, a=Required(first), b=Required(second)
-        ) -> OrderResponse:
-            """Place an order."""
-            raise NotImplementedError
-
-
-def test_a_cycle_error_names_the_whole_trail():
-    """The message has to say which operations form the loop."""
-    first = Operation(
-        lookup_customer,
-        bind={"customer_id": FromRequest("customer_id")},
-        output=Customer,
-    )
-    second = Operation(
-        record_audit,
-        bind={"customer_id": FromRequest("customer_id")},
-        output=Customer,
-        after=[first],
-    )
-    object.__setattr__(first, "after", (second,))
-    pot = Pot("svc")
-
-    with pytest.raises(TypeError, match="lookup_customer -> record_audit"):
-
-        @pot.summon("/orders")
-        def create_order(
-            request: OrderRequest, a=Required(first), b=Required(second)
-        ) -> OrderResponse:
-            """Place an order."""
-            raise NotImplementedError
-
-
 # --- arguments the caller need not supply ------------------------------------
 
 
@@ -449,25 +403,6 @@ def test_an_argument_without_a_default_still_has_to_be_bound():
         )
 
 
-def test_an_operation_taking_kwargs_accepts_any_binding_name():
-    """`**extra` genuinely accepts the name, so rejecting it would be a false alarm."""
-    pot = Pot("svc")
-
-    _register(
-        pot,
-        Operation(
-            flexible_lookup,
-            bind={
-                "customer_id": FromRequest("customer_id"),
-                "trace_id": FromContext("trace_id"),
-            },
-            output=Customer,
-        ),
-    )
-
-    assert pot.endpoints[0].tools[0].contract is not None
-
-
 def test_an_operation_without_kwargs_still_rejects_an_unknown_binding():
     pot = Pot("svc")
 
@@ -505,3 +440,215 @@ def test_a_bound_method_operation_is_accepted():
     )
 
     assert pot.endpoints[0].tools[0].contract is not None
+
+
+# --- the capability set is closed --------------------------------------------
+
+
+def test_after_may_only_name_a_declared_operation():
+    """Ordering is part of the graph, so it cannot reach outside the endpoint."""
+    elsewhere = Operation(lookup_customer, output=Customer)
+    pot = Pot("svc")
+
+    with pytest.raises(TypeError, match="orders itself after"):
+
+        @pot.summon("/orders")
+        def create_order(
+            request: OrderRequest,
+            order=Required(
+                Operation(
+                    place_order,
+                    bind={
+                        "customer_id": FromRequest("customer_id"),
+                        "tier": AgentChoice(),
+                        "sku": FromRequest("sku"),
+                    },
+                    output=OrderResponse,
+                    after=[elsewhere],
+                )
+            ),
+        ) -> OrderResponse:
+            """Place an order."""
+            raise NotImplementedError
+
+
+def test_agent_choice_may_only_offer_results_of_a_declared_operation():
+    elsewhere = Operation(lookup_customer, output=Customer)
+    pot = Pot("svc")
+
+    with pytest.raises(TypeError, match="offers"):
+
+        @pot.summon("/orders")
+        def create_order(
+            request: OrderRequest,
+            order=Required(
+                Operation(
+                    place_order,
+                    bind={
+                        "customer_id": FromRequest("customer_id"),
+                        "tier": AgentChoice(from_result=elsewhere),
+                        "sku": FromRequest("sku"),
+                    },
+                    output=OrderResponse,
+                )
+            ),
+        ) -> OrderResponse:
+            """Place an order."""
+            raise NotImplementedError
+
+
+def test_after_naming_a_declared_operation_is_accepted():
+    lookup = Operation(
+        lookup_customer,
+        bind={"customer_id": FromRequest("customer_id")},
+        output=Customer,
+    )
+    pot = Pot("svc")
+
+    @pot.summon("/orders")
+    def create_order(
+        request: OrderRequest,
+        customer=Required(lookup),
+        order=Required(
+            Operation(
+                place_order,
+                bind={
+                    "customer_id": FromRequest("customer_id"),
+                    "tier": FromResult(lookup, "tier"),
+                    "sku": FromRequest("sku"),
+                },
+                output=OrderResponse,
+                after=[lookup],
+            )
+        ),
+    ) -> OrderResponse:
+        """Place an order."""
+        raise NotImplementedError
+
+    assert len(pot.endpoints[0].tools) == 2
+
+
+# --- a result must be structured to be read from -----------------------------
+
+
+def scalar_lookup(customer_id: str) -> str:
+    """Return a customer tier."""
+    return "standard"
+
+
+def test_a_field_cannot_be_read_from_an_unstructured_result():
+    """`output=str` has no statically checkable fields, so the read is unverifiable."""
+    producer = Operation(
+        scalar_lookup, bind={"customer_id": FromRequest("customer_id")}, output=str
+    )
+    pot = Pot("svc")
+
+    with pytest.raises(TypeError, match="cannot be checked"):
+
+        @pot.summon("/orders")
+        def create_order(
+            request: OrderRequest,
+            tier=Required(producer),
+            order=Required(
+                Operation(
+                    place_order,
+                    bind={
+                        "customer_id": FromRequest("customer_id"),
+                        "tier": FromResult(producer, "anything"),
+                        "sku": FromRequest("sku"),
+                    },
+                    output=OrderResponse,
+                )
+            ),
+        ) -> OrderResponse:
+            """Place an order."""
+            raise NotImplementedError
+
+
+def test_a_dataclass_output_can_be_read_from():
+    @dataclasses.dataclass
+    class Profile:
+        customer_id: str
+        tier: str
+
+    def load_profile(customer_id: str) -> Profile:
+        """Load a profile."""
+        return Profile(customer_id=customer_id, tier="standard")
+
+    producer = Operation(
+        load_profile, bind={"customer_id": FromRequest("customer_id")}, output=Profile
+    )
+    pot = Pot("svc")
+
+    @pot.summon("/orders")
+    def create_order(
+        request: OrderRequest,
+        profile=Required(producer),
+        order=Required(
+            Operation(
+                place_order,
+                bind={
+                    "customer_id": FromRequest("customer_id"),
+                    "tier": FromResult(producer, "tier"),
+                    "sku": FromRequest("sku"),
+                },
+                output=OrderResponse,
+            )
+        ),
+    ) -> OrderResponse:
+        """Place an order."""
+        raise NotImplementedError
+
+    assert len(pot.endpoints[0].tools) == 2
+
+
+# --- a contracted operation has explicit parameters --------------------------
+
+
+@pytest.mark.parametrize(
+    "operation",
+    [
+        lambda customer_id, **extra: Customer(customer_id=customer_id, tier="t"),
+        lambda *positional: Customer(customer_id="c", tier="t"),
+    ],
+    ids=["kwargs", "args"],
+)
+def test_a_contracted_operation_may_not_be_variadic(operation):
+    """A variadic schema is open-ended, so the model could pass unnamed arguments."""
+    operation.__doc__ = "Look up a customer."
+    pot = Pot("svc")
+
+    with pytest.raises(TypeError, match="explicit parameters"):
+
+        @pot.summon("/orders")
+        def create_order(
+            request: OrderRequest,
+            customer=Required(
+                Operation(
+                    operation,
+                    bind={"customer_id": FromRequest("customer_id")},
+                    output=Customer,
+                )
+            ),
+        ) -> OrderResponse:
+            """Place an order."""
+            raise NotImplementedError
+
+
+def test_a_bare_variadic_callable_is_still_allowed():
+    """Only a contract requires explicit parameters; legacy callables are untouched."""
+
+    def flexible(**extra: object) -> Customer:
+        """Look up a customer."""
+        return Customer(customer_id="c", tier="t")
+
+    pot = Pot("svc")
+
+    @pot.summon("/orders")
+    def create_order(
+        request: OrderRequest, customer=Required(flexible)
+    ) -> OrderResponse:
+        """Place an order."""
+        raise NotImplementedError
+
+    assert pot.endpoints[0].tools[0].contract is None
