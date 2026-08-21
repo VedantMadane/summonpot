@@ -24,18 +24,30 @@ def _bindable_request_fields(
     return {parameter.name for parameter in parameters}
 
 
-def _operation_parameters(operation: Any) -> list[str]:
-    """Return the argument names of a capability, excluding a bound receiver."""
+def _operation_signature(operation: Any) -> tuple[list[str], set[str], bool]:
+    """Describe a capability's arguments.
+
+    Returns the explicit argument names, those of them that have a default, and
+    whether the operation also accepts arbitrary keyword arguments.
+    """
     try:
         signature = inspect.signature(operation)
     except (TypeError, ValueError):  # pragma: no cover - exotic callables
-        return []
-    return [
-        name
-        for name, parameter in signature.parameters.items()
-        if parameter.kind
-        not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
-    ]
+        return [], set(), False
+
+    names: list[str] = []
+    defaulted: set[str] = set()
+    accepts_extra = False
+    for name, parameter in signature.parameters.items():
+        if parameter.kind is inspect.Parameter.VAR_KEYWORD:
+            accepts_extra = True
+            continue
+        if parameter.kind is inspect.Parameter.VAR_POSITIONAL:
+            continue
+        names.append(name)
+        if parameter.default is not inspect.Parameter.empty:
+            defaulted.add(name)
+    return names, defaulted, accepts_extra
 
 
 def _output_fields(output: Any) -> set[str] | None:
@@ -88,28 +100,35 @@ def _validate_bindings(
     has_request_model: bool,
 ) -> None:
     """Check one operation's bindings against the endpoint that declares it."""
-    assert contract.bind is not None
-    argument_names = _operation_parameters(contract.operation)
+    if contract.bind is None:  # pragma: no cover - guarded by the caller
+        return
+    argument_names, defaulted, accepts_extra = _operation_signature(contract.operation)
 
     # A binding for an argument the operation does not take is a typo that would
-    # otherwise surface as a TypeError mid-request.
-    for name in contract.bind:
-        if name not in argument_names:
-            raise TypeError(
-                f"Endpoint {endpoint!r} binds {name!r} for operation {operation!r}, "
-                f"which takes no such argument. It takes: "
-                f"{', '.join(argument_names) or 'no arguments'}."
-            )
+    # otherwise surface as a TypeError mid-request. An operation taking **kwargs
+    # genuinely accepts the name, so only reject when it cannot.
+    if not accepts_extra:
+        for name in contract.bind:
+            if name not in argument_names:
+                raise TypeError(
+                    f"Endpoint {endpoint!r} binds {name!r} for operation "
+                    f"{operation!r}, which takes no such argument. It takes: "
+                    f"{', '.join(argument_names) or 'no arguments'}."
+                )
 
-    # Declaring `bind` opts into the contract, so it has to be complete. An argument
-    # the model may choose is written as AgentChoice() rather than left out, so a
-    # model-controlled argument is never the result of an omission.
+    # Declaring `bind` opts into the contract, so it has to cover every argument the
+    # caller must supply. An argument the model may choose is written AgentChoice()
+    # rather than left out, so a model-controlled argument is never the result of an
+    # omission. An argument with a default is already determined - it takes that
+    # default, and is not offered to the model - so leaving it out is a choice
+    # rather than a gap.
     for name in argument_names:
-        if name not in contract.bind:
+        if name not in contract.bind and name not in defaulted:
             raise TypeError(
                 f"Endpoint {endpoint!r} leaves argument {name!r} of operation "
-                f"{operation!r} unbound. Every argument of an operation that declares "
-                "bind must have a source; use AgentChoice() to let the model choose it."
+                f"{operation!r} unbound, and it has no default. Every argument of an "
+                "operation that declares bind must have a source; use AgentChoice() "
+                "to let the model choose it."
             )
 
     for name, source in contract.bind.items():

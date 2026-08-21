@@ -382,3 +382,126 @@ def test_a_cycle_error_names_the_whole_trail():
         ) -> OrderResponse:
             """Place an order."""
             raise NotImplementedError
+
+
+# --- arguments the caller need not supply ------------------------------------
+
+
+def search_customers(query: str, limit: int = 10) -> Customer:
+    """Search customers."""
+    return Customer(customer_id=query, tier="standard")
+
+
+def flexible_lookup(customer_id: str, **extra: object) -> Customer:
+    """Look up a customer, accepting extra keywords."""
+    return Customer(customer_id=customer_id, tier="standard")
+
+
+def _register(pot: Pot, contract: Operation) -> None:
+    @pot.summon("/orders")
+    def create_order(request: OrderRequest, op=Required(contract)) -> OrderResponse:
+        """Place an order."""
+        raise NotImplementedError
+
+
+def test_an_argument_with_a_default_may_be_left_unbound():
+    """It is already determined: it takes the default and is not offered to the model."""
+    pot = Pot("svc")
+
+    _register(
+        pot,
+        Operation(
+            search_customers,
+            bind={"query": FromRequest("customer_id")},
+            output=Customer,
+        ),
+    )
+
+    assert pot.endpoints[0].tools[0].contract is not None
+
+
+def test_an_argument_with_a_default_may_still_be_bound_explicitly():
+    pot = Pot("svc")
+
+    _register(
+        pot,
+        Operation(
+            search_customers,
+            bind={"query": FromRequest("customer_id"), "limit": AgentChoice()},
+            output=Customer,
+        ),
+    )
+
+    assert pot.endpoints[0].tools[0].contract is not None
+
+
+def test_an_argument_without_a_default_still_has_to_be_bound():
+    pot = Pot("svc")
+
+    with pytest.raises(TypeError, match="no default"):
+        _register(
+            pot,
+            Operation(
+                place_order,
+                bind={"customer_id": FromRequest("customer_id")},
+                output=OrderResponse,
+            ),
+        )
+
+
+def test_an_operation_taking_kwargs_accepts_any_binding_name():
+    """`**extra` genuinely accepts the name, so rejecting it would be a false alarm."""
+    pot = Pot("svc")
+
+    _register(
+        pot,
+        Operation(
+            flexible_lookup,
+            bind={
+                "customer_id": FromRequest("customer_id"),
+                "trace_id": FromContext("trace_id"),
+            },
+            output=Customer,
+        ),
+    )
+
+    assert pot.endpoints[0].tools[0].contract is not None
+
+
+def test_an_operation_without_kwargs_still_rejects_an_unknown_binding():
+    pot = Pot("svc")
+
+    with pytest.raises(TypeError, match="takes no such argument"):
+        _register(
+            pot,
+            Operation(
+                search_customers,
+                bind={"query": FromRequest("customer_id"), "nope": AgentChoice()},
+                output=Customer,
+            ),
+        )
+
+
+def test_a_bound_method_operation_is_accepted():
+    """The receiver is already supplied, so it is not an unbound argument."""
+
+    class Directory:
+        def __init__(self, tier: str) -> None:
+            self.tier = tier
+
+        def lookup(self, customer_id: str) -> Customer:
+            """Look up a customer."""
+            return Customer(customer_id=customer_id, tier=self.tier)
+
+    pot = Pot("svc")
+
+    _register(
+        pot,
+        Operation(
+            Directory("gold").lookup,
+            bind={"customer_id": FromRequest("customer_id")},
+            output=Customer,
+        ),
+    )
+
+    assert pot.endpoints[0].tools[0].contract is not None
