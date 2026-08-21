@@ -19,8 +19,8 @@ sufficient executor, skipping the model entirely when one legal path remains.
 
 Two invariants govern almost every design argument:
 
-1. **The signature is the whole contract.** Anything that pushes configuration into the
-   endpoint signature is moving in the wrong direction.
+1. **The endpoint declaration is the whole contract.** Anything that pushes configuration
+   outside the endpoint declaration is moving in the wrong direction.
 2. **No executor may add capabilities, weaken validation, or change the response
    contract.**
 
