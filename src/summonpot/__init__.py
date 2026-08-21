@@ -4,6 +4,16 @@ from importlib.metadata import PackageNotFoundError, version
 
 from pydantic_ai.usage import UsageLimits
 
+from summonpot.contracts import (
+    AgentChoice,
+    AtLeast,
+    AtMost,
+    Exactly,
+    FromContext,
+    FromRequest,
+    FromResult,
+    Operation,
+)
 from summonpot.dependencies import Depends, Required
 from summonpot.pot import Pot
 
@@ -12,4 +22,17 @@ try:
 except PackageNotFoundError:
     __version__ = "0.0.0+unknown"
 
-__all__ = ["Depends", "Pot", "Required", "UsageLimits"]
+__all__ = [
+    "AgentChoice",
+    "AtLeast",
+    "AtMost",
+    "Depends",
+    "Exactly",
+    "FromContext",
+    "FromRequest",
+    "FromResult",
+    "Operation",
+    "Pot",
+    "Required",
+    "UsageLimits",
+]

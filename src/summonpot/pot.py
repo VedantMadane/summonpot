@@ -165,8 +165,12 @@ class Pot:
                 if pname in ("self", "cls"):
                     continue
                 if isinstance(param.default, Dependency):
-                    dependency_tool = build_tool_from_func(param.default.operation)
+                    # `.callable` unwraps an Operation contract; a bare callable
+                    # passes through unchanged, so existing endpoints are untouched.
+                    dependency_tool = build_tool_from_func(param.default.callable)
                     dependency_tool.required = param.default.required
+                    dependency_tool.contract = param.default.contract
+                    dependency_tool.bounds = param.default.bounds
                     dependency_tools.append(dependency_tool)
                     continue
                 annotation = hints.get(pname, param.annotation)

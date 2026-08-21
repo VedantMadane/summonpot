@@ -34,6 +34,10 @@ class ToolDef:
     parameters: list[ParamDef] = field(default_factory=list)
     fn: Any = None  # the callable
     required: bool = False
+    # The typed contract, when the endpoint declared one. Carried here so the graph
+    # builder and the runtime can read it; nothing consumes it yet.
+    contract: Any = None
+    bounds: Any = None
 
     async def call(self, *args: Any, **kwargs: Any) -> Any:
         """Execute the tool with the given arguments.
