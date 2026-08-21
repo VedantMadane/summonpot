@@ -17,6 +17,7 @@ from summonpot._annotations import (
     safe_get_type_hints,
     type_name,
 )
+from summonpot._validation import validate_contracts
 from summonpot.dependencies import Dependency
 from summonpot.models import EndpointDef, ParamDef, ToolDef
 from summonpot.runtime import Runtime
@@ -235,6 +236,12 @@ class Pot:
                 return_type = type_name(return_hint)
 
             endpoint_tools = [*all_tools, *dependency_tools]
+            validate_contracts(
+                endpoint=endpoint_name,
+                tools=endpoint_tools,
+                input_model=input_model,
+                parameters=parameters,
+            )
             tool_names = [tool.name for tool in endpoint_tools]
             duplicate_names = sorted(
                 {name for name in tool_names if tool_names.count(name) > 1}
