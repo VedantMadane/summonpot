@@ -267,3 +267,41 @@ def test_call_bounds_is_importable_from_the_package_root():
     """The helpers cannot express every interval, so the type itself is public."""
     assert CallBounds(minimum=2, maximum=3).describe() == "between 2 and 3"
     assert Between(2, 3) == CallBounds(minimum=2, maximum=3)
+
+
+def test_declared_ordering_cannot_be_changed_through_the_callers_sequence():
+    """`after` is graph data, read exactly as the bindings are."""
+    audit = Operation(lookup_customer)
+    ordering = [audit]
+    contract = Operation(place_order, after=ordering)
+
+    ordering.append(Operation(lookup_customer))
+
+    assert contract.after == (audit,)
+    assert isinstance(contract.after, tuple)
+
+
+# --- graph node semantics ----------------------------------------------------
+
+
+def test_operations_are_hashable_whether_or_not_they_are_bound():
+    """Step 03 uses these as set and dict keys; it cannot depend on `bind`."""
+    unbound = Operation(lookup_customer)
+    bound = Operation(lookup_customer, bind={"customer_id": FromRequest("customer_id")})
+    ordered = Operation(place_order, after=[unbound])
+
+    assert {unbound, bound, ordered} == {unbound, bound, ordered}
+    assert len({unbound, bound, ordered}) == 3
+
+
+def test_operations_are_distinct_nodes_even_when_declared_alike():
+    """Two declarations are two nodes, so FromResult names one of them unambiguously."""
+    first = Operation(lookup_customer, bind={"customer_id": FromRequest("customer_id")})
+    second = Operation(
+        lookup_customer, bind={"customer_id": FromRequest("customer_id")}
+    )
+
+    assert first == first
+    assert first != second
+    assert FromResult(first, "tier") == FromResult(first, "tier")
+    assert FromResult(first, "tier") != FromResult(second, "tier")

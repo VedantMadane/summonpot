@@ -10,7 +10,7 @@ capability graph, and the runtime that fills bound arguments arrive in later cha
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Any
@@ -125,9 +125,17 @@ def Between(minimum: int, maximum: int) -> CallBounds:
 # ---------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)
 class Operation:
     """A capability together with the contract governing how it may be called.
+
+    Operations are graph vertices — ``FromResult`` and ``after`` both reference them —
+    so they compare and hash **by identity**. Two separately declared operations are
+    two declarations even when they look alike, which is what makes ``FromResult(op,
+    ...)`` point at one specific node rather than at whichever declaration happens to
+    match structurally. Identity also keeps the semantics the same whether or not
+    ``bind`` is present; value equality would have to hash the bindings, which means
+    imposing an order on a mapping that has none.
 
     Declared away from the endpoint so the endpoint signature stays a declaration
     rather than a configuration object::
@@ -150,16 +158,20 @@ class Operation:
     operation: Callable[..., Any]
     bind: Mapping[str, ArgumentSource] | None = None
     output: Any = None
-    after: tuple[Operation, ...] = ()
+    after: Sequence[Operation] = ()
 
     def __post_init__(self) -> None:
-        # The bindings are the security boundary: they decide which arguments the
-        # model may choose. `frozen=True` only stops the attribute being reassigned,
+        # The bindings decide which arguments the model may choose, so they are the
+        # security boundary. `frozen=True` only stops the attribute being reassigned,
         # so without a snapshot the mapping stays writable through this attribute and
         # through whatever dict the caller passed in - after registration, and after
         # any validation the declaration has already passed.
         if self.bind is not None:
             object.__setattr__(self, "bind", MappingProxyType(dict(self.bind)))
+        # `after` is ordering, which the capability graph reads exactly as it reads
+        # the bindings. Annotated as a tuple but not normalised, a caller-owned list
+        # stayed writable after the contract was registered and validated.
+        object.__setattr__(self, "after", tuple(self.after))
 
     def with_bind(self, **bindings: ArgumentSource) -> Operation:
         """Return a copy of this operation with some bindings replaced.
