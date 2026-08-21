@@ -13,7 +13,6 @@ with the graph that can.
 
 from __future__ import annotations
 
-import dataclasses
 import inspect
 from typing import Any
 
@@ -37,8 +36,6 @@ def _readable_fields(output: Any) -> set[str] | None:
     """Return the fields a result exposes, or None if it exposes none statically."""
     if isinstance(output, type) and issubclass(output, BaseModel):
         return set(output.model_fields)
-    if dataclasses.is_dataclass(output) and isinstance(output, type):
-        return {field.name for field in dataclasses.fields(output)}
     return None
 
 
@@ -203,6 +200,16 @@ def _validate_bindings(
                 declared=declared,
                 what=f"offers {name!r} from",
             )
+            # Offering a result to the model puts it into agent context, so it has
+            # the same prerequisite as reading a field from it: the producer must
+            # declare an output type, or the value reaches the model unvalidated.
+            # No field check here - AgentChoice names no field.
+            _require_validatable_output(
+                endpoint=endpoint,
+                operation=operation,
+                argument=name,
+                producer=source.from_result,
+            )
 
 
 def _validate_from_request(
@@ -228,18 +235,35 @@ def _validate_from_request(
         )
 
 
+def _require_validatable_output(
+    *, endpoint: str, operation: str, argument: str, producer: Operation
+) -> None:
+    """Reject consuming a result the producer never gave a type to.
+
+    A result reaches agent context whether it is read from or offered as a choice,
+    and the invariant is the same either way: it must be validated against a declared
+    type before it gets there.
+    """
+    if producer.output is None:
+        name = getattr(
+            producer.operation, "__name__", type(producer.operation).__name__
+        )
+        raise TypeError(
+            f"Endpoint {endpoint!r} consumes the result of {name!r} for argument "
+            f"{argument!r} of operation {operation!r}, but {name!r} declares no "
+            "output type. Give it output=... so the result can be validated before "
+            "it is used."
+        )
+
+
 def _validate_result_field(
     *, endpoint: str, operation: str, argument: str, source: FromResult
 ) -> None:
     """Check that a result binding reads a field the producer's output declares."""
     producer = source.operation
-    if producer.output is None:
-        raise TypeError(
-            f"Endpoint {endpoint!r} binds {argument!r} of operation {operation!r} to "
-            f"field {source.field!r} of another operation's result, but that "
-            "operation declares no output type. Give it output=... so the result can "
-            "be validated before it is read."
-        )
+    _require_validatable_output(
+        endpoint=endpoint, operation=operation, argument=argument, producer=producer
+    )
 
     fields = _readable_fields(producer.output)
     if fields is None:

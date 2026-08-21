@@ -8,8 +8,6 @@ it needed the rejection case.
 
 from __future__ import annotations
 
-import dataclasses
-
 import pytest
 from pydantic import BaseModel
 
@@ -565,43 +563,6 @@ def test_a_field_cannot_be_read_from_an_unstructured_result():
             raise NotImplementedError
 
 
-def test_a_dataclass_output_can_be_read_from():
-    @dataclasses.dataclass
-    class Profile:
-        customer_id: str
-        tier: str
-
-    def load_profile(customer_id: str) -> Profile:
-        """Load a profile."""
-        return Profile(customer_id=customer_id, tier="standard")
-
-    producer = Operation(
-        load_profile, bind={"customer_id": FromRequest("customer_id")}, output=Profile
-    )
-    pot = Pot("svc")
-
-    @pot.summon("/orders")
-    def create_order(
-        request: OrderRequest,
-        profile=Required(producer),
-        order=Required(
-            Operation(
-                place_order,
-                bind={
-                    "customer_id": FromRequest("customer_id"),
-                    "tier": FromResult(producer, "tier"),
-                    "sku": FromRequest("sku"),
-                },
-                output=OrderResponse,
-            )
-        ),
-    ) -> OrderResponse:
-        """Place an order."""
-        raise NotImplementedError
-
-    assert len(pot.endpoints[0].tools) == 2
-
-
 # --- a contracted operation has explicit parameters --------------------------
 
 
@@ -652,3 +613,98 @@ def test_a_bare_variadic_callable_is_still_allowed():
         raise NotImplementedError
 
     assert pot.endpoints[0].tools[0].contract is None
+
+
+# --- a result reaching the model must be validatable --------------------------
+
+
+def test_agent_choice_may_not_offer_a_result_with_no_declared_output():
+    """Offering a result puts it in agent context, so it must be validatable first."""
+    producer = Operation(
+        lookup_customer, bind={"customer_id": FromRequest("customer_id")}
+    )
+    pot = Pot("svc")
+
+    with pytest.raises(TypeError, match="declares no output type"):
+
+        @pot.summon("/orders")
+        def create_order(
+            request: OrderRequest,
+            customer=Required(producer),
+            order=Required(
+                Operation(
+                    place_order,
+                    bind={
+                        "customer_id": FromRequest("customer_id"),
+                        "tier": AgentChoice(from_result=producer, item_type=str),
+                        "sku": FromRequest("sku"),
+                    },
+                    output=OrderResponse,
+                )
+            ),
+        ) -> OrderResponse:
+            """Place an order."""
+            raise NotImplementedError
+
+
+def test_agent_choice_may_offer_a_result_with_a_declared_output():
+    producer = Operation(
+        lookup_customer,
+        bind={"customer_id": FromRequest("customer_id")},
+        output=Customer,
+    )
+    pot = Pot("svc")
+
+    @pot.summon("/orders")
+    def create_order(
+        request: OrderRequest,
+        customer=Required(producer),
+        order=Required(
+            Operation(
+                place_order,
+                bind={
+                    "customer_id": FromRequest("customer_id"),
+                    "tier": AgentChoice(from_result=producer, item_type=str),
+                    "sku": FromRequest("sku"),
+                },
+                output=OrderResponse,
+            )
+        ),
+    ) -> OrderResponse:
+        """Place an order."""
+        raise NotImplementedError
+
+    assert len(pot.endpoints[0].tools) == 2
+
+
+def test_agent_choice_may_offer_a_scalar_result():
+    """`output=str` is a validatable contract; only the absence of one is a gap.
+
+    Reading a *field* from it is still refused — that check belongs to FromResult,
+    and AgentChoice names no field.
+    """
+    producer = Operation(
+        scalar_lookup, bind={"customer_id": FromRequest("customer_id")}, output=str
+    )
+    pot = Pot("svc")
+
+    @pot.summon("/orders")
+    def create_order(
+        request: OrderRequest,
+        tier=Required(producer),
+        order=Required(
+            Operation(
+                place_order,
+                bind={
+                    "customer_id": FromRequest("customer_id"),
+                    "tier": AgentChoice(from_result=producer, item_type=str),
+                    "sku": FromRequest("sku"),
+                },
+                output=OrderResponse,
+            )
+        ),
+    ) -> OrderResponse:
+        """Place an order."""
+        raise NotImplementedError
+
+    assert len(pot.endpoints[0].tools) == 2
