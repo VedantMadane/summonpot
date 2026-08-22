@@ -6,9 +6,10 @@ import asyncio
 import functools
 import inspect
 import threading
-from typing import Any
+from typing import Annotated, Any, get_args, get_origin
 
 import pytest
+from pydantic import Field
 
 from summonpot.models import ToolDef
 from summonpot.tools import build_tool_from_func, tool
@@ -274,3 +275,112 @@ def test_nested_plain_function_with_a_self_field_is_accepted():
         "self",
         "template",
     ]
+
+
+# --- resolved parameter annotations ------------------------------------------
+
+
+def test_a_parameter_carries_its_resolved_annotation():
+    """`type_annotation` is a display string; callers that reason about the type
+    need the object, and the two must not disagree."""
+
+    def combine(value: int, label: str) -> str:
+        """Combine two values."""
+        return f"{label}{value}"
+
+    definition = build_tool_from_func(combine)
+    by_name = {parameter.name: parameter for parameter in definition.parameters}
+
+    assert by_name["value"].annotation is int
+    assert by_name["label"].annotation is str
+
+
+def test_an_unannotated_parameter_has_no_resolved_annotation():
+    """The display string falls back to 'str'; the object must stay honest."""
+
+    def lookup(value):
+        """Look up a value."""
+        return value
+
+    (parameter,) = build_tool_from_func(lookup).parameters
+
+    assert parameter.type_annotation == "str"
+    assert parameter.annotation is None
+
+
+def test_a_union_survives_as_the_union_object():
+    """A display string cannot round-trip this."""
+
+    def paginate(limit: int | None = None) -> str:
+        """Paginate."""
+        return ""
+
+    (parameter,) = build_tool_from_func(paginate).parameters
+
+    assert parameter.annotation == (int | None)
+
+
+def test_a_generic_keeps_its_element_type():
+    def batch(items: list[int]) -> str:
+        """Batch."""
+        return ""
+
+    (parameter,) = build_tool_from_func(batch).parameters
+
+    assert parameter.annotation == list[int]
+
+
+def test_annotated_metadata_survives():
+    """Constraints are the reason the resolved object matters."""
+
+    def search(term: Annotated[str, Field(min_length=3)]) -> str:
+        """Search."""
+        return term
+
+    (parameter,) = build_tool_from_func(search).parameters
+
+    assert get_origin(parameter.annotation) is Annotated
+    assert get_args(parameter.annotation)[0] is str
+
+
+def test_the_tool_decorator_resolves_annotations_too():
+    @tool()
+    def transform(values: list[int], flag: bool = False) -> str:
+        """Transform values."""
+        return ""
+
+    by_name = {parameter.name: parameter for parameter in transform.parameters}
+
+    assert by_name["values"].annotation == list[int]
+    assert by_name["flag"].annotation is bool
+
+
+@pytest.mark.parametrize("kind", ["bound_method", "callable_object", "partial"])
+def test_normalized_callables_annotate_only_their_business_parameters(kind):
+    """The receiver and any bound argument are already supplied, so neither appears."""
+
+    class Directory:
+        def lookup(self, key: str) -> str:
+            """Look up a key."""
+            return key
+
+    class Repository:
+        """Look up a key."""
+
+        def __call__(self, key: str) -> str:
+            return key
+
+    def fetch(table: str, key: str) -> str:
+        """Fetch a record."""
+        return key
+
+    operation = {
+        "bound_method": Directory().lookup,
+        "callable_object": Repository(),
+        "partial": functools.partial(fetch, "accounts"),
+    }[kind]
+
+    (parameter,) = build_tool_from_func(operation).parameters
+
+    assert parameter.name == "key"
+    assert parameter.annotation is str

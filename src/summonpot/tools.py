@@ -48,6 +48,7 @@ def tool(
                     description=description_text,
                     required=is_required,
                     default=None if is_required else param.default,
+                    annotation=_resolved_annotation(pname, param, hints),
                 )
             )
         return ToolDef(
@@ -58,6 +59,22 @@ def tool(
         )
 
     return decorator
+
+
+def _resolved_annotation(
+    pname: str, param: inspect.Parameter, hints: dict[str, Any]
+) -> Any:
+    """Return a parameter's annotation as a resolved object, or None.
+
+    `type_annotation` beside it is a display string, which cannot round-trip a union
+    or a generic's element type. Callers that need to reason about the type - rather
+    than print it - read this.
+    """
+    if pname in hints:
+        return hints[pname]
+    if param.annotation is not inspect.Parameter.empty:
+        return param.annotation
+    return None
 
 
 def _unwrap_partials(func: Callable[..., Any]) -> Callable[..., Any]:
@@ -185,6 +202,7 @@ def build_tool_from_func(func: Callable[..., Any]) -> ToolDef:
                 description="",
                 required=is_required,
                 default=None if is_required else param.default,
+                annotation=_resolved_annotation(pname, param, hints),
             )
         )
     return ToolDef(
