@@ -588,3 +588,104 @@ def test_a_fixed_tuple_against_a_homogeneous_target(supplied, compatible):
     """A differing parameter count is not unknown when the target admits any number:
     every member the source declares still has to satisfy the one element type."""
     assert is_compatible(supplied, tuple[int, ...]) is compatible
+
+
+@pytest.mark.parametrize(
+    ("supplied", "wanted", "compatible"),
+    [
+        # A fixed tuple is a sequence of its members, so a homogeneous target is
+        # satisfied only when every member fits its one element type.
+        (tuple[int, str], Sequence[int], False),
+        (tuple[int, int], Sequence[int], True),
+        (list[int], Sequence[int], True),
+        # Two fixed tuples describe positions, so their lengths have to agree.
+        (tuple[int, str], tuple[int], False),
+        (tuple[int], tuple[int, str], False),
+        (tuple[int, str], tuple[int, str], True),
+        # Unresolved shapes stay unknown.
+        (tuple[()], tuple[int, ...], True),
+        (tuple, tuple[int, ...], True),
+    ],
+)
+def test_fixed_tuple_relations(supplied, wanted, compatible):
+    assert is_compatible(supplied, wanted) is compatible
+
+
+# --- a union of collections is still something to choose from ----------------
+
+
+@pytest.mark.parametrize(
+    ("output", "selectable", "element"),
+    [
+        (list[str] | set[str], True, str),
+        (list[str] | tuple[str, ...], True, str),
+        # Every member is selectable but they disagree, so the element is unknown.
+        (list[str] | list[int], True, None),
+        # A scalar may arrive, so the whole thing is not selectable.
+        (list[str] | str, False, None),
+        (list[str] | None, False, None),
+        # An unknown member cannot be disproven.
+        (list[str] | Any, True, None),
+    ],
+    ids=[
+        "same-element",
+        "different-shapes",
+        "differing-elements",
+        "mixed-scalar",
+        "optional",
+        "unknown-member",
+    ],
+)
+def test_a_union_output_is_selectable_when_every_member_is(output, selectable, element):
+    assert selectable_item_type(output) == (selectable, element)
+
+
+def test_a_choice_from_a_union_of_collections_is_accepted():
+    """Rejecting this was a false rejection: every possible output is a collection."""
+
+    def list_tiers(customer_id: str) -> list[str] | set[str]:
+        """List tiers."""
+        return ["standard"]
+
+    producer = Operation(
+        list_tiers,
+        bind={"customer_id": FromRequest("customer_id")},
+        output=list[str] | set[str],
+    )
+    pot = Pot("svc")
+
+    _register(
+        pot,
+        producer,
+        Operation(
+            wants_str,
+            bind={"customer_id": AgentChoice(from_result=producer, item_type=str)},
+            output=Customer,
+        ),
+    )
+
+    assert len(pot.endpoints[0].tools) == 2
+
+
+def test_a_choice_from_a_union_containing_a_scalar_is_rejected():
+    def list_tiers(customer_id: str) -> list[str] | str:
+        """List tiers."""
+        return ["standard"]
+
+    producer = Operation(
+        list_tiers,
+        bind={"customer_id": FromRequest("customer_id")},
+        output=list[str] | str,
+    )
+    pot = Pot("svc")
+
+    with pytest.raises(TypeError, match="not a collection of selectable items"):
+        _register(
+            pot,
+            producer,
+            Operation(
+                wants_str,
+                bind={"customer_id": AgentChoice(from_result=producer, item_type=str)},
+                output=Customer,
+            ),
+        )

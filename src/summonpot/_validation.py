@@ -152,10 +152,28 @@ def _generics_compatible(source: Any, target: Any) -> bool:
     source_args = [a for a in raw_source if a is not Ellipsis]
     target_args = [a for a in raw_target if a is not Ellipsis]
 
-    # A homogeneous target admits any number of members, so a differing count is not
-    # unknown: every member the source declares has to satisfy the one element type.
-    if _is_homogeneous_tuple(raw_target) and source_args:
+    source_is_fixed = get_origin(source) is tuple and not _is_homogeneous_tuple(
+        raw_source
+    )
+    target_is_fixed = get_origin(target) is tuple and not _is_homogeneous_tuple(
+        raw_target
+    )
+
+    # A fixed tuple is a sequence of its declared members, so a target admitting any
+    # number of one element type - tuple[T, ...] or Sequence[T] - is satisfied only
+    # if every member fits T. The differing count is not what makes it unknown.
+    if source_is_fixed and not target_is_fixed and len(target_args) == 1:
         return all(_is_compatible(member, target_args[0]) for member in source_args)
+
+    # Two fixed tuples describe positions, so different lengths cannot match.
+    if (
+        source_is_fixed
+        and target_is_fixed
+        and raw_source
+        and raw_target
+        and len(source_args) != len(target_args)
+    ):
+        return False
 
     if not source_args or not target_args or len(source_args) != len(target_args):
         return True
@@ -174,6 +192,21 @@ def _selectable_item_type(output: Any) -> tuple[bool, Any]:
     output = _unwrap(output)
     if _is_unknown(output):
         return True, None
+
+    # Any member of a union may arrive, so the result is selectable only if every
+    # member is. Element types are combined only when they agree; disagreement is
+    # left unknown rather than modelled.
+    members = _union_members(output)
+    if members is not None:
+        element_types = set()
+        for member in members:
+            if _is_unknown(member):
+                return True, None
+            selectable, element = _selectable_item_type(member)
+            if not selectable:
+                return False, None
+            element_types.add(element)
+        return True, element_types.pop() if len(element_types) == 1 else None
 
     origin = get_origin(output) or output
     args = get_args(output)
