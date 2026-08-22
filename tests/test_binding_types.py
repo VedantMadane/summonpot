@@ -11,8 +11,8 @@ The acceptance tests here matter as much as the rejections.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from typing import Annotated, Any, Literal
+from collections.abc import Mapping, Sequence
+from typing import Annotated, Any, Literal, Protocol
 
 import pytest
 from pydantic import BaseModel, Field
@@ -26,7 +26,12 @@ from summonpot import (
     Pot,
     Required,
 )
-from summonpot._types import is_compatible, selectable_item_type
+from summonpot._validation import (
+    _is_compatible as is_compatible,
+)
+from summonpot._validation import (
+    _selectable_item_type as selectable_item_type,
+)
 
 
 class Person(BaseModel):
@@ -328,3 +333,167 @@ def test_a_choice_whose_item_type_contradicts_the_collection_is_rejected():
                 output=Customer,
             ),
         )
+
+
+# --- relations the first pass got wrong --------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("supplied", "wanted", "compatible"),
+    [
+        # A related origin says nothing about the parameters.
+        (list[int], Sequence[str], False),
+        (list[int], Sequence[int], True),
+        (dict[str, int], Mapping[str, str], False),
+        (dict[str, int], Mapping[str, int], True),
+        # A literal target constrains values, but its value *types* are provable.
+        (int, Literal["x"], False),
+        (str, Literal["x"], True),
+        (Literal["z"], Literal["x", "y"], False),
+        (Literal["x"], Literal["x", "y"], True),
+        # bool is an int, so it widens like one.
+        (bool, float, True),
+        (bool, complex, True),
+    ],
+)
+def test_relations_that_needed_correcting(supplied, wanted, compatible):
+    assert is_compatible(supplied, wanted) is compatible
+
+
+def test_an_uncheckable_relation_is_unknown_not_a_crash():
+    """`issubclass` raises for a Protocol that is not runtime_checkable."""
+
+    class Plain(Protocol):
+        def go(self) -> None: ...
+
+    assert is_compatible(int, Plain) is True
+
+
+def test_a_protocol_argument_registers():
+    """The crash reached registration, so the regression belongs there too."""
+
+    class Plain(Protocol):
+        def go(self) -> None: ...
+
+    def wants_protocol(customer_id: Plain) -> Customer:
+        """Take a protocol."""
+        return Customer(name="n", tier="t")
+
+    pot = Pot("svc")
+
+    _register(
+        pot,
+        Operation(
+            wants_protocol,
+            bind={"customer_id": FromRequest("customer_id")},
+            output=Customer,
+        ),
+    )
+
+    assert pot.endpoints[0].tools[0].contract is not None
+
+
+@pytest.mark.parametrize(
+    ("output", "selectable"),
+    [
+        (tuple[str, ...], True),
+        (tuple[int, str], False),
+        (tuple[int], False),
+        (tuple[()], False),
+        (tuple, True),
+    ],
+    ids=["homogeneous", "heterogeneous", "fixed-one", "empty", "bare"],
+)
+def test_only_a_homogeneous_tuple_is_selectable(output, selectable):
+    """A fixed tuple has a different type per position, so there is no item type."""
+    assert selectable_item_type(output)[0] is selectable
+
+
+# --- the chosen value has to fit the argument receiving it -------------------
+
+
+def _tier_producer() -> Operation:
+    def list_tiers(customer_id: str) -> list[str]:
+        """List tiers."""
+        return ["standard"]
+
+    return Operation(
+        list_tiers, bind={"customer_id": FromRequest("customer_id")}, output=list[str]
+    )
+
+
+def test_a_declared_item_type_must_fit_the_argument():
+    producer = _tier_producer()
+    pot = Pot("svc")
+
+    with pytest.raises(TypeError, match="incompatible"):
+        _register(
+            pot,
+            producer,
+            Operation(
+                wants_int,
+                bind={"quantity": AgentChoice(from_result=producer, item_type=str)},
+                output=Customer,
+            ),
+        )
+
+
+def test_an_inferred_item_type_must_fit_the_argument():
+    """With no explicit item_type, the collection's element type is the choice."""
+    producer = _tier_producer()
+    pot = Pot("svc")
+
+    with pytest.raises(TypeError, match="incompatible"):
+        _register(
+            pot,
+            producer,
+            Operation(
+                wants_int,
+                bind={"quantity": AgentChoice(from_result=producer)},
+                output=Customer,
+            ),
+        )
+
+
+def test_a_direct_choice_must_also_fit_the_argument():
+    """A choice with no producer behind it was skipping type validation entirely."""
+    pot = Pot("svc")
+
+    with pytest.raises(TypeError, match="incompatible"):
+        _register(
+            pot,
+            Operation(
+                wants_int,
+                bind={"quantity": AgentChoice(item_type=str)},
+                output=Customer,
+            ),
+        )
+
+
+def test_an_unconstrained_choice_is_still_accepted():
+    """Nothing declares the type, so nothing can be disproven."""
+    pot = Pot("svc")
+
+    _register(
+        pot,
+        Operation(wants_int, bind={"quantity": AgentChoice()}, output=Customer),
+    )
+
+    assert pot.endpoints[0].tools[0].contract is not None
+
+
+def test_a_choice_that_fits_is_accepted():
+    producer = _tier_producer()
+    pot = Pot("svc")
+
+    _register(
+        pot,
+        producer,
+        Operation(
+            wants_str,
+            bind={"customer_id": AgentChoice(from_result=producer, item_type=str)},
+            output=Customer,
+        ),
+    )
+
+    assert len(pot.endpoints[0].tools) == 2

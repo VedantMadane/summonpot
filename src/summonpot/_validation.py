@@ -14,14 +14,185 @@ with the graph that can.
 from __future__ import annotations
 
 import inspect
-from typing import Any
+from collections.abc import Mapping, Sequence
+from types import UnionType
+from typing import (
+    Annotated,
+    Any,
+    Literal,
+    TypeVar,
+    Union,
+    get_args,
+    get_origin,
+)
 
 from pydantic import BaseModel
 
-from summonpot._types import describe, is_compatible, selectable_item_type
 from summonpot.contracts import AgentChoice, FromRequest, FromResult, Operation
 
 _VARIADIC = (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
+
+
+# ---------------------------------------------------------------------------
+# Conservative type comparison
+#
+# Only the relations binding validation needs, deliberately narrow. Every
+# function answers "is this provably wrong?" - anything it cannot decide is
+# accepted, because a guard that refuses a valid declaration is worse than one
+# that misses an invalid one.
+# ---------------------------------------------------------------------------
+
+_SELECTABLE = (list, set, frozenset, Sequence)
+# Iterable, but not a collection of selectable values: a string yields characters
+# and a mapping yields keys.
+_NOT_SELECTABLE = (str, bytes, bytearray, dict, Mapping)
+
+
+def _unwrap(annotation: Any) -> Any:
+    """Strip `Annotated` down to the type it decorates."""
+    while get_origin(annotation) is Annotated:
+        annotation = get_args(annotation)[0]
+    return annotation
+
+
+def _is_unknown(annotation: Any) -> bool:
+    """Report whether nothing can be proven about this annotation."""
+    if annotation is None or annotation is Any or annotation is object:
+        return True
+    return isinstance(annotation, str | TypeVar)
+
+
+def _safe_issubclass(source: Any, target: Any) -> bool | None:
+    """Return the subclass relation, or None when it cannot be established.
+
+    `issubclass` raises for a Protocol that is not `runtime_checkable`, among
+    others. An unanswerable question is unknown, never a registration failure.
+    """
+    if not (isinstance(source, type) and isinstance(target, type)):
+        return None
+    try:
+        return issubclass(source, target)
+    except TypeError:
+        return None
+
+
+def _union_members(annotation: Any) -> tuple[Any, ...] | None:
+    """Return a union's members, or None if this is not a union."""
+    if get_origin(annotation) in (Union, UnionType):
+        return get_args(annotation)
+    return None
+
+
+def _widens_numerically(source: Any, target: Any) -> bool:
+    """Report whether the numeric tower permits this widening.
+
+    Based on the subclass relation rather than identity, so `bool` widens like the
+    `int` it is.
+    """
+    if _safe_issubclass(source, int) and target in (float, complex):
+        return True
+    return bool(_safe_issubclass(source, float) and target is complex)
+
+
+def _is_compatible(source: Any, target: Any) -> bool:
+    """Report whether a value of type `source` may satisfy `target`.
+
+    True also means "cannot be disproven".
+    """
+    source, target = _unwrap(source), _unwrap(target)
+
+    if _is_unknown(source) or _is_unknown(target) or source is target:
+        return True
+
+    # Any member of a union source may arrive, so all of them must fit; a union
+    # target is satisfied by fitting any one member.
+    members = _union_members(source)
+    if members is not None:
+        return all(_is_compatible(member, target) for member in members)
+    members = _union_members(target)
+    if members is not None:
+        return any(_is_compatible(source, member) for member in members)
+
+    source_values = get_args(source) if get_origin(source) is Literal else None
+    target_values = get_args(target) if get_origin(target) is Literal else None
+    if source_values is not None and target_values is not None:
+        # Both value sets are finite and known, so disjointness is provable.
+        return all(value in target_values for value in source_values)
+    if source_values is not None:
+        return all(_is_compatible(type(value), target) for value in source_values)
+    if target_values is not None:
+        # The value cannot be proven, but the type of every permitted value can.
+        return any(_is_compatible(source, type(value)) for value in target_values)
+
+    if get_origin(source) is not None or get_origin(target) is not None:
+        return _generics_compatible(source, target)
+
+    if _widens_numerically(source, target):
+        return True
+    related = _safe_issubclass(source, target)
+    return True if related is None else related
+
+
+def _generics_compatible(source: Any, target: Any) -> bool:
+    """Compare two annotations where at least one is parameterised."""
+    source_origin, target_origin = get_origin(source), get_origin(target)
+    if source_origin is None or target_origin is None:
+        return True
+
+    if source_origin is not target_origin:
+        related = _safe_issubclass(source_origin, target_origin)
+        if related is None:
+            return True
+        if not related:
+            return False
+        # The origins are related, but that says nothing about the parameters -
+        # list[int] is not a Sequence[str]. Fall through and compare them.
+
+    source_args = [a for a in get_args(source) if a is not Ellipsis]
+    target_args = [a for a in get_args(target) if a is not Ellipsis]
+    if not source_args or not target_args or len(source_args) != len(target_args):
+        return True
+    return all(
+        _is_compatible(s, t) for s, t in zip(source_args, target_args, strict=True)
+    )
+
+
+def _selectable_item_type(output: Any) -> tuple[bool, Any]:
+    """Describe what a model could select from a result of type `output`."""
+    output = _unwrap(output)
+    if _is_unknown(output):
+        return True, None
+
+    origin = get_origin(output) or output
+    args = get_args(output)
+
+    if origin is tuple:
+        # Only the homogeneous form is a collection of like items. A fixed tuple has
+        # a different type at each position, so "select an item" has no single item
+        # type to constrain. Bare `tuple` is unparameterised and therefore unknown,
+        # which is not the same as `tuple[()]` - that one provably has no items.
+        if get_origin(output) is None:
+            return True, None
+        if len(args) == 2 and args[1] is Ellipsis:
+            return True, args[0]
+        return False, None
+
+    # Checked one type at a time: _safe_issubclass answers "unknown" for a union
+    # target, which would let these fall through to the Sequence test below - and a
+    # str *is* a Sequence, of characters.
+    if any(_safe_issubclass(origin, excluded) for excluded in _NOT_SELECTABLE):
+        return False, None
+    if any(_safe_issubclass(origin, candidate) for candidate in _SELECTABLE):
+        return True, args[0] if args else None
+    return False, None
+
+
+def _describe(annotation: Any) -> str:
+    """Render an annotation for an error message."""
+    annotation = _unwrap(annotation)
+    if annotation is None:
+        return "unannotated"
+    return getattr(annotation, "__name__", None) or str(annotation)
 
 
 def _bindable_request_fields(
@@ -260,6 +431,17 @@ def _validate_bindings(
                 argument=name,
                 source=source,
             )
+        if isinstance(source, AgentChoice):
+            # Whatever the model picks still has to fit the argument receiving it.
+            # Checked for every choice, including one with no producer behind it.
+            _require_compatible(
+                endpoint=endpoint,
+                operation=operation,
+                argument=name,
+                wanted=argument_types.get(name),
+                supplied=_chosen_type(source),
+                origin="the model's choice",
+            )
 
 
 def _operation_name(contract: Operation) -> str:
@@ -292,13 +474,26 @@ def _require_compatible(
     the comparison does not model is accepted, because refusing what cannot be proven
     would block valid declarations.
     """
-    if is_compatible(supplied, wanted):
+    if _is_compatible(supplied, wanted):
         return
     raise TypeError(
-        f"Endpoint {endpoint!r} binds {origin} ({describe(supplied)}) to argument "
-        f"{argument!r} of operation {operation!r} ({describe(wanted)}). Those types "
+        f"Endpoint {endpoint!r} binds {origin} ({_describe(supplied)}) to argument "
+        f"{argument!r} of operation {operation!r} ({_describe(wanted)}). Those types "
         "are incompatible."
     )
+
+
+def _chosen_type(source: AgentChoice) -> Any:
+    """Return the declared type of a value the model chooses, if it is known.
+
+    The explicit `item_type` when there is one, otherwise the element type of the
+    collection it chooses from. Unknown when neither says.
+    """
+    if source.item_type is not None:
+        return source.item_type
+    if source.from_result is not None:
+        return _selectable_item_type(source.from_result.output)[1]
+    return None
 
 
 def _require_selectable(
@@ -309,22 +504,22 @@ def _require_selectable(
     if producer is None:  # pragma: no cover - guarded by the caller
         return
 
-    selectable, item_type = selectable_item_type(producer.output)
+    selectable, item_type = _selectable_item_type(producer.output)
     if not selectable:
         raise TypeError(
             f"Endpoint {endpoint!r} offers argument {argument!r} of operation "
             f"{operation!r} as a choice from the result of "
             f"{_operation_name(producer)!r}, typed "
-            f"{describe(producer.output)}. A choice is made from a list, set, tuple "
+            f"{_describe(producer.output)}. A choice is made from a list, set, tuple "
             "or sequence; that type is not a collection of selectable items."
         )
 
-    if source.item_type is not None and not is_compatible(item_type, source.item_type):
+    if source.item_type is not None and not _is_compatible(item_type, source.item_type):
         raise TypeError(
             f"Endpoint {endpoint!r} offers argument {argument!r} of operation "
-            f"{operation!r} as a choice of {describe(source.item_type)}, but "
+            f"{operation!r} as a choice of {_describe(source.item_type)}, but "
             f"{_operation_name(producer)!r} returns a collection of "
-            f"{describe(item_type)}."
+            f"{_describe(item_type)}."
         )
 
 
