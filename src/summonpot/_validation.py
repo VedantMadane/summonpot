@@ -18,6 +18,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from summonpot._types import describe, is_compatible, selectable_item_type
 from summonpot.contracts import AgentChoice, FromRequest, FromResult, Operation
 
 _VARIADIC = (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
@@ -32,11 +33,32 @@ def _bindable_request_fields(
     return {parameter.name for parameter in parameters}
 
 
+def _request_annotations(
+    input_model: type[BaseModel] | None, parameters: list[Any]
+) -> dict[str, Any]:
+    """Return the endpoint's request field types, keyed by the name bindings use."""
+    if input_model is not None:
+        return {
+            name: field.annotation for name, field in input_model.model_fields.items()
+        }
+    return {parameter.name: parameter.annotation for parameter in parameters}
+
+
 def _readable_fields(output: Any) -> set[str] | None:
     """Return the fields a result exposes, or None if it exposes none statically."""
     if isinstance(output, type) and issubclass(output, BaseModel):
         return set(output.model_fields)
     return None
+
+
+def _argument_annotations(tool: Any) -> dict[str, Any]:
+    """Return an operation's resolved argument types, keyed by name.
+
+    Read from the normalized ParamDef list rather than by re-inspecting the callable,
+    so this agrees with the arguments the model is actually offered for a bound
+    method, a callable object or a partial.
+    """
+    return {p.name: p.annotation for p in tool.parameters}
 
 
 def validate_contracts(
@@ -79,6 +101,8 @@ def validate_contracts(
             contract=contract,
             declared=declared,
             request_fields=request_fields,
+            argument_types=_argument_annotations(tool),
+            request_types=_request_annotations(input_model, parameters),
         )
 
 
@@ -114,6 +138,8 @@ def _validate_bindings(
     contract: Operation,
     declared: set[Operation],
     request_fields: set[str],
+    argument_types: dict[str, Any],
+    request_types: dict[str, Any],
 ) -> None:
     """Check one operation's bindings against the endpoint that declares it."""
     bind = contract.bind or {}
@@ -178,6 +204,14 @@ def _validate_bindings(
                 source=source,
                 request_fields=request_fields,
             )
+            _require_compatible(
+                endpoint=endpoint,
+                operation=operation,
+                argument=name,
+                wanted=argument_types.get(name),
+                supplied=request_types.get(source.field),
+                origin=f"request field {source.field!r}",
+            )
         elif isinstance(source, FromResult):
             _require_declared(
                 endpoint=endpoint,
@@ -191,6 +225,16 @@ def _validate_bindings(
                 operation=operation,
                 argument=name,
                 source=source,
+            )
+            _require_compatible(
+                endpoint=endpoint,
+                operation=operation,
+                argument=name,
+                wanted=argument_types.get(name),
+                supplied=_result_field_type(source),
+                origin=(
+                    f"field {source.field!r} of {_operation_name(source.operation)!r}"
+                ),
             )
         elif isinstance(source, AgentChoice) and source.from_result is not None:
             _require_declared(
@@ -210,6 +254,78 @@ def _validate_bindings(
                 argument=name,
                 producer=source.from_result,
             )
+            _require_selectable(
+                endpoint=endpoint,
+                operation=operation,
+                argument=name,
+                source=source,
+            )
+
+
+def _operation_name(contract: Operation) -> str:
+    """Render an operation for an error message."""
+    return getattr(contract.operation, "__name__", type(contract.operation).__name__)
+
+
+def _result_field_type(source: FromResult) -> Any:
+    """Return the declared type of the output field a binding reads."""
+    output = source.operation.output
+    if isinstance(output, type) and issubclass(output, BaseModel):
+        field = output.model_fields.get(source.field)
+        if field is not None:
+            return field.annotation
+    return None
+
+
+def _require_compatible(
+    *,
+    endpoint: str,
+    operation: str,
+    argument: str,
+    wanted: Any,
+    supplied: Any,
+    origin: str,
+) -> None:
+    """Reject a binding whose value provably cannot satisfy the argument.
+
+    Only a definite mismatch is rejected. An unresolved annotation, `Any`, or a shape
+    the comparison does not model is accepted, because refusing what cannot be proven
+    would block valid declarations.
+    """
+    if is_compatible(supplied, wanted):
+        return
+    raise TypeError(
+        f"Endpoint {endpoint!r} binds {origin} ({describe(supplied)}) to argument "
+        f"{argument!r} of operation {operation!r} ({describe(wanted)}). Those types "
+        "are incompatible."
+    )
+
+
+def _require_selectable(
+    *, endpoint: str, operation: str, argument: str, source: AgentChoice
+) -> None:
+    """Reject offering the model a choice from a result it cannot choose from."""
+    producer = source.from_result
+    if producer is None:  # pragma: no cover - guarded by the caller
+        return
+
+    selectable, item_type = selectable_item_type(producer.output)
+    if not selectable:
+        raise TypeError(
+            f"Endpoint {endpoint!r} offers argument {argument!r} of operation "
+            f"{operation!r} as a choice from the result of "
+            f"{_operation_name(producer)!r}, typed "
+            f"{describe(producer.output)}. A choice is made from a list, set, tuple "
+            "or sequence; that type is not a collection of selectable items."
+        )
+
+    if source.item_type is not None and not is_compatible(item_type, source.item_type):
+        raise TypeError(
+            f"Endpoint {endpoint!r} offers argument {argument!r} of operation "
+            f"{operation!r} as a choice of {describe(source.item_type)}, but "
+            f"{_operation_name(producer)!r} returns a collection of "
+            f"{describe(item_type)}."
+        )
 
 
 def _validate_from_request(
