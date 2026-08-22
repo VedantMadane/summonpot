@@ -497,3 +497,94 @@ def test_a_choice_that_fits_is_accepted():
     )
 
     assert len(pot.endpoints[0].tools) == 2
+
+
+# --- an unknown item_type must not erase what the producer proved ------------
+
+
+@pytest.mark.parametrize("item_type", [Any, object], ids=["any", "object"])
+def test_an_unknown_item_type_does_not_mask_the_producer(item_type):
+    """The model can only pick values the producer returned, so its element type
+    is a fact that a broader `item_type` cannot widen away."""
+    producer = _tier_producer()
+    pot = Pot("svc")
+
+    with pytest.raises(TypeError, match="incompatible"):
+        _register(
+            pot,
+            producer,
+            Operation(
+                wants_int,
+                bind={
+                    "quantity": AgentChoice(from_result=producer, item_type=item_type)
+                },
+                output=Customer,
+            ),
+        )
+
+
+def test_an_unparameterised_producer_falls_back_to_the_item_type():
+    """With no element type to read, the declaration is the only thing that says."""
+
+    def list_anything(customer_id: str) -> list:
+        """List values."""
+        return []
+
+    producer = Operation(
+        list_anything, bind={"customer_id": FromRequest("customer_id")}, output=list
+    )
+    pot = Pot("svc")
+
+    with pytest.raises(TypeError, match="incompatible"):
+        _register(
+            pot,
+            producer,
+            Operation(
+                wants_int,
+                bind={"quantity": AgentChoice(from_result=producer, item_type=str)},
+                output=Customer,
+            ),
+        )
+
+
+def test_an_unparameterised_producer_with_no_item_type_is_accepted():
+    def list_anything(customer_id: str) -> list:
+        """List values."""
+        return []
+
+    producer = Operation(
+        list_anything, bind={"customer_id": FromRequest("customer_id")}, output=list
+    )
+    pot = Pot("svc")
+
+    _register(
+        pot,
+        producer,
+        Operation(
+            wants_int,
+            bind={"quantity": AgentChoice(from_result=producer)},
+            output=Customer,
+        ),
+    )
+
+    assert len(pot.endpoints[0].tools) == 2
+
+
+# --- a fixed tuple against a homogeneous one ---------------------------------
+
+
+@pytest.mark.parametrize(
+    ("supplied", "compatible"),
+    [
+        (tuple[int, str], False),
+        (tuple[int, int], True),
+        (tuple[()], True),
+        (tuple, True),
+        (tuple[int, ...], True),
+    ],
+    ids=["heterogeneous", "homogeneous-fixed", "empty", "bare", "variadic"],
+)
+def test_a_fixed_tuple_against_a_homogeneous_target(supplied, compatible):
+    """A differing parameter count is not unknown when the target admits any number:
+    every member the source declares still has to satisfy the one element type."""
+    assert is_compatible(supplied, tuple[int, ...]) is compatible

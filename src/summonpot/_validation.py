@@ -148,13 +148,25 @@ def _generics_compatible(source: Any, target: Any) -> bool:
         # The origins are related, but that says nothing about the parameters -
         # list[int] is not a Sequence[str]. Fall through and compare them.
 
-    source_args = [a for a in get_args(source) if a is not Ellipsis]
-    target_args = [a for a in get_args(target) if a is not Ellipsis]
+    raw_source, raw_target = get_args(source), get_args(target)
+    source_args = [a for a in raw_source if a is not Ellipsis]
+    target_args = [a for a in raw_target if a is not Ellipsis]
+
+    # A homogeneous target admits any number of members, so a differing count is not
+    # unknown: every member the source declares has to satisfy the one element type.
+    if _is_homogeneous_tuple(raw_target) and source_args:
+        return all(_is_compatible(member, target_args[0]) for member in source_args)
+
     if not source_args or not target_args or len(source_args) != len(target_args):
         return True
     return all(
         _is_compatible(s, t) for s, t in zip(source_args, target_args, strict=True)
     )
+
+
+def _is_homogeneous_tuple(args: tuple[Any, ...]) -> bool:
+    """Report whether these arguments spell `tuple[T, ...]`."""
+    return len(args) == 2 and args[1] is Ellipsis
 
 
 def _selectable_item_type(output: Any) -> tuple[bool, Any]:
@@ -173,7 +185,7 @@ def _selectable_item_type(output: Any) -> tuple[bool, Any]:
         # which is not the same as `tuple[()]` - that one provably has no items.
         if get_origin(output) is None:
             return True, None
-        if len(args) == 2 and args[1] is Ellipsis:
+        if _is_homogeneous_tuple(args):
             return True, args[0]
         return False, None
 
@@ -486,14 +498,15 @@ def _require_compatible(
 def _chosen_type(source: AgentChoice) -> Any:
     """Return the declared type of a value the model chooses, if it is known.
 
-    The explicit `item_type` when there is one, otherwise the element type of the
-    collection it chooses from. Unknown when neither says.
+    A producer's element type wins over `item_type`, because the model can only pick
+    values the producer actually returned. Declaring `item_type=Any` narrows nothing
+    and must not erase what the producer already proved.
     """
-    if source.item_type is not None:
-        return source.item_type
     if source.from_result is not None:
-        return _selectable_item_type(source.from_result.output)[1]
-    return None
+        element = _selectable_item_type(source.from_result.output)[1]
+        if not _is_unknown(element):
+            return element
+    return source.item_type
 
 
 def _require_selectable(
