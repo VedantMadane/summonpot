@@ -4,8 +4,9 @@ An endpoint's declaration already says *which* operations may run. These types l
 also say *where each argument's value comes from*, which is what makes the execution
 path a computable property rather than a guess.
 
-Nothing here executes: this module is vocabulary. Registration-time validation, the
-capability graph, and the runtime that fills bound arguments arrive in later changes.
+Nothing here executes: this module is vocabulary. Registration validates these
+declarations before serving. The capability graph and runtime that fill bound arguments
+remain later work.
 """
 
 from __future__ import annotations
