@@ -626,7 +626,7 @@ def test_fixed_tuple_relations(supplied, wanted, compatible):
         (list[str] | str, False, None),
         (list[str] | None, False, None),
         # An unknown member cannot be disproven.
-        (list[str] | Any, True, None),
+        (list[str] | Any, True, str | Any),
     ],
     ids=[
         "same-element",
@@ -724,7 +724,7 @@ def test_tuple_arity_relations(supplied, wanted, compatible):
         # A known non-selectable member rejects wherever it appears in the union.
         (list[str] | Any | str, False, None),
         (list[str] | str | Any, False, None),
-        (list[str] | Any, True, None),
+        (list[str] | Any, True, str | Any),
     ],
     ids=[
         "differing-elements",
@@ -786,6 +786,76 @@ def test_a_choice_of_differing_elements_fits_a_matching_union_argument():
         producer,
         Operation(
             accepts_either,
+            bind={"quantity": AgentChoice(from_result=producer)},
+            output=Customer,
+        ),
+    )
+
+    assert len(pot.endpoints[0].tools) == 2
+
+
+def test_a_variadic_source_cannot_satisfy_an_empty_fixed_tuple():
+    """`tuple[()]` is a fixed target of arity zero like any other fixed arity."""
+    assert is_compatible(tuple[int, ...], tuple[()]) is False
+    assert is_compatible(tuple[()], tuple[int, ...]) is True
+    assert is_compatible(tuple, tuple[()]) is True
+
+
+@pytest.mark.parametrize(
+    ("output", "element"),
+    [
+        (list[str] | Any, str | Any),
+        (list[str] | list, str | Any),
+        (list[int] | Any, int | Any),
+    ],
+    ids=["unknown-member", "unparameterised-member", "compatible-known-member"],
+)
+def test_an_unknown_possibility_joins_the_known_ones(output, element):
+    """Adding an unknown branch must not erase what the known branches proved."""
+    assert selectable_item_type(output) == (True, element)
+
+
+def test_a_known_incompatible_possibility_survives_an_unknown_branch():
+    def maybe_values(customer_id: str) -> list[str] | Any:
+        """Return values."""
+        return []
+
+    producer = Operation(
+        maybe_values,
+        bind={"customer_id": FromRequest("customer_id")},
+        output=list[str] | Any,
+    )
+    pot = Pot("svc")
+
+    with pytest.raises(TypeError, match="incompatible"):
+        _register(
+            pot,
+            producer,
+            Operation(
+                wants_int,
+                bind={"quantity": AgentChoice(from_result=producer)},
+                output=Customer,
+            ),
+        )
+
+
+def test_a_compatible_known_possibility_still_passes_with_an_unknown_branch():
+    def maybe_values(customer_id: str) -> list[int] | Any:
+        """Return values."""
+        return []
+
+    producer = Operation(
+        maybe_values,
+        bind={"customer_id": FromRequest("customer_id")},
+        output=list[int] | Any,
+    )
+    pot = Pot("svc")
+
+    _register(
+        pot,
+        producer,
+        Operation(
+            wants_int,
             bind={"quantity": AgentChoice(from_result=producer)},
             output=Customer,
         ),

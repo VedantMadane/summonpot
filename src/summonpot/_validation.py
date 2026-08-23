@@ -177,7 +177,6 @@ def _generics_compatible(source: Any, target: Any) -> bool:
         get_origin(source) is tuple
         and _is_homogeneous_tuple(raw_source)
         and target_is_fixed
-        and raw_target
     ):
         return False
 
@@ -205,10 +204,12 @@ def _selectable_item_type(output: Any) -> tuple[bool, Any]:
     members = _union_members(output)
     if members is not None:
         elements: list[Any] = []
-        unknown_member = False
         for member in members:
             if _is_unknown(member):
-                unknown_member = True
+                # An unknown possibility is Any, not an absence. Recording it keeps
+                # the known possibilities beside it, so a provably wrong one still
+                # fails under the source-union rule.
+                elements.append(Any)
                 continue
             selectable, element = _selectable_item_type(member)
             # Every member is inspected before returning: a known non-selectable
@@ -216,8 +217,8 @@ def _selectable_item_type(output: Any) -> tuple[bool, Any]:
             # the order the union happens to be written in.
             if not selectable:
                 return False, None
-            elements.append(element)
-        if unknown_member or not elements or any(e is None for e in elements):
+            elements.append(Any if element is None else element)
+        if not elements:
             return True, None
         # Differing element types stay a union rather than collapsing to unknown, so
         # the source-union rule still applies to whatever the model picks.
