@@ -22,7 +22,10 @@ def build_app(pot: Pot) -> Any:
 
     app = FastAPI(
         title=pot.name,
-        description="Signature-first API framework for typed endpoints and bounded agentic execution.",
+        description=(
+            "A contract-first Python framework for turning typed endpoint declarations "
+            "into executable APIs."
+        ),
         version=__version__,
     )
 

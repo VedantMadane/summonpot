@@ -10,6 +10,25 @@ release assembles them here — run `make changelog-draft` to preview them.
 
 <!-- towncrier release notes start -->
 
+## [0.5.0] - 2026-08-23
+
+### Added
+
+- Add `Operation`, argument sources (`FromRequest`, `FromResult`, `FromContext`, `AgentChoice`), and call bounds, so an endpoint can declare where each operation argument comes from. `Depends` and `Required` now accept a contract as well as a callable. ([#60](https://github.com/tugrulguner/summonpot/pull/60))
+- Validate capability contracts when an endpoint is declared: bindings must name real arguments and request fields, an operation that declares `bind` must bind every argument, `FromResult` must name a declared operation with a validatable output field, and the operations must be orderable. ([#61](https://github.com/tugrulguner/summonpot/pull/61))
+- Reject a binding whose declared type provably cannot satisfy the argument it feeds, and require `AgentChoice(from_result=...)` to name a collection the model can select an item from. ([#63](https://github.com/tugrulguner/summonpot/pull/63))
+
+### Changed
+
+- Added AGENTS.md and internal review skills for contributors, and recorded the shipped coding-agent skills in the roadmap foundation. ([#57](https://github.com/tugrulguner/summonpot/pull/57))
+- Split agent guidance into a root AGENTS.md and a nested src/summonpot/AGENTS.md, added a CLAUDE.md symlink, and kept AGENTS.md out of the installed wheel. ([#58](https://github.com/tugrulguner/summonpot/pull/58))
+
+### Fixed
+
+- Capability parameters now carry their resolved annotation alongside the display string, so `ToolDef.parameters` no longer reports a type it does not expose. ([#62](https://github.com/tugrulguner/summonpot/pull/62))
+- Align package metadata, CLI help, OpenAPI, the README, and the roadmap with Summonpot's contract-first positioning and shipped registration-time operation validation. ([#64](https://github.com/tugrulguner/summonpot/pull/64))
+
+
 ## [0.4.0] - 2026-08-17
 
 ### Added

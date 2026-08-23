@@ -1,4 +1,4 @@
-"""A signature-first API framework for typed endpoints and bounded agentic execution."""
+"""A contract-first Python framework for turning typed endpoint declarations into executable APIs."""
 
 from importlib.metadata import PackageNotFoundError, version
 

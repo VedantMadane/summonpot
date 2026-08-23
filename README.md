@@ -98,6 +98,10 @@ not accepted until every `Required(...)` operation has completed successfully.
 - **Closed capability sets** made from exact application-owned callables.
 - **Optional and mandatory operations** through `Depends(...)` and `Required(...)`.
 - **Runtime-enforced required use**, tracked per request rather than trusted to a prompt.
+- **Typed `Operation` contracts** that declare request, prior-result, context, or
+  model-chosen argument sources without expanding the endpoint API.
+- **Registration-time contract validation** that rejects missing sources, invalid result
+  references, unsupported choices, and provably incompatible types before serving.
 - **Provider-neutral model selection** for OpenAI, Anthropic, Google, Groq, Mistral,
   OpenRouter, and xAI.
 - **Generated HTTP and OpenAPI contracts** for body and query endpoints.
@@ -108,6 +112,18 @@ not accepted until every `Required(...)` operation has completed successfully.
   credentials.
 - **Coding-agent skills** for Claude Code, Cursor, Windsurf, GitHub Copilot, Cline, and
   OpenAI Codex.
+
+### New in 0.5.0
+
+Summonpot 0.5.0 makes capability dataflow part of the endpoint declaration. `Operation`
+can bind arguments to request fields, validated prior results, framework context, or an
+explicitly model-chosen item. Registration rejects incomplete contracts, invalid
+references, unsupported choice collections, dependency cycles, and type relationships
+that are provably incompatible.
+
+This release establishes the validated contract layer. Runtime binding injection and
+automatic no-model execution remain the next execution milestones, so existing
+model-backed endpoint behavior does not change silently during the upgrade.
 
 ## Quick start
 
@@ -231,13 +247,69 @@ Capabilities do not become request-body fields or OpenAPI parameters. Their docs
 and annotations define the tool schema visible to the model, while their implementations
 define the real application behavior.
 
-The capability set is closed, but capability inputs are currently model-selected. Treat
+The capability set is closed. Typed `Operation.bind` declarations can now state and
+validate where inputs are intended to come from, but the current runtime does not inject
+those bound values yet; capability inputs remain model-selected during execution. Treat
 them like input from an untrusted caller: validate arguments and enforce authorization
 inside each operation. Pass exact operations, never raw database sessions, engines,
 connections, cursors, arbitrary SQL, shell access, or ambient filesystem authority.
 
 See the complete executable
 [`Required(...)` quote example](examples/02_required_capability.py).
+
+## Typed operation contracts fail before serving
+
+Use `Operation` when a capability's dataflow is part of the endpoint contract rather
+than something the model should invent:
+
+```python
+from my_service.models import Customer, CustomerRequest, CustomerResponse
+from my_service.operations import load_customer
+from summonpot import FromRequest, Operation, Pot, Required
+
+
+pot = Pot("customer-api")
+
+customer_from_request = Operation(
+    load_customer,
+    bind={"customer_id": FromRequest("customer_id")},
+    output=Customer,
+)
+
+
+@pot.summon("/customers")
+def get_customer(
+    request: CustomerRequest,
+    customer=Required(customer_from_request),
+) -> CustomerResponse:
+    """Load this customer and return the approved customer view."""
+    raise NotImplementedError
+```
+
+The contract is immutable after construction. At registration, summonpot verifies that:
+
+- every required operation argument has an explicit source;
+- `FromRequest(...)` names a real request field;
+- `FromResult(...)` names a declared producer and a readable, typed output field;
+- `AgentChoice(...)` selects from a supported collection and fits its receiving argument;
+- known source, element, and destination types are compatible; and
+- ordering references name operations declared by the same endpoint.
+
+The rule is deliberately conservative: a declaration is rejected only when its
+incompatibility is provable. Missing annotations, `Any`, framework context, and type
+relationships the checker cannot establish remain unknown rather than becoming false
+registration errors. An annotation that names a type Python cannot resolve is still an
+invalid endpoint declaration and fails at import.
+
+For example, binding an `int` request field to a `str` operation argument fails while the
+module is imported. A `Customer` value may feed a `Person` argument when `Customer` is a
+subclass, and Python's numeric widening permits `int` or `bool` to feed `float`.
+
+> [!IMPORTANT]
+> Registration validates and stores `FromRequest`, `FromResult`, `FromContext`,
+> `AgentChoice`, and `after` declarations today. Runtime binding injection, ordering
+> execution, and automatic no-model paths remain planned. Until those layers ship, the
+> model-backed runtime still supplies capability arguments.
 
 ## How it works today
 
@@ -285,8 +357,9 @@ The roadmap adds a no-model executor without adding a second endpoint API:
 | A bounded semantic choice remains | Use the agent runtime with declared capabilities |
 | No legal path exists | Return a typed deterministic error |
 
-This compiler, typed capability bindings, SQLAlchemy/SQLite operation adapters, write
-receipts, streaming, and built-in authentication are **planned, not shipped**. See
+This compiler, runtime binding injection and ordering, SQLAlchemy/SQLite operation
+adapters, write receipts, streaming, and built-in authentication are **planned, not
+shipped**. See
 [ROADMAP.md](ROADMAP.md) for the design boundaries and implementation order.
 
 ## HTTP methods and OpenAPI
@@ -442,7 +515,7 @@ Useful places to contribute include:
 - executable examples for real application workflows;
 - provider and HTTP acceptance coverage;
 - clearer errors, safer defaults, and API ergonomics;
-- typed capability contracts and result validation;
+- runtime binding injection, capability-graph execution, and operation result validation;
 - exact database-operation adapters;
 - the deterministic execution compiler described in the roadmap;
 - documentation, diagrams, and reproducible bug reports.
