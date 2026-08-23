@@ -113,6 +113,18 @@ not accepted until every `Required(...)` operation has completed successfully.
 - **Coding-agent skills** for Claude Code, Cursor, Windsurf, GitHub Copilot, Cline, and
   OpenAI Codex.
 
+### New in 0.5.0
+
+Summonpot 0.5.0 makes capability dataflow part of the endpoint declaration. `Operation`
+can bind arguments to request fields, validated prior results, framework context, or an
+explicitly model-chosen item. Registration rejects incomplete contracts, invalid
+references, unsupported choice collections, dependency cycles, and type relationships
+that are provably incompatible.
+
+This release establishes the validated contract layer. Runtime binding injection and
+automatic no-model execution remain the next execution milestones, so existing
+model-backed endpoint behavior does not change silently during the upgrade.
+
 ## Quick start
 
 ### 1. Install
@@ -503,7 +515,7 @@ Useful places to contribute include:
 - executable examples for real application workflows;
 - provider and HTTP acceptance coverage;
 - clearer errors, safer defaults, and API ergonomics;
-- typed capability contracts and result validation;
+- runtime binding injection, capability-graph execution, and operation result validation;
 - exact database-operation adapters;
 - the deterministic execution compiler described in the roadmap;
 - documentation, diagrams, and reproducible bug reports.

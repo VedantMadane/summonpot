@@ -29,21 +29,32 @@ The current release line provides:
 - GET, POST, PUT, PATCH, DELETE, and HEAD routing with validated body or query contracts.
 - A keyless test model for exercising routing and capability wiring without provider credentials.
 - Installable coding-agent skills describing the endpoint contract, for Claude Code, Cursor, Windsurf, GitHub Copilot, Cline, and OpenAI Codex.
+- Immutable `Operation` declarations with `FromRequest`, `FromResult`, `FromContext`, and `AgentChoice` argument sources.
+- Declarative call bounds and ordering references without adding decorator configuration.
+- Registration-time validation for complete bindings, request and result references, operation ordering, selectable collections, and provable type incompatibility.
 - Python 3.11–3.13 CI, package builds, and expanded runtime/CLI coverage.
+
+### 0.5.0 boundary
+
+Version 0.5.0 ships the vocabulary and registration checks for typed operation dataflow.
+It does not yet inject those bindings during execution. The current model runtime still
+supplies capability arguments, and every reachable capability must validate and authorize
+its inputs exactly as it did before 0.5.0.
 
 ## Next milestones
 
 The ordering below reflects technical dependencies, not promised release dates.
 
-### 1. Typed capability contracts
+### 1. Bound execution and capability graph
 
-Move from function signatures alone to explicit operation contracts:
+Make the validated declarations control execution:
 
-- Validate capability inputs before execution.
-- Validate capability outputs before they enter agent context.
-- Declare minimum and maximum call counts.
-- Support once-only operations and required ordering.
-- Restrict each argument to declared sources: request data, prior operation results, framework context, or explicitly agent-controlled values.
+- Inject `FromRequest`, `FromResult`, and `FromContext` values instead of offering those arguments to the model.
+- Offer only `AgentChoice` values to the model, constrained to the declared selectable collection.
+- Validate operation outputs before a later operation can read them.
+- Enforce declared ordering and call bounds during each request.
+- Build the per-endpoint capability graph needed to distinguish complete paths, bounded choices, and impossible paths.
+- Keep unknown type relationships conservative without letting unknown branches erase known contradictions.
 
 ### 2. Exact database operations
 
