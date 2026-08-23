@@ -619,8 +619,9 @@ def test_fixed_tuple_relations(supplied, wanted, compatible):
     [
         (list[str] | set[str], True, str),
         (list[str] | tuple[str, ...], True, str),
-        # Every member is selectable but they disagree, so the element is unknown.
-        (list[str] | list[int], True, None),
+        # Members disagree, so the element stays a union rather than being erased;
+        # the consumer check then still applies to whatever is picked.
+        (list[str] | list[int], True, str | int),
         # A scalar may arrive, so the whole thing is not selectable.
         (list[str] | str, False, None),
         (list[str] | None, False, None),
@@ -689,3 +690,105 @@ def test_a_choice_from_a_union_containing_a_scalar_is_rejected():
                 output=Customer,
             ),
         )
+
+
+@pytest.mark.parametrize(
+    ("supplied", "wanted", "compatible"),
+    [
+        # `tuple[()]` is a known arity of zero, unlike bare `tuple`.
+        (tuple[()], tuple[int], False),
+        (tuple[int], tuple[()], False),
+        (tuple[()], tuple[()], True),
+        # A variadic source admits lengths a fixed target cannot accept.
+        (tuple[int, ...], tuple[int], False),
+        (tuple[int, ...], tuple[int, str], False),
+        (tuple[int, ...], tuple[int, ...], True),
+        # An empty source satisfies a homogeneous target vacuously.
+        (tuple[()], tuple[int, ...], True),
+        # Bare tuple stays unknown.
+        (tuple, tuple[int], True),
+    ],
+)
+def test_tuple_arity_relations(supplied, wanted, compatible):
+    assert is_compatible(supplied, wanted) is compatible
+
+
+@pytest.mark.parametrize(
+    ("output", "selectable", "element"),
+    [
+        # Differing element types stay a union, so the source-union rule still
+        # applies to whatever the model picks.
+        (list[str] | list[int], True, str | int),
+        (list[str] | set[int], True, str | int),
+        (list[str] | set[str], True, str),
+        # A known non-selectable member rejects wherever it appears in the union.
+        (list[str] | Any | str, False, None),
+        (list[str] | str | Any, False, None),
+        (list[str] | Any, True, None),
+    ],
+    ids=[
+        "differing-elements",
+        "differing-shapes-and-elements",
+        "same-element",
+        "scalar-after-unknown",
+        "scalar-before-unknown",
+        "unknown-only",
+    ],
+)
+def test_union_selection_is_order_independent(output, selectable, element):
+    assert selectable_item_type(output) == (selectable, element)
+
+
+def test_a_choice_of_differing_elements_must_still_fit_the_argument():
+    """Collapsing the possibilities to unknown hid a provable mismatch."""
+
+    def mixed_values(customer_id: str) -> list[str] | list[int]:
+        """Return values of either type."""
+        return []
+
+    producer = Operation(
+        mixed_values,
+        bind={"customer_id": FromRequest("customer_id")},
+        output=list[str] | list[int],
+    )
+    pot = Pot("svc")
+
+    with pytest.raises(TypeError, match="incompatible"):
+        _register(
+            pot,
+            producer,
+            Operation(
+                wants_int,
+                bind={"quantity": AgentChoice(from_result=producer)},
+                output=Customer,
+            ),
+        )
+
+
+def test_a_choice_of_differing_elements_fits_a_matching_union_argument():
+    def mixed_values(customer_id: str) -> list[str] | list[int]:
+        """Return values of either type."""
+        return []
+
+    def accepts_either(quantity: int | str) -> Customer:
+        """Take either."""
+        return Customer(name="n", tier="t")
+
+    producer = Operation(
+        mixed_values,
+        bind={"customer_id": FromRequest("customer_id")},
+        output=list[str] | list[int],
+    )
+    pot = Pot("svc")
+
+    _register(
+        pot,
+        producer,
+        Operation(
+            accepts_either,
+            bind={"quantity": AgentChoice(from_result=producer)},
+            output=Customer,
+        ),
+    )
+
+    assert len(pot.endpoints[0].tools) == 2

@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Mapping, Sequence
+from functools import reduce
+from operator import or_
 from types import UnionType
 from typing import (
     Annotated,
@@ -165,13 +167,17 @@ def _generics_compatible(source: Any, target: Any) -> bool:
     if source_is_fixed and not target_is_fixed and len(target_args) == 1:
         return all(_is_compatible(member, target_args[0]) for member in source_args)
 
-    # Two fixed tuples describe positions, so different lengths cannot match.
+    # Two fixed tuples describe positions, so different lengths cannot match. The
+    # zero-length `tuple[()]` counts: it is a known arity, unlike bare `tuple`.
+    if source_is_fixed and target_is_fixed and len(source_args) != len(target_args):
+        return False
+
+    # A variadic source admits lengths a fixed target cannot accept.
     if (
-        source_is_fixed
+        get_origin(source) is tuple
+        and _is_homogeneous_tuple(raw_source)
         and target_is_fixed
-        and raw_source
         and raw_target
-        and len(source_args) != len(target_args)
     ):
         return False
 
@@ -198,15 +204,24 @@ def _selectable_item_type(output: Any) -> tuple[bool, Any]:
     # left unknown rather than modelled.
     members = _union_members(output)
     if members is not None:
-        element_types = set()
+        elements: list[Any] = []
+        unknown_member = False
         for member in members:
             if _is_unknown(member):
-                return True, None
+                unknown_member = True
+                continue
             selectable, element = _selectable_item_type(member)
+            # Every member is inspected before returning: a known non-selectable
+            # branch rejects wherever it appears, so the verdict does not depend on
+            # the order the union happens to be written in.
             if not selectable:
                 return False, None
-            element_types.add(element)
-        return True, element_types.pop() if len(element_types) == 1 else None
+            elements.append(element)
+        if unknown_member or not elements or any(e is None for e in elements):
+            return True, None
+        # Differing element types stay a union rather than collapsing to unknown, so
+        # the source-union rule still applies to whatever the model picks.
+        return True, reduce(or_, dict.fromkeys(elements))
 
     origin = get_origin(output) or output
     args = get_args(output)
