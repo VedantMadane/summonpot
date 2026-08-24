@@ -22,8 +22,8 @@ from summonpot import (
     FromRequest,
     FromResult,
     Operation,
-    Pot,
     Required,
+    Summon,
 )
 
 
@@ -166,16 +166,16 @@ def test_an_operation_registers_like_a_bare_callable():
         bind={"customer_id": FromRequest("customer_id")},
         output=Customer,
     )
-    pot = Pot("svc")
+    summon = Summon("svc")
 
-    @pot.summon("/orders")
+    @summon("/orders")
     def create_order(
         request: OrderRequest, customer=Required(contract)
     ) -> OrderResponse:
         """Place an order for this customer."""
         ...
 
-    (tool,) = pot.endpoints[0].tools
+    (tool,) = summon.endpoints[0].tools
     assert tool.name == "lookup_customer"
     assert tool.required is True
     assert tool.contract is contract
@@ -184,16 +184,16 @@ def test_an_operation_registers_like_a_bare_callable():
 
 def test_a_bare_callable_still_registers_with_no_contract():
     """The contract is opt-in; endpoints written before it keep working unchanged."""
-    pot = Pot("svc")
+    summon = Summon("svc")
 
-    @pot.summon("/orders")
+    @summon("/orders")
     def create_order(
         request: OrderRequest, customer=Required(lookup_customer)
     ) -> OrderResponse:
         """Place an order for this customer."""
         ...
 
-    (tool,) = pot.endpoints[0].tools
+    (tool,) = summon.endpoints[0].tools
     assert tool.contract is None
     assert tool.bounds == CallBounds(minimum=1)
 
@@ -233,9 +233,9 @@ def test_registered_bindings_cannot_be_changed_through_the_callers_mapping():
     """The contract snapshots the mapping rather than storing it by reference."""
     declared = {"customer_id": FromRequest("customer_id")}
     contract = Operation(lookup_customer, bind=declared, output=Customer)
-    pot = Pot("svc")
+    summon = Summon("svc")
 
-    @pot.summon("/orders")
+    @summon("/orders")
     def create_order(
         request: OrderRequest, customer=Required(contract)
     ) -> OrderResponse:
@@ -244,7 +244,7 @@ def test_registered_bindings_cannot_be_changed_through_the_callers_mapping():
 
     declared["customer_id"] = FromRequest("attacker_controlled")
 
-    registered = pot.endpoints[0].tools[0].contract
+    registered = summon.endpoints[0].tools[0].contract
     assert registered is not None
     assert registered.bind == {"customer_id": FromRequest("customer_id")}
 

@@ -1,4 +1,4 @@
-"""Pot — the summoning vessel. Register endpoints, summon agents."""
+"""The Summon application object."""
 
 from __future__ import annotations
 
@@ -25,13 +25,13 @@ from summonpot.runtime import Runtime
 from summonpot.tools import build_tool_from_func
 
 
-class Pot:
-    """A summoning vessel for agentic endpoints.
+class Summon:
+    """A contract-first application containing declared endpoints.
 
     Example::
 
         from pydantic import BaseModel
-        from summonpot import Pot
+        from summonpot import Summon
 
         class ResearchRequest(BaseModel):
             query: str
@@ -39,14 +39,14 @@ class Pot:
         class ResearchResponse(BaseModel):
             summary: str
 
-        pot = Pot(tools=[search_web])
+        summon = Summon(tools=[search_web])
 
-        @pot.summon("/research")
+        @summon("/research")
         def research_topic(request: ResearchRequest) -> ResearchResponse:
             \"\"\"Research this topic thoroughly.\"\"\"
             ...
 
-        pot.serve()
+        summon.serve()
     """
 
     def __init__(
@@ -57,7 +57,7 @@ class Pot:
         model: str | None = None,
         runtime: Runtime | None = None,
     ) -> None:
-        """Create a pot.
+        """Create a Summon application.
 
         Args:
             name: Service name, used as the OpenAPI title.
@@ -75,22 +75,22 @@ class Pot:
             )
         self.name = name or "summonpot"
         # Convert any raw functions to ToolDef objects
-        self._pot_tools: list = []
+        self._tools: list = []
         if tools:
             for t in tools:
                 if isinstance(t, ToolDef):
-                    self._pot_tools.append(t)
+                    self._tools.append(t)
                 else:
-                    self._pot_tools.append(build_tool_from_func(t))
+                    self._tools.append(build_tool_from_func(t))
         self._endpoints: list[EndpointDef] = []
         # (path, method) -> endpoint name, for duplicate-route detection.
         self._routes: dict[tuple[str, str], str] = {}
         self._runtime = runtime if runtime is not None else Runtime(model=model)
 
     def __repr__(self) -> str:
-        return f"Pot({self.name!r}, endpoints={len(self._endpoints)}, tools={len(self._pot_tools)})"
+        return f"Summon({self.name!r}, endpoints={len(self._endpoints)}, tools={len(self._tools)})"
 
-    def summon(
+    def __call__(
         self,
         path: str,
         *,
@@ -99,7 +99,7 @@ class Pot:
         model: str | None = None,
         method: str = "POST",
     ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-        """Decorator: summon an agent behind the given route.
+        """Declare an endpoint at the given route.
 
         Args:
             path: URL path for the endpoint (e.g. ``/research``).
@@ -144,11 +144,11 @@ class Pot:
                     "it is required."
                 )
 
-            # Merge pot-level tools with endpoint-specific tools. Each endpoint
+            # Merge application-level tools with endpoint-specific tools. Each endpoint
             # gets its own ToolDef: `required` is per-endpoint state, so sharing
             # one object would let a Required(...) on one endpoint leak into every
             # other endpoint using the same capability.
-            all_tools = [replace(t) for t in self._pot_tools]
+            all_tools = [replace(t) for t in self._tools]
             if tools:
                 # Convert raw functions to ToolDefs
                 for t in tools:
@@ -282,12 +282,18 @@ class Pot:
             def declaration(*args: Any, **kwargs: Any) -> Any:
                 raise TypeError(
                     f"Summonpot endpoint declaration {endpoint_name!r} is not directly "
-                    f"callable. Serve the Pot or invoke {normalized_method} {path}."
+                    f"callable. Serve the Summon application or invoke "
+                    f"{normalized_method} {path}."
                 )
 
             return declaration
 
         return decorator
+
+    # Temporary source-compatibility bridge for applications that have already renamed
+    # `Pot` to `Summon` but still use `summon.summon(...)`. The callable application is
+    # the only canonical spelling and the only one taught by first-party examples.
+    summon = __call__
 
     @property
     def endpoints(self) -> list[EndpointDef]:

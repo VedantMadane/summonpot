@@ -1,4 +1,4 @@
-"""Tests for the Pot class — endpoint registration and introspection."""
+"""Tests for the Summon class — endpoint registration and introspection."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import Annotated, Literal
 import pytest
 from pydantic import BaseModel, Field
 
-from summonpot import Depends, Pot, Required
+from summonpot import Depends, Required, Summon
 from summonpot.tools import tool
 
 
@@ -22,22 +22,22 @@ class ResearchResponse(BaseModel):
     sources: list[str]
 
 
-def test_pot_init():
-    pot = Pot("svc")
-    assert pot.name == "svc"
-    assert pot.endpoints == []
+def test_summon_init():
+    summon = Summon("svc")
+    assert summon.name == "svc"
+    assert summon.endpoints == []
 
 
 def test_summon_registers_endpoint():
-    pot = Pot("svc")
+    summon = Summon("svc")
 
-    @pot.summon("/research")
+    @summon("/research")
     def research_topic(query: str, depth: str = "standard") -> str:
         """Research this topic."""
         return ""
 
-    assert len(pot.endpoints) == 1
-    ep = pot.endpoints[0]
+    assert len(summon.endpoints) == 1
+    ep = summon.endpoints[0]
     assert ep.path == "/research"
     assert ep.name == "research_topic"
     assert ep.description == "Research this topic."
@@ -49,10 +49,10 @@ def test_summon_registers_endpoint():
 
 
 def test_registered_endpoint_declaration_is_not_directly_callable():
-    pot = Pot("svc")
+    summon = Summon("svc")
     executed: list[str] = []
 
-    @pot.summon("/research")
+    @summon("/research")
     def research_topic(query: str) -> str:
         """Research this topic."""
         executed.append(query)
@@ -63,17 +63,17 @@ def test_registered_endpoint_declaration_is_not_directly_callable():
 
     assert str(error.value) == (
         "Summonpot endpoint declaration 'research_topic' is not directly callable. "
-        "Serve the Pot or invoke POST /research."
+        "Serve the Summon application or invoke POST /research."
     )
     assert executed == []
 
 
 def test_registered_declaration_preserves_its_public_signature():
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     def expected(query: str, depth: int = 1) -> str: ...
 
-    @pot.summon("/research")
+    @summon("/research")
     def research_topic(query: str, depth: int = 1) -> str:
         """Research this topic."""
         ...
@@ -84,14 +84,14 @@ def test_registered_declaration_preserves_its_public_signature():
 
 
 def test_summon_registers_pydantic_input_and_output_contracts():
-    pot = Pot("svc")
+    summon = Summon("svc")
 
-    @pot.summon("/research")
+    @summon("/research")
     def research(request: ResearchRequest) -> ResearchResponse:
         """Research a topic."""
         ...
 
-    endpoint = pot.endpoints[0]
+    endpoint = summon.endpoints[0]
     assert endpoint.input_model is ResearchRequest
     assert endpoint.output_model is ResearchResponse
     assert endpoint.return_type == "ResearchResponse"
@@ -109,9 +109,9 @@ def test_summon_rejects_an_unresolvable_parameter_annotation():
     """Silently dropping the contract is what this must never do again."""
     with pytest.raises(TypeError, match="Could not resolve the annotation"):
         _register_with_unresolvable_annotations(
-            "from summonpot import Pot\n"
-            "pot = Pot('svc')\n"
-            "@pot.summon('/research')\n"
+            "from summonpot import Summon\n"
+            "summon = Summon('svc')\n"
+            "@summon('/research')\n"
             "def research(request: OnlyUnderTypeChecking) -> str:\n"
             "    '''Research a topic.'''\n"
             "    ...\n"
@@ -121,9 +121,9 @@ def test_summon_rejects_an_unresolvable_parameter_annotation():
 def test_summon_rejects_an_unresolvable_return_annotation():
     with pytest.raises(TypeError, match="the return type"):
         _register_with_unresolvable_annotations(
-            "from summonpot import Pot\n"
-            "pot = Pot('svc')\n"
-            "@pot.summon('/research')\n"
+            "from summonpot import Summon\n"
+            "summon = Summon('svc')\n"
+            "@summon('/research')\n"
             "def research(query: str) -> MissingResponseModel:\n"
             "    '''Research a topic.'''\n"
             "    ...\n"
@@ -137,14 +137,14 @@ def test_summon_rejects_a_model_defined_in_a_local_scope():
         class LocalRequest(BaseModel):
             query: str
 
-        pot = Pot("svc")
+        summon = Summon("svc")
 
-        @pot.summon("/research")
+        @summon("/research")
         def research(request: LocalRequest) -> str:
             """Research a topic."""
             ...
 
-        return pot
+        return summon
 
     with pytest.raises(TypeError, match="Could not resolve the annotation"):
         build_pot()
@@ -152,31 +152,31 @@ def test_summon_rejects_a_model_defined_in_a_local_scope():
 
 def test_summon_requires_a_docstring_goal():
     """The docstring is the agent's instructions, so an empty one is not usable."""
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     with pytest.raises(TypeError, match="has no docstring"):
 
-        @pot.summon("/research")
+        @summon("/research")
         def research(request: ResearchRequest) -> ResearchResponse: ...
 
 
 def test_summon_rejects_a_whitespace_only_docstring():
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     with pytest.raises(TypeError, match="has no docstring"):
 
-        @pot.summon("/research")
+        @summon("/research")
         def research(request: ResearchRequest) -> ResearchResponse:
             """ """
             ...
 
 
 def test_summon_rejects_mixed_pydantic_and_scalar_inputs():
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     with pytest.raises(TypeError, match="exactly one request parameter"):
 
-        @pot.summon("/research")
+        @summon("/research")
         def research(request: ResearchRequest, trace_id: str) -> ResearchResponse:
             """Research a topic."""
             ...
@@ -191,9 +191,9 @@ def test_summon_compiles_dependency_parameters_as_closed_capabilities():
         """Rank the loaded sources."""
         return sources
 
-    pot = Pot("svc")
+    summon = Summon("svc")
 
-    @pot.summon("/research")
+    @summon("/research")
     def research(
         request: ResearchRequest,
         sources=Depends(load_sources),
@@ -202,7 +202,7 @@ def test_summon_compiles_dependency_parameters_as_closed_capabilities():
         """Research a topic using only the declared capabilities."""
         ...
 
-    endpoint = pot.endpoints[0]
+    endpoint = summon.endpoints[0]
     assert endpoint.input_model is ResearchRequest
     assert [parameter.name for parameter in endpoint.parameters] == ["request"]
     assert [tool.name for tool in endpoint.tools] == ["load_sources", "rank_sources"]
@@ -217,11 +217,11 @@ def test_summon_rejects_duplicate_capability_names():
         return query
 
     second_lookup.__name__ = "lookup"
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     with pytest.raises(TypeError, match="Duplicate capability name: lookup"):
 
-        @pot.summon("/research")
+        @summon("/research")
         def research(
             request: ResearchRequest,
             first=Depends(lookup),
@@ -231,33 +231,33 @@ def test_summon_rejects_duplicate_capability_names():
             ...
 
 
-def test_pot_level_tools_shared_across_endpoints():
-    pot = Pot("svc", tools=[search_web_raw])
+def test_application_level_tools_shared_across_endpoints():
+    summon = Summon("svc", tools=[search_web_raw])
 
-    @pot.summon("/one")
+    @summon("/one")
     def one(q: str) -> str:
         """One."""
         return ""
 
-    @pot.summon("/two")
+    @summon("/two")
     def two(q: str) -> str:
         """Two."""
         return ""
 
-    assert len(pot.endpoints[0].tools) == 1
-    assert len(pot.endpoints[1].tools) == 1
-    assert pot.endpoints[0].tools[0].name == "search_web_raw"
+    assert len(summon.endpoints[0].tools) == 1
+    assert len(summon.endpoints[1].tools) == 1
+    assert summon.endpoints[0].tools[0].name == "search_web_raw"
 
 
 def test_endpoint_specific_tools_merged():
-    pot = Pot("svc", tools=[search_web_raw])
+    summon = Summon("svc", tools=[search_web_raw])
 
-    @pot.summon("/custom", tools=[translate_raw])
+    @summon("/custom", tools=[translate_raw])
     def custom(q: str) -> str:
         """Custom."""
         return ""
 
-    names = [t.name for t in pot.endpoints[0].tools]
+    names = [t.name for t in summon.endpoints[0].tools]
     assert names == ["search_web_raw", "translate_raw"]
 
 
@@ -274,14 +274,14 @@ def test_tool_decorator_builds_tooldef():
 
 
 def test_repr():
-    pot = Pot("svc")
+    summon = Summon("svc")
 
-    @pot.summon("/x")
+    @summon("/x")
     def x() -> str:
         """X."""
         return ""
 
-    assert "endpoints=1" in repr(pot)
+    assert "endpoints=1" in repr(summon)
 
 
 # --- helpers (plain functions, not decorated) ---
@@ -303,14 +303,14 @@ def test_summon_accepts_explicitly_quoted_forward_references():
     Under PEP 563 the stored source is `'"ResearchRequest"'`, so evaluating it once
     yields the string `'ResearchRequest'` rather than the class.
     """
-    pot = Pot("svc")
+    summon = Summon("svc")
 
-    @pot.summon("/research")
+    @summon("/research")
     def research(request: "ResearchRequest") -> "ResearchResponse":  # noqa: UP037
         """Research a topic."""
         ...
 
-    endpoint = pot.endpoints[0]
+    endpoint = summon.endpoints[0]
     assert endpoint.input_model is ResearchRequest
     assert endpoint.output_model is ResearchResponse
 
@@ -318,9 +318,9 @@ def test_summon_accepts_explicitly_quoted_forward_references():
 def test_summon_still_rejects_a_quoted_name_that_does_not_exist():
     with pytest.raises(TypeError, match="'StillMissing'"):
         _register_with_unresolvable_annotations(
-            "from summonpot import Pot\n"
-            "pot = Pot('svc')\n"
-            "@pot.summon('/research')\n"
+            "from summonpot import Summon\n"
+            "summon = Summon('svc')\n"
+            "@summon('/research')\n"
             'def research(request: "StillMissing") -> str:\n'
             "    '''Research a topic.'''\n"
             "    ...\n"
@@ -329,22 +329,22 @@ def test_summon_still_rejects_a_quoted_name_that_does_not_exist():
 
 def test_summon_resolves_forward_references_inside_container_annotations():
     """`list["ResearchResponse"]` must resolve, not stay a container of strings."""
-    pot = Pot("svc")
+    summon = Summon("svc")
 
-    @pot.summon("/research")
+    @summon("/research")
     def research(request: "ResearchRequest") -> "ResearchResponse":  # noqa: UP037
         """Research a topic."""
         ...
 
-    @pot.summon("/batch")
+    @summon("/batch")
     def batch(items: list["ResearchRequest"]) -> dict[str, "ResearchResponse"]:  # noqa: UP037
         """Research several topics."""
         ...
 
-    assert pot.endpoints[0].input_model is ResearchRequest
+    assert summon.endpoints[0].input_model is ResearchRequest
     # The container resolved to real classes, so it renders with their names rather
     # than as a container of quoted strings.
-    batch_endpoint = pot.endpoints[1]
+    batch_endpoint = summon.endpoints[1]
     assert batch_endpoint.parameters[0].type_annotation == "list[ResearchRequest]"
     assert batch_endpoint.return_type == "dict[str, ResearchResponse]"
 
@@ -352,9 +352,9 @@ def test_summon_resolves_forward_references_inside_container_annotations():
 def test_summon_rejects_a_missing_name_nested_in_a_container():
     with pytest.raises(TypeError, match="'MissingInside'"):
         _register_with_unresolvable_annotations(
-            "from summonpot import Pot\n"
-            "pot = Pot('svc')\n"
-            "@pot.summon('/research')\n"
+            "from summonpot import Summon\n"
+            "summon = Summon('svc')\n"
+            "@summon('/research')\n"
             'def research(items: list["MissingInside"]) -> str:\n'
             "    '''Research topics.'''\n"
             "    ...\n"
@@ -363,11 +363,11 @@ def test_summon_rejects_a_missing_name_nested_in_a_container():
 
 def test_summon_rejects_a_path_without_a_leading_slash():
     """Such a path registers and builds, but no request can ever reach it."""
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     with pytest.raises(ValueError, match="must start with '/'"):
 
-        @pot.summon("research")
+        @summon("research")
         def research(request: ResearchRequest) -> ResearchResponse:
             """Research a topic."""
             ...
@@ -375,51 +375,51 @@ def test_summon_rejects_a_path_without_a_leading_slash():
 
 def test_summon_rejects_a_duplicate_path():
     """Starlette dispatches the first match, so the second was silently dead."""
-    pot = Pot("svc")
+    summon = Summon("svc")
 
-    @pot.summon("/research")
+    @summon("/research")
     def research(request: ResearchRequest) -> ResearchResponse:
         """Research a topic."""
         ...
 
     with pytest.raises(ValueError, match="POST /research is already registered"):
 
-        @pot.summon("/research")
+        @summon("/research")
         def research_again(request: ResearchRequest) -> ResearchResponse:
             """Research a topic differently."""
             ...
 
-    assert len(pot.endpoints) == 1
+    assert len(summon.endpoints) == 1
 
 
 def test_summon_allows_one_path_to_carry_different_methods():
     """GET /orders and POST /orders are distinct routes."""
-    pot = Pot("svc")
+    summon = Summon("svc")
 
-    @pot.summon("/orders", method="GET")
+    @summon("/orders", method="GET")
     def list_orders(status: str = "open") -> str:
         """List orders."""
         return ""
 
-    @pot.summon("/orders", method="POST")
+    @summon("/orders", method="POST")
     def place_order(item: str) -> str:
         """Place an order."""
         return ""
 
-    assert len(pot.endpoints) == 2
+    assert len(summon.endpoints) == 2
 
 
 def test_summon_normalizes_the_method_when_detecting_duplicates():
-    pot = Pot("svc")
+    summon = Summon("svc")
 
-    @pot.summon("/orders", method="GET")
+    @summon("/orders", method="GET")
     def list_orders(status: str = "open") -> str:
         """List orders."""
         return ""
 
     with pytest.raises(ValueError, match="GET /orders is already registered"):
 
-        @pot.summon("/orders", method="get")
+        @summon("/orders", method="get")
         def list_orders_again(status: str = "open") -> str:
             """List orders again."""
             return ""
@@ -427,84 +427,84 @@ def test_summon_normalizes_the_method_when_detecting_duplicates():
 
 def test_summon_rejects_unimplemented_streaming():
     """The flag shipped in 0.2.0 but was never read by the runtime or the server."""
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     with pytest.raises(NotImplementedError, match="stream=True is not implemented"):
 
-        @pot.summon("/research", stream=True)
+        @summon("/research", stream=True)
         def research(request: ResearchRequest) -> ResearchResponse:
             """Research a topic."""
             ...
 
-    assert pot.endpoints == []
+    assert summon.endpoints == []
 
 
 def test_summon_still_accepts_the_default_non_streaming_endpoint():
-    pot = Pot("svc")
+    summon = Summon("svc")
 
-    @pot.summon("/research")
+    @summon("/research")
     def research(request: ResearchRequest) -> ResearchResponse:
         """Research a topic."""
         ...
 
-    assert pot.endpoints[0].stream is False
+    assert summon.endpoints[0].stream is False
 
 
-def test_pot_level_capabilities_are_not_shared_between_endpoints():
+def test_application_level_capabilities_are_not_shared_between_endpoints():
     """`required` is per-endpoint state and must not leak across endpoints."""
-    pot = Pot("svc", tools=[search_web_raw])
+    summon = Summon("svc", tools=[search_web_raw])
 
-    @pot.summon("/one")
+    @summon("/one")
     def one(q: str) -> str:
         """One."""
         return ""
 
-    @pot.summon("/two")
+    @summon("/two")
     def two(q: str) -> str:
         """Two."""
         return ""
 
-    first, second = pot.endpoints[0].tools[0], pot.endpoints[1].tools[0]
+    first, second = summon.endpoints[0].tools[0], summon.endpoints[1].tools[0]
     assert first is not second
-    assert first is not pot._pot_tools[0]
+    assert first is not summon._tools[0]
 
     first.required = True
 
     assert second.required is False
-    assert pot._pot_tools[0].required is False
+    assert summon._tools[0].required is False
 
 
-def test_pot_accepts_a_default_model():
-    pot = Pot("svc", model="anthropic:claude-sonnet-4-5")
+def test_summon_accepts_a_default_model():
+    summon = Summon("svc", model="anthropic:claude-sonnet-4-5")
 
-    assert pot._runtime.default_model == "anthropic:claude-sonnet-4-5"
+    assert summon._runtime.default_model == "anthropic:claude-sonnet-4-5"
 
 
-def test_pot_rejects_both_model_and_runtime():
+def test_summon_rejects_both_model_and_runtime():
     """A supplied runtime already carries its own model."""
     from summonpot.runtime import Runtime
 
     with pytest.raises(TypeError, match="not both"):
-        Pot("svc", model="openai:gpt-4o-mini", runtime=Runtime())
+        Summon("svc", model="openai:gpt-4o-mini", runtime=Runtime())
 
 
 def test_summon_normalizes_and_records_the_method():
-    pot = Pot("svc")
+    summon = Summon("svc")
 
-    @pot.summon("/forecast", method="get")
+    @summon("/forecast", method="get")
     def forecast(city: str) -> str:
         """Report the forecast."""
         return ""
 
-    assert pot.endpoints[0].method == "GET"
+    assert summon.endpoints[0].method == "GET"
 
 
 def test_summon_rejects_an_unsupported_method():
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     with pytest.raises(ValueError, match="Unsupported HTTP method"):
 
-        @pot.summon("/forecast", method="TRACE")
+        @summon("/forecast", method="TRACE")
         def forecast(city: str) -> str:
             """Report the forecast."""
             return ""
@@ -512,11 +512,11 @@ def test_summon_rejects_an_unsupported_method():
 
 def test_summon_rejects_a_request_model_on_a_bodyless_method():
     """A GET has no body to carry the model, so this must fail at registration."""
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     with pytest.raises(TypeError, match="carries no request body"):
 
-        @pot.summon("/research", method="GET")
+        @summon("/research", method="GET")
         def research(request: ResearchRequest) -> ResearchResponse:
             """Research a topic."""
             ...
@@ -528,33 +528,33 @@ def test_summon_rejects_a_request_model_on_a_bodyless_method():
 )
 def test_summon_rejects_query_annotations_with_no_encoding(annotation):
     """These used to reach FastAPI and crash build_app() during startup."""
-    namespace = {"ResearchRequest": ResearchRequest, "Pot": Pot}
+    namespace = {"ResearchRequest": ResearchRequest, "Summon": Summon}
     source = (
         f"def endpoint(payload: {annotation} = None) -> str:\n"
         "    '''Look something up.'''\n"
         "    return ''\n"
     )
     exec(source, namespace)
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     with pytest.raises(TypeError, match="has no query encoding"):
-        pot.summon("/lookup", method="GET")(namespace["endpoint"])
+        summon("/lookup", method="GET")(namespace["endpoint"])
 
 
 @pytest.mark.parametrize("annotation", ["list[int] | None", "int | str", "str"])
 def test_summon_accepts_query_representable_annotations(annotation):
-    namespace = {"Pot": Pot}
+    namespace = {"Summon": Summon}
     source = (
         f"def endpoint(value: {annotation} = None) -> str:\n"
         "    '''Look something up.'''\n"
         "    return ''\n"
     )
     exec(source, namespace)
-    pot = Pot("svc")
+    summon = Summon("svc")
 
-    pot.summon("/lookup", method="GET")(namespace["endpoint"])
+    summon("/lookup", method="GET")(namespace["endpoint"])
 
-    assert pot.endpoints[0].method == "GET"
+    assert summon.endpoints[0].method == "GET"
 
 
 @pytest.mark.parametrize(
@@ -572,7 +572,7 @@ def test_summon_accepts_constrained_scalar_query_annotations(annotation):
         "Annotated": Annotated,
         "Literal": Literal,
         "Field": Field,
-        "Pot": Pot,
+        "Summon": Summon,
     }
     source = (
         f"def endpoint(value: {annotation} = None) -> str:\n"
@@ -580,44 +580,44 @@ def test_summon_accepts_constrained_scalar_query_annotations(annotation):
         "    return ''\n"
     )
     exec(source, namespace)
-    pot = Pot("svc")
+    summon = Summon("svc")
 
-    pot.summon("/lookup", method="GET")(namespace["endpoint"])
+    summon("/lookup", method="GET")(namespace["endpoint"])
 
-    assert pot.endpoints[0].method == "GET"
+    assert summon.endpoints[0].method == "GET"
 
 
 def test_summon_still_rejects_a_mapping_hidden_behind_annotated():
     """Unwrapping Annotated must not open a hole for mappings."""
-    namespace = {"Annotated": Annotated, "Field": Field, "Pot": Pot}
+    namespace = {"Annotated": Annotated, "Field": Field, "Summon": Summon}
     source = (
         "def endpoint(value: Annotated[dict[str, int], Field()] = None) -> str:\n"
         "    '''Look something up.'''\n"
         "    return ''\n"
     )
     exec(source, namespace)
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     with pytest.raises(TypeError, match="has no query encoding"):
-        pot.summon("/lookup", method="GET")(namespace["endpoint"])
+        summon("/lookup", method="GET")(namespace["endpoint"])
 
 
 def test_summon_rejects_the_same_path_and_method_twice():
-    pot = Pot("svc")
+    summon = Summon("svc")
 
-    @pot.summon("/orders", method="GET")
+    @summon("/orders", method="GET")
     def list_orders(status: str = "open") -> str:
         """List orders."""
         return ""
 
     with pytest.raises(ValueError, match="GET /orders is already registered"):
 
-        @pot.summon("/orders", method="get")
+        @summon("/orders", method="get")
         def list_orders_again(status: str = "open") -> str:
             """List orders differently."""
             return ""
 
-    assert len(pot.endpoints) == 1
+    assert len(summon.endpoints) == 1
 
 
 def test_summon_accepts_a_local_model_passed_as_a_live_annotation():
@@ -628,22 +628,22 @@ def test_summon_accepts_a_local_model_passed_as_a_live_annotation():
     """
     source = (
         "from pydantic import BaseModel\n"
-        "from summonpot import Pot\n"
+        "from summonpot import Summon\n"
         "def build():\n"
         "    class LocalRequest(BaseModel):\n"
         "        query: str\n"
-        "    pot = Pot('svc')\n"
-        "    @pot.summon('/research')\n"
+        "    summon = Summon('svc')\n"
+        "    @summon('/research')\n"
         "    def research(request: LocalRequest) -> str:\n"
         '        """Research a topic."""\n'
         "        ...\n"
-        "    return pot\n"
+        "    return summon\n"
     )
     # dont_inherit: this module uses postponed annotations, and exec would
     # otherwise pass that flag on -- the very condition being excluded here.
     namespace: dict = {}
     exec(compile(source, "<local-model>", "exec", dont_inherit=True), namespace)
 
-    pot = namespace["build"]()
+    summon = namespace["build"]()
 
-    assert pot.endpoints[0].input_model.__name__ == "LocalRequest"
+    assert summon.endpoints[0].input_model.__name__ == "LocalRequest"

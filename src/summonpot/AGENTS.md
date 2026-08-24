@@ -13,8 +13,9 @@ silently degraded typed endpoints to untyped ones for months. Catch the exact er
 can handle, and let the rest surface.
 
 **Fail at registration, not at request time.** Roughly ten of 0.3.0's changes turned
-silently-wrong declarations into errors raised when the pot is imported. A wrong
-declaration should never reach traffic. When adding a rule, add it to `summon()`.
+silently-wrong declarations into errors raised when the application module is imported.
+A wrong declaration should never reach traffic. When adding a rule, add it to
+`Summon.__call__()`.
 
 **Do not use a name as a proxy for a property.** Rejecting a capability because its
 first parameter is called `self` both rejected valid functions and accepted real

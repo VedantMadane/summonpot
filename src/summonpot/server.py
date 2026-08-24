@@ -8,20 +8,20 @@ from types import UnionType
 from typing import TYPE_CHECKING, Annotated, Any, Union, get_args, get_origin
 
 from summonpot import __version__
-from summonpot.pot import BODYLESS_METHODS, _unwrap_annotated
+from summonpot.summon import BODYLESS_METHODS, _unwrap_annotated
 
 if TYPE_CHECKING:
-    from summonpot.pot import Pot
+    from summonpot.summon import Summon
 
 logger = logging.getLogger("summonpot.server")
 
 
-def build_app(pot: Pot) -> Any:
-    """Build a FastAPI application from a Pot instance."""
+def build_app(summon: Summon) -> Any:
+    """Build a FastAPI application from a Summon instance."""
     from fastapi import FastAPI
 
     app = FastAPI(
-        title=pot.name,
+        title=summon.name,
         description=(
             "A contract-first Python framework for turning typed endpoint declarations "
             "into executable APIs."
@@ -29,14 +29,14 @@ def build_app(pot: Pot) -> Any:
         version=__version__,
     )
 
-    for endpoint in pot.endpoints:
+    for endpoint in summon.endpoints:
         route_path = endpoint.path
         method = endpoint.method
 
         if endpoint.parameters and method in BODYLESS_METHODS:
             # GET/DELETE/HEAD carry no request body, so the declared parameters
             # become query parameters instead.
-            _handle_with_query = _make_query_handler(endpoint, pot)
+            _handle_with_query = _make_query_handler(endpoint, summon)
             app.add_api_route(
                 route_path,
                 _handle_with_query,
@@ -68,7 +68,7 @@ def build_app(pot: Pot) -> Any:
                     **fields,  # pyright: ignore[reportArgumentType, reportCallIssue]
                 )
 
-            _handle_with_body = _make_body_handler(endpoint, pot, RequestModel)
+            _handle_with_body = _make_body_handler(endpoint, summon, RequestModel)
 
             app.add_api_route(
                 route_path,
@@ -83,7 +83,7 @@ def build_app(pot: Pot) -> Any:
                 description=endpoint.description,
             )
         else:
-            _handle_without_body = _make_no_body_handler(endpoint, pot)
+            _handle_without_body = _make_no_body_handler(endpoint, summon)
 
             app.add_api_route(
                 route_path,
@@ -101,7 +101,7 @@ def build_app(pot: Pot) -> Any:
     return app
 
 
-async def _run_endpoint(pot: Any, endpoint: Any, params: dict[str, Any]) -> Any:
+async def _run_endpoint(summon: Any, endpoint: Any, params: dict[str, Any]) -> Any:
     """Run an endpoint, translating runtime failures into stable HTTP responses.
 
     Without this every failure — an unmet required capability, a provider outage, an
@@ -116,7 +116,7 @@ async def _run_endpoint(pot: Any, endpoint: Any, params: dict[str, Any]) -> Any:
     )
 
     try:
-        return await pot._runtime.call(endpoint, params)
+        return await summon._runtime.call(endpoint, params)
     except UsageLimitExceeded as exc:
         # Details are logged, never returned: an exception raised inside the agent
         # loop can carry rejected model output or tool-call context, and the HTTP
@@ -171,7 +171,7 @@ async def _run_endpoint(pot: Any, endpoint: Any, params: dict[str, Any]) -> Any:
         ) from exc
 
 
-def _make_body_handler(endpoint: Any, pot: Any, request_model: type[Any]) -> Any:
+def _make_body_handler(endpoint: Any, summon: Any, request_model: type[Any]) -> Any:
     """Create a body-only route handler while retaining endpoint context in its closure."""
 
     async def handle(body: Any) -> Any:
@@ -180,7 +180,7 @@ def _make_body_handler(endpoint: Any, pot: Any, request_model: type[Any]) -> Any
             if hasattr(body, "model_dump")
             else body
         )
-        return await _run_endpoint(pot, endpoint, params)
+        return await _run_endpoint(summon, endpoint, params)
 
     handle.__annotations__["body"] = request_model
     return handle
@@ -199,13 +199,13 @@ def _needs_query_marker(annotation: Any) -> bool:
     return origin in (list, set, frozenset, tuple)
 
 
-def _make_query_handler(endpoint: Any, pot: Any) -> Any:
+def _make_query_handler(endpoint: Any, summon: Any) -> Any:
     """Create a handler whose parameters arrive as a query string."""
 
     from fastapi import Query
 
     async def handle(**kwargs: Any) -> Any:
-        return await _run_endpoint(pot, endpoint, kwargs)
+        return await _run_endpoint(summon, endpoint, kwargs)
 
     parameters = []
     annotations: dict[str, Any] = {}
@@ -240,11 +240,11 @@ def _make_query_handler(endpoint: Any, pot: Any) -> Any:
     return handle
 
 
-def _make_no_body_handler(endpoint: Any, pot: Any) -> Any:
+def _make_no_body_handler(endpoint: Any, summon: Any) -> Any:
     """Create a parameter-free route handler with context retained in its closure."""
 
     async def handle() -> Any:
-        return await _run_endpoint(pot, endpoint, {})
+        return await _run_endpoint(summon, endpoint, {})
 
     return handle
 

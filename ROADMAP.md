@@ -112,7 +112,7 @@ no valid path
 
 This decision will use the fixed endpoint goal, validated request, capability graph, and operation results. Callers will not send an `action` field or select an agent framework.
 
-The public declaration remains `@pot.summon` in every mode. Endpoint authors will not maintain separate deterministic and agentic handlers for the same goal:
+The public declaration remains `@summon` in every mode. Endpoint authors will not maintain separate deterministic and agentic handlers for the same goal:
 
 - A balance endpoint with one exact account lookup and calculation path can run deterministically.
 - An order-fulfilment endpoint can run deterministically when only one valid option remains.
@@ -142,7 +142,7 @@ Summonpot—not the caller or model—will choose the smallest eligible harness.
 ## Non-goals
 
 - Requiring users to configure agent graphs, chains, planners, or framework-specific agents.
-- Turning `@pot.summon` into a traditional handler decorator.
+- Turning `@summon` into a traditional handler decorator.
 - One endpoint or method for every possible action when one fixed goal can naturally orchestrate bounded capabilities.
 - Accepting caller-provided action names as a substitute for endpoint intent.
 - Exposing raw database sessions, arbitrary SQL, shell access, filesystem access, or ambient application authority.

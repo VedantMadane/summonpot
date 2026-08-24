@@ -90,7 +90,7 @@ class Runtime:
         """Resolve the default model at call time.
 
         Resolved lazily so that setting ``SUMMONPOT_MODEL`` after the module
-        defining the ``Pot`` is imported still takes effect. Reading it in
+        defining the ``Summon`` application is imported still takes effect. Reading it in
         ``__init__`` made the variable silently useless in that very common case.
         """
         configured = self._model or os.environ.get(

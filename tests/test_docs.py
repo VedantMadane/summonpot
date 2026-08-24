@@ -30,9 +30,9 @@ def test_binding_mitigation_snippet_runs():
 
     exec(_snippet_after("Binding and exposure"), namespace)
 
-    pot = namespace["pot"]
-    assert pot._runtime.usage_limits is not None
-    assert pot._runtime.timeout is not None
+    summon = namespace["summon"]
+    assert summon._runtime.usage_limits is not None
+    assert summon._runtime.timeout is not None
 
 
 def test_bounding_a_call_snippet_runs():
@@ -40,9 +40,9 @@ def test_bounding_a_call_snippet_runs():
 
     exec(_snippet_after("## Bounding a call"), namespace)
 
-    pot = namespace["pot"]
-    assert pot._runtime.usage_limits is not None
-    assert pot._runtime.timeout == 30.0
+    summon = namespace["summon"]
+    assert summon._runtime.usage_limits is not None
+    assert summon._runtime.timeout == 30.0
 
 
 @pytest.mark.parametrize("api", ["UsageLimits"])
@@ -55,7 +55,7 @@ def test_documented_public_names_are_importable(api):
 def test_declaration_surfaces_use_ellipsis_instead_of_not_implemented():
     surfaces = [
         README,
-        ROOT / "src/summonpot/pot.py",
+        ROOT / "src/summonpot/summon.py",
         ROOT / "src/summonpot/contracts.py",
         ROOT / "src/summonpot/templates/skills/summonpot.md",
         *sorted((ROOT / "docs").rglob("*.md")),

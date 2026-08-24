@@ -29,13 +29,13 @@ Two invariants govern almost every design argument:
 
 ```text
 src/summonpot/
-  pot.py            @pot.summon, registration and all registration-time guards
+  summon.py            @summon, registration and all registration-time guards
   runtime.py        the agent loop, model resolution, usage limits and timeout
   server.py         FastAPI route construction, request schemas, HTTP error mapping
   models.py         EndpointDef, ToolDef, ParamDef
   dependencies.py   Depends / Required
   tools.py          capability construction from callables
-  _annotations.py   shared annotation resolution (used by pot.py and tools.py)
+  _annotations.py   shared annotation resolution (used by summon.py and tools.py)
   cli.py            the summonpot command
   commands/         CLI subcommands
   skills/           the shipped agent skill, and per-agent formatting

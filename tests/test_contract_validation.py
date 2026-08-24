@@ -17,8 +17,8 @@ from summonpot import (
     FromRequest,
     FromResult,
     Operation,
-    Pot,
     Required,
+    Summon,
 )
 
 
@@ -56,23 +56,23 @@ def record_audit(customer_id: str) -> Customer:
 
 def test_a_bare_callable_needs_no_contract():
     """The contract is opt-in; endpoints written before it keep working."""
-    pot = Pot("svc")
+    summon = Summon("svc")
 
-    @pot.summon("/orders")
+    @summon("/orders")
     def create_order(
         request: OrderRequest, customer=Required(lookup_customer)
     ) -> OrderResponse:
         """Place an order."""
         ...
 
-    assert pot.endpoints[0].tools[0].contract is None
+    assert summon.endpoints[0].tools[0].contract is None
 
 
 def test_an_operation_may_declare_an_output_without_bindings():
     """Declaring no bindings means what it means today: the model chooses."""
-    pot = Pot("svc")
+    summon = Summon("svc")
 
-    @pot.summon("/orders")
+    @summon("/orders")
     def create_order(
         request: OrderRequest,
         customer=Required(Operation(lookup_customer, output=Customer)),
@@ -80,7 +80,7 @@ def test_an_operation_may_declare_an_output_without_bindings():
         """Place an order."""
         ...
 
-    assert pot.endpoints[0].tools[0].contract is not None
+    assert summon.endpoints[0].tools[0].contract is not None
 
 
 def test_a_complete_chain_of_bindings_is_accepted():
@@ -89,9 +89,9 @@ def test_a_complete_chain_of_bindings_is_accepted():
         bind={"customer_id": FromRequest("customer_id")},
         output=Customer,
     )
-    pot = Pot("svc")
+    summon = Summon("svc")
 
-    @pot.summon("/orders")
+    @summon("/orders")
     def create_order(
         request: OrderRequest,
         customer=Required(lookup),
@@ -110,14 +110,14 @@ def test_a_complete_chain_of_bindings_is_accepted():
         """Place an order."""
         ...
 
-    assert len(pot.endpoints[0].tools) == 2
+    assert len(summon.endpoints[0].tools) == 2
 
 
 @pytest.mark.parametrize("source", [AgentChoice(), FromContext("user_id")])
 def test_non_request_sources_are_accepted(source):
-    pot = Pot("svc")
+    summon = Summon("svc")
 
-    @pot.summon("/orders")
+    @summon("/orders")
     def create_order(
         request: OrderRequest,
         customer=Required(
@@ -127,14 +127,14 @@ def test_non_request_sources_are_accepted(source):
         """Place an order."""
         ...
 
-    assert pot.endpoints[0].tools[0].contract is not None
+    assert summon.endpoints[0].tools[0].contract is not None
 
 
 def test_from_request_resolves_against_a_scalar_endpoint():
     """An endpoint without a request model still declares bindable field names."""
-    pot = Pot("svc")
+    summon = Summon("svc")
 
-    @pot.summon("/orders")
+    @summon("/orders")
     def create_order(
         customer_id: str,
         customer=Required(
@@ -148,7 +148,7 @@ def test_from_request_resolves_against_a_scalar_endpoint():
         """Place an order."""
         ...
 
-    assert pot.endpoints[0].tools[0].contract is not None
+    assert summon.endpoints[0].tools[0].contract is not None
 
 
 def test_a_diamond_of_dependencies_is_not_a_cycle():
@@ -173,9 +173,9 @@ def test_a_diamond_of_dependencies_is_not_a_cycle():
         output=OrderResponse,
         after=[second],
     )
-    pot = Pot("svc")
+    summon = Summon("svc")
 
-    @pot.summon("/orders")
+    @summon("/orders")
     def create_order(
         request: OrderRequest,
         a=Required(first),
@@ -185,18 +185,18 @@ def test_a_diamond_of_dependencies_is_not_a_cycle():
         """Place an order."""
         ...
 
-    assert len(pot.endpoints[0].tools) == 3
+    assert len(summon.endpoints[0].tools) == 3
 
 
 # --- invalid declarations fail at registration -------------------------------
 
 
 def test_a_binding_for_an_unknown_argument_is_rejected():
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     with pytest.raises(TypeError, match="takes no such argument"):
 
-        @pot.summon("/orders")
+        @summon("/orders")
         def create_order(
             request: OrderRequest,
             customer=Required(
@@ -213,11 +213,11 @@ def test_a_binding_for_an_unknown_argument_is_rejected():
 
 def test_a_partially_bound_operation_is_rejected():
     """An omitted argument must not silently become model-controlled."""
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     with pytest.raises(TypeError, match="unbound"):
 
-        @pot.summon("/orders")
+        @summon("/orders")
         def create_order(
             request: OrderRequest,
             order=Required(
@@ -233,11 +233,11 @@ def test_a_partially_bound_operation_is_rejected():
 
 
 def test_from_request_naming_a_missing_field_is_rejected():
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     with pytest.raises(TypeError, match="request does not declare"):
 
-        @pot.summon("/orders")
+        @summon("/orders")
         def create_order(
             request: OrderRequest,
             customer=Required(
@@ -254,11 +254,11 @@ def test_from_request_naming_a_missing_field_is_rejected():
 
 def test_from_result_on_an_undeclared_operation_is_rejected():
     elsewhere = Operation(lookup_customer, output=Customer)
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     with pytest.raises(TypeError, match="does not declare"):
 
-        @pot.summon("/orders")
+        @summon("/orders")
         def create_order(
             request: OrderRequest,
             order=Required(
@@ -282,11 +282,11 @@ def test_from_result_on_an_operation_without_an_output_is_rejected():
     lookup = Operation(
         lookup_customer, bind={"customer_id": FromRequest("customer_id")}
     )
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     with pytest.raises(TypeError, match="declares no output type"):
 
-        @pot.summon("/orders")
+        @summon("/orders")
         def create_order(
             request: OrderRequest,
             customer=Required(lookup),
@@ -312,11 +312,11 @@ def test_from_result_naming_a_missing_output_field_is_rejected():
         bind={"customer_id": FromRequest("customer_id")},
         output=Customer,
     )
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     with pytest.raises(TypeError, match="Customer does not declare"):
 
-        @pot.summon("/orders")
+        @summon("/orders")
         def create_order(
             request: OrderRequest,
             customer=Required(lookup),
@@ -349,8 +349,8 @@ def flexible_lookup(customer_id: str, **extra: object) -> Customer:
     return Customer(customer_id=customer_id, tier="standard")
 
 
-def _register(pot: Pot, contract: Operation) -> None:
-    @pot.summon("/orders")
+def _register(summon: Summon, contract: Operation) -> None:
+    @summon("/orders")
     def create_order(request: OrderRequest, op=Required(contract)) -> OrderResponse:
         """Place an order."""
         ...
@@ -358,10 +358,10 @@ def _register(pot: Pot, contract: Operation) -> None:
 
 def test_an_argument_with_a_default_may_be_left_unbound():
     """It is already determined: it takes the default and is not offered to the model."""
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     _register(
-        pot,
+        summon,
         Operation(
             search_customers,
             bind={"query": FromRequest("customer_id")},
@@ -369,14 +369,14 @@ def test_an_argument_with_a_default_may_be_left_unbound():
         ),
     )
 
-    assert pot.endpoints[0].tools[0].contract is not None
+    assert summon.endpoints[0].tools[0].contract is not None
 
 
 def test_an_argument_with_a_default_may_still_be_bound_explicitly():
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     _register(
-        pot,
+        summon,
         Operation(
             search_customers,
             bind={"query": FromRequest("customer_id"), "limit": AgentChoice()},
@@ -384,15 +384,15 @@ def test_an_argument_with_a_default_may_still_be_bound_explicitly():
         ),
     )
 
-    assert pot.endpoints[0].tools[0].contract is not None
+    assert summon.endpoints[0].tools[0].contract is not None
 
 
 def test_an_argument_without_a_default_still_has_to_be_bound():
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     with pytest.raises(TypeError, match="no default"):
         _register(
-            pot,
+            summon,
             Operation(
                 place_order,
                 bind={"customer_id": FromRequest("customer_id")},
@@ -402,11 +402,11 @@ def test_an_argument_without_a_default_still_has_to_be_bound():
 
 
 def test_an_operation_without_kwargs_still_rejects_an_unknown_binding():
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     with pytest.raises(TypeError, match="takes no such argument"):
         _register(
-            pot,
+            summon,
             Operation(
                 search_customers,
                 bind={"query": FromRequest("customer_id"), "nope": AgentChoice()},
@@ -426,10 +426,10 @@ def test_a_bound_method_operation_is_accepted():
             """Look up a customer."""
             return Customer(customer_id=customer_id, tier=self.tier)
 
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     _register(
-        pot,
+        summon,
         Operation(
             Directory("gold").lookup,
             bind={"customer_id": FromRequest("customer_id")},
@@ -437,7 +437,7 @@ def test_a_bound_method_operation_is_accepted():
         ),
     )
 
-    assert pot.endpoints[0].tools[0].contract is not None
+    assert summon.endpoints[0].tools[0].contract is not None
 
 
 # --- the capability set is closed --------------------------------------------
@@ -446,11 +446,11 @@ def test_a_bound_method_operation_is_accepted():
 def test_after_may_only_name_a_declared_operation():
     """Ordering is part of the graph, so it cannot reach outside the endpoint."""
     elsewhere = Operation(lookup_customer, output=Customer)
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     with pytest.raises(TypeError, match="orders itself after"):
 
-        @pot.summon("/orders")
+        @summon("/orders")
         def create_order(
             request: OrderRequest,
             order=Required(
@@ -472,11 +472,11 @@ def test_after_may_only_name_a_declared_operation():
 
 def test_agent_choice_may_only_offer_results_of_a_declared_operation():
     elsewhere = Operation(lookup_customer, output=Customer)
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     with pytest.raises(TypeError, match="offers"):
 
-        @pot.summon("/orders")
+        @summon("/orders")
         def create_order(
             request: OrderRequest,
             order=Required(
@@ -501,9 +501,9 @@ def test_after_naming_a_declared_operation_is_accepted():
         bind={"customer_id": FromRequest("customer_id")},
         output=Customer,
     )
-    pot = Pot("svc")
+    summon = Summon("svc")
 
-    @pot.summon("/orders")
+    @summon("/orders")
     def create_order(
         request: OrderRequest,
         customer=Required(lookup),
@@ -523,7 +523,7 @@ def test_after_naming_a_declared_operation_is_accepted():
         """Place an order."""
         ...
 
-    assert len(pot.endpoints[0].tools) == 2
+    assert len(summon.endpoints[0].tools) == 2
 
 
 # --- a result must be structured to be read from -----------------------------
@@ -544,11 +544,11 @@ def test_a_field_cannot_be_read_from_an_unstructured_result():
     producer = Operation(
         scalar_lookup, bind={"customer_id": FromRequest("customer_id")}, output=str
     )
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     with pytest.raises(TypeError, match="cannot be checked"):
 
-        @pot.summon("/orders")
+        @summon("/orders")
         def create_order(
             request: OrderRequest,
             tier=Required(producer),
@@ -582,11 +582,11 @@ def test_a_field_cannot_be_read_from_an_unstructured_result():
 def test_a_contracted_operation_may_not_be_variadic(operation):
     """A variadic schema is open-ended, so the model could pass unnamed arguments."""
     operation.__doc__ = "Look up a customer."
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     with pytest.raises(TypeError, match="explicit parameters"):
 
-        @pot.summon("/orders")
+        @summon("/orders")
         def create_order(
             request: OrderRequest,
             customer=Required(
@@ -608,16 +608,16 @@ def test_a_bare_variadic_callable_is_still_allowed():
         """Look up a customer."""
         return Customer(customer_id="c", tier="t")
 
-    pot = Pot("svc")
+    summon = Summon("svc")
 
-    @pot.summon("/orders")
+    @summon("/orders")
     def create_order(
         request: OrderRequest, customer=Required(flexible)
     ) -> OrderResponse:
         """Place an order."""
         ...
 
-    assert pot.endpoints[0].tools[0].contract is None
+    assert summon.endpoints[0].tools[0].contract is None
 
 
 # --- a result reaching the model must be validatable --------------------------
@@ -628,11 +628,11 @@ def test_agent_choice_may_not_offer_a_result_with_no_declared_output():
     producer = Operation(
         lookup_customer, bind={"customer_id": FromRequest("customer_id")}
     )
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     with pytest.raises(TypeError, match="declares no output type"):
 
-        @pot.summon("/orders")
+        @summon("/orders")
         def create_order(
             request: OrderRequest,
             customer=Required(producer),
@@ -658,9 +658,9 @@ def test_agent_choice_may_offer_a_result_with_a_declared_output():
         bind={"customer_id": FromRequest("customer_id")},
         output=list[str],
     )
-    pot = Pot("svc")
+    summon = Summon("svc")
 
-    @pot.summon("/orders")
+    @summon("/orders")
     def create_order(
         request: OrderRequest,
         customer=Required(producer),
@@ -679,7 +679,7 @@ def test_agent_choice_may_offer_a_result_with_a_declared_output():
         """Place an order."""
         ...
 
-    assert len(pot.endpoints[0].tools) == 2
+    assert len(summon.endpoints[0].tools) == 2
 
 
 def test_agent_choice_may_not_offer_a_scalar_result():
@@ -692,11 +692,11 @@ def test_agent_choice_may_not_offer_a_scalar_result():
     producer = Operation(
         scalar_lookup, bind={"customer_id": FromRequest("customer_id")}, output=str
     )
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     with pytest.raises(TypeError, match="not a collection of selectable items"):
 
-        @pot.summon("/orders")
+        @summon("/orders")
         def create_order(
             request: OrderRequest,
             tier=Required(producer),
@@ -721,11 +721,11 @@ def test_the_unstructured_output_error_recommends_something_accepted():
     producer = Operation(
         scalar_lookup, bind={"customer_id": FromRequest("customer_id")}, output=str
     )
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     with pytest.raises(TypeError) as error:
 
-        @pot.summon("/orders")
+        @summon("/orders")
         def create_order(
             request: OrderRequest,
             tier=Required(producer),
