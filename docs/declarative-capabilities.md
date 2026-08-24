@@ -121,6 +121,8 @@ Request data reaches the model as text, and the model chooses the arguments for 
 
 Write each capability so it validates its own inputs and enforces its own authorization, exactly as you would for an operation reachable from an untrusted caller. Do not rely on the agent to pass only sensible arguments.
 
-Constraining argument sources—request data, prior operation results, framework context, or explicitly agent-controlled values—is milestone 1 on the [roadmap](../ROADMAP.md).
+Enforcing declared argument sources at runtime—injecting request data, prior operation
+results, framework context, or explicitly agent-controlled values—is milestone 1 on the
+[roadmap](../ROADMAP.md).
 
 Strict SQLAlchemy and SQLite operation objects are planned and not yet shipped. See the target API examples in the README and the implementation sequence in the roadmap.
