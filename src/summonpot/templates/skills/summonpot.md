@@ -158,8 +158,9 @@ The argument sources mean:
 
 Once `bind=` is present, bind every argument that has no default. Registration rejects
 unknown arguments, missing request or result fields, undeclared producers, unreadable
-outputs, invalid `after=` references, dependency cycles, and unsupported selectable
-collection shapes.
+outputs, invalid `after=` references, and unsupported selectable collection shapes.
+Dependency cycles are structurally unrepresentable through the immutable public
+`Operation` API rather than discovered by a separate cycle detector.
 
 Known source, element, and destination types must be compatible. The policy is to
 **reject only provable incompatibility**: missing annotations, `Any`, context values, and

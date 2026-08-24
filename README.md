@@ -129,8 +129,9 @@ not accepted until every `Required(...)` operation has completed successfully.
 Summonpot 0.5.0 makes capability dataflow part of the endpoint declaration. `Operation`
 can bind arguments to request fields, validated prior results, framework context, or an
 explicitly model-chosen item. Registration rejects incomplete contracts, invalid
-references, unsupported choice collections, dependency cycles, and type relationships
-that are provably incompatible.
+references, unsupported choice collections, and type relationships that are provably
+incompatible. Dependency cycles are structurally unrepresentable through the immutable
+public `Operation` API rather than discovered by a separate cycle detector.
 
 This release establishes the validated contract layer. Runtime binding injection and
 automatic no-model execution remain the next execution milestones, so existing

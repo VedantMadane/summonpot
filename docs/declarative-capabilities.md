@@ -67,7 +67,9 @@ ticket = Operation(
 `FromRequest` names validated request data. `FromResult` names a field on a declared
 producer's typed output. `FromContext` names framework-owned state. `AgentChoice` is the
 explicit model-controlled source. Registration rejects incomplete bindings, missing
-fields, undeclared producers, dependency cycles, and types known to be incompatible.
+fields, undeclared producers, and types known to be incompatible. Dependency cycles are
+structurally unrepresentable through the immutable public `Operation` API rather than
+discovered by a separate cycle detector.
 
 The declarations are immutable and shipped today. Runtime binding injection, ordering,
 and maximum/exact call-count enforcement are not: the current model runtime still supplies

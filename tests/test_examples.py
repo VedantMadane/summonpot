@@ -17,6 +17,7 @@ EXAMPLES = [
     ("02_required_capability.py", "/quotes", "post"),
     ("03_agentic_order.py", "/orders", "post"),
     ("04_http_methods.py", "/products", "get"),
+    ("04_http_methods.py", "/products", "post"),
     ("05_bounded_runtime.py", "/summaries", "post"),
     ("06_support_service/app.py", "/support", "post"),
 ]
@@ -68,6 +69,9 @@ def test_support_example_declares_the_typed_operation_chain(monkeypatch):
     }
     assert ticket.contract.after == (customer.contract, policy.contract)
     assert ticket.bounds == Exactly(1)
+    assert customer.required is True
+    assert policy.required is True
+    assert ticket.required is True
 
 
 def test_support_example_guide_states_the_current_binding_boundary():

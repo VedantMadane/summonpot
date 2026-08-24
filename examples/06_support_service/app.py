@@ -10,7 +10,6 @@ from support_operations import create_ticket, load_customer, load_policy
 
 from summonpot import (
     AgentChoice,
-    Depends,
     Exactly,
     FromRequest,
     FromResult,
@@ -54,7 +53,7 @@ ticket_creation = Operation(
 def handle_support(
     request: SupportRequest,
     customer=Required(customer_lookup),
-    policy=Depends(policy_lookup),
+    policy=Required(policy_lookup),
     ticket=Required(ticket_creation, calls=Exactly(1)),
 ) -> SupportResponse:
     """Handle the customer's support message. Load the customer. Select the relevant approved policy. Mark confirmed outages urgent and everything else normal. Create exactly one ticket, then write a brief reply grounded in the customer record and policy."""
