@@ -3,7 +3,7 @@
 from support_models import SupportRequest, SupportResponse
 from support_operations import create_ticket, load_customer, load_policy
 
-from summonpot import Depends, Pot, Required, UsageLimits
+from summonpot import Depends, Summon, Required, UsageLimits
 from summonpot.runtime import Runtime
 
 runtime = Runtime(
@@ -11,10 +11,10 @@ runtime = Runtime(
     usage_limits=UsageLimits(request_limit=10, total_tokens_limit=12_000),
     timeout=60.0,
 )
-pot = Pot("support-service", runtime=runtime)
+summon = Summon("support-service", runtime=runtime)
 
 
-@pot.summon("/support")
+@summon("/support")
 def handle_support(
     request: SupportRequest,
     customer=Required(load_customer),
@@ -26,4 +26,4 @@ def handle_support(
 
 
 if __name__ == "__main__":
-    pot.serve(host="127.0.0.1", port=8000)
+    summon.serve(host="127.0.0.1", port=8000)

@@ -3,7 +3,13 @@
 A summonpot endpoint is a declaration, not a Python handler.
 
 ```python
-@pot.summon("/research")
+from summonpot import Depends, Required, Summon
+
+
+summon = Summon("research-api")
+
+
+@summon("/research")
 def research(
     request: ResearchRequest,
     sources=Required(load_sources),
@@ -38,7 +44,7 @@ bounded choice remains → agentic execution
 no legal path → typed deterministic error
 ```
 
-The public endpoint declaration stays the same. The fixed docstring goal and validated request determine the work; callers do not send an `action` field or select an agent framework. Automatic deterministic endpoint execution is planned—the current runtime still executes `@pot.summon` requests through the provider-neutral agent loop.
+The public endpoint declaration stays the same. The fixed docstring goal and validated request determine the work; callers do not send an `action` field or select an agent framework. Automatic deterministic endpoint execution is planned—the current runtime still executes `@summon` requests through the provider-neutral agent loop.
 
 Dependency parameters are declaration-only. They do not appear in the HTTP request body
 or OpenAPI request schema. The ellipsis is the complete declaration body, and direct calls

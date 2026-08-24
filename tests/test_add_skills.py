@@ -31,7 +31,7 @@ def test_skill_is_written_where_the_agent_reads_it(agent, relative, tmp_path: Pa
     assert result.exit_code == 0
     written = tmp_path / relative
     assert written.is_file()
-    assert "@pot.summon" in written.read_text()
+    assert "@summon" in written.read_text()
 
 
 def test_claude_skill_has_the_frontmatter_that_makes_it_discoverable(tmp_path: Path):

@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from summonpot import Pot
+from summonpot import Summon
 
 
 class ReviewRequest(BaseModel):
@@ -16,14 +16,14 @@ class ReviewResponse(BaseModel):
     summary: str
 
 
-pot = Pot("minimal-review")
+summon = Summon("minimal-review")
 
 
-@pot.summon("/review")
+@summon("/review")
 def review(request: ReviewRequest) -> ReviewResponse:
     """Classify the text's sentiment and summarize it in one short sentence."""
     ...
 
 
 if __name__ == "__main__":
-    pot.serve(host="127.0.0.1", port=8000)
+    summon.serve(host="127.0.0.1", port=8000)

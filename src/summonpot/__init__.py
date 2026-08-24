@@ -17,7 +17,7 @@ from summonpot.contracts import (
     Operation,
 )
 from summonpot.dependencies import Depends, Required
-from summonpot.pot import Pot
+from summonpot.summon import Summon
 
 try:
     __version__ = version("summonpot")
@@ -36,7 +36,7 @@ __all__ = [
     "FromRequest",
     "FromResult",
     "Operation",
-    "Pot",
     "Required",
+    "Summon",
     "UsageLimits",
 ]

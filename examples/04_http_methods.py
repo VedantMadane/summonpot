@@ -4,7 +4,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
-from summonpot import Pot, Required
+from summonpot import Summon, Required
 
 PRODUCTS = {
     "notebook": {"category": "stationery", "price_cents": 1299},
@@ -58,10 +58,10 @@ def reserve_product(customer_id: str, sku: str) -> dict[str, str]:
     }
 
 
-pot = Pot("catalog")
+summon = Summon("catalog")
 
 
-@pot.summon("/products", method="GET")
+@summon("/products", method="GET")
 def list_products(
     category: str | None = None,
     max_price_cents: Annotated[int | None, Field(gt=0)] = None,
@@ -71,7 +71,7 @@ def list_products(
     ...
 
 
-@pot.summon("/products", method="POST")
+@summon("/products", method="POST")
 def reserve(
     request: ReservationRequest,
     reservation=Required(reserve_product),
@@ -81,4 +81,4 @@ def reserve(
 
 
 if __name__ == "__main__":
-    pot.serve(host="127.0.0.1", port=8000)
+    summon.serve(host="127.0.0.1", port=8000)

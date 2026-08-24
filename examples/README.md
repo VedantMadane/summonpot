@@ -13,7 +13,7 @@ The ellipsis is a complete declaration body, not an implementation waiting to be
 ```
 
 Summonpot never calls that body. Calling the decorated declaration directly raises an
-error; serve the `Pot` or invoke the generated HTTP route.
+error; serve the application or invoke the generated HTTP route.
 
 ## Before running
 
@@ -59,7 +59,7 @@ curl -X POST http://127.0.0.1:8000/quotes \
   -d '{"unit_price_cents":1299,"quantity":3,"tax_rate_percent":"8.25"}'
 ```
 
-`calculate_quote` is deterministic application code, but current `@pot.summon` requests still use the configured model runtime. Automatic no-model deterministic endpoint execution is planned, not shipped.
+`calculate_quote` is deterministic application code, but current `@summon` requests still use the configured model runtime. Automatic no-model deterministic endpoint execution is planned, not shipped.
 
 ### 3. Bounded agentic order fulfillment
 

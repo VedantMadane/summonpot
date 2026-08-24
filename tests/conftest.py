@@ -9,15 +9,15 @@ import pytest
 
 @pytest.fixture
 def mock_runtime():
-    """Return a Pot whose Runtime is replaced with a mock.
+    """Return a Summon whose Runtime is replaced with a mock.
 
     Lets tests exercise endpoint registration and server building
     without making real LLM calls.
     """
-    from summonpot.pot import Pot
+    from summonpot.summon import Summon
 
-    pot = Pot("test-pot")
-    original_runtime = pot._runtime
+    summon = Summon("test-summon")
+    original_runtime = summon._runtime
     mock = AsyncMock()
 
     def install(mock_response="agent response"):
@@ -25,8 +25,8 @@ def mock_runtime():
             return mock_response
 
         mock.call.side_effect = fake_call
-        pot._runtime = mock
-        return pot
+        summon._runtime = mock
+        return summon
 
     yield install
-    pot._runtime = original_runtime
+    summon._runtime = original_runtime

@@ -147,7 +147,7 @@ class Operation:
             output=Customer,
         )
 
-        @pot.summon("/orders")
+        @summon("/orders")
         def place_order(
             request: OrderRequest,
             customer=Required(lookup_by_customer_id),

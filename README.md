@@ -47,10 +47,10 @@ docstring, capabilities, and return type are the executable contract. There is n
 body to implement, agent graph to configure, or caller-provided `action` to interpret.
 Summonpot owns routing, validation, the bounded model loop, capability enforcement,
 structured output, and OpenAPI generation. Calling a registered declaration directly
-raises a clear error; serve the `Pot` or invoke its generated HTTP route instead.
+raises a clear error; serve the application or invoke its generated HTTP route instead.
 
 > [!IMPORTANT]
-> Every current production `@pot.summon` request runs through the configured model.
+> Every current production `@summon` request runs through the configured model.
 > Automatic no-model execution for contracts with one fully resolved operation path is
 > on the [roadmap](ROADMAP.md), not shipped behavior.
 
@@ -61,7 +61,13 @@ configure an agent and then wrap it in HTTP. Summonpot starts from the endpoint 
 instead:
 
 ```python
-@pot.summon("/research")
+from summonpot import Depends, Required, Summon
+
+
+summon = Summon("research-api")
+
+
+@summon("/research")
 def research(
     request: ResearchRequest,
     sources=Depends(search_web),
@@ -153,7 +159,7 @@ Create `app.py`:
 from typing import Literal
 
 from pydantic import BaseModel, Field
-from summonpot import Pot
+from summonpot import Summon
 
 
 class ReviewRequest(BaseModel):
@@ -165,10 +171,10 @@ class ReviewResponse(BaseModel):
     summary: str
 
 
-pot = Pot("review-api")
+summon = Summon("review-api")
 
 
-@pot.summon("/review")
+@summon("/review")
 def review(request: ReviewRequest) -> ReviewResponse:
     """Classify the text's sentiment and summarize it in one short sentence."""
     ...
@@ -228,7 +234,7 @@ Attach it to one endpoint:
 from summonpot import Required
 
 
-@pot.summon("/quotes")
+@summon("/quotes")
 def create_quote(
     request: QuoteRequest,
     calculation=Required(calculate_quote),
@@ -268,10 +274,10 @@ than something the model should invent:
 ```python
 from my_service.models import Customer, CustomerRequest, CustomerResponse
 from my_service.operations import load_customer
-from summonpot import FromRequest, Operation, Pot, Required
+from summonpot import FromRequest, Operation, Summon, Required
 
 
-pot = Pot("customer-api")
+summon = Summon("customer-api")
 
 customer_from_request = Operation(
     load_customer,
@@ -280,7 +286,7 @@ customer_from_request = Operation(
 )
 
 
-@pot.summon("/customers")
+@summon("/customers")
 def get_customer(
     request: CustomerRequest,
     customer=Required(customer_from_request),
@@ -346,7 +352,7 @@ The endpoint docstring becomes the fixed goal. Request data becomes the user mes
 Capabilities become the complete set of callable operations. The response model becomes
 both the structured-output schema and the final local validator.
 
-Pydantic AI is an internal runtime dependency. Applications use `Pot`, `@pot.summon`,
+Pydantic AI is an internal runtime dependency. Applications use `Summon`, `@summon`,
 Pydantic models, and declarative capabilities; they do not construct provider clients or
 Pydantic AI agents.
 
@@ -380,7 +386,7 @@ class TicketPage(BaseModel):
     tickets: list[str]
 
 
-@pot.summon("/tickets", method="GET")
+@summon("/tickets", method="GET")
 def list_tickets(
     status: Literal["open", "closed"] = "open",
     ids: list[int] | None = None,
@@ -406,16 +412,16 @@ types, and `stream=True`.
 | OpenRouter | `summonpot[openrouter]` | `openrouter:anthropic/claude-sonnet-4` | `OPENROUTER_API_KEY` |
 | xAI | `summonpot[xai]` | `xai:grok-4` | `XAI_API_KEY` |
 
-Set one default for the pot through `SUMMONPOT_MODEL` or in Python:
+Set one default for the `Summon` application through `SUMMONPOT_MODEL` or in Python:
 
 ```python
-pot = Pot("research-api", model="openrouter:anthropic/claude-sonnet-4")
+summon = Summon("research-api", model="openrouter:anthropic/claude-sonnet-4")
 ```
 
 Override it for one endpoint without changing that endpoint's HTTP contract:
 
 ```python
-@pot.summon("/research", model="anthropic:claude-sonnet-4-5")
+@summon("/research", model="anthropic:claude-sonnet-4-5")
 def research(request: ResearchRequest) -> ResearchResponse:
     """Research the topic and return a sourced report."""
     ...
@@ -430,11 +436,11 @@ unprefixed model names resolve through OpenAI for backward compatibility.
 so set explicit usage limits and a timeout:
 
 ```python
-from summonpot import Pot, UsageLimits
+from summonpot import Summon, UsageLimits
 from summonpot.runtime import Runtime
 
 
-pot = Pot(
+summon = Summon(
     "my-service",
     runtime=Runtime(
         usage_limits=UsageLimits(

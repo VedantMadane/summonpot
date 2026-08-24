@@ -4,7 +4,7 @@ from decimal import ROUND_HALF_UP, Decimal
 
 from pydantic import BaseModel, Field
 
-from summonpot import Pot, Required
+from summonpot import Summon, Required
 
 
 class QuoteRequest(BaseModel):
@@ -37,10 +37,10 @@ def calculate_quote(
     }
 
 
-pot = Pot("required-calculation")
+summon = Summon("required-calculation")
 
 
-@pot.summon("/quotes")
+@summon("/quotes")
 def create_quote(
     request: QuoteRequest,
     calculation=Required(calculate_quote),
@@ -50,4 +50,4 @@ def create_quote(
 
 
 if __name__ == "__main__":
-    pot.serve(host="127.0.0.1", port=8000)
+    summon.serve(host="127.0.0.1", port=8000)

@@ -14,7 +14,7 @@ from pydantic_ai.exceptions import (
     UsageLimitExceeded,
 )
 
-from summonpot import Depends, Pot, __version__
+from summonpot import Depends, Summon, __version__
 from summonpot.server import build_app
 
 
@@ -29,14 +29,14 @@ class AnalysisResponse(BaseModel):
 
 
 def test_build_app_creates_route(mock_runtime):
-    pot = mock_runtime(mock_response="Hello, world!")
+    summon = mock_runtime(mock_response="Hello, world!")
 
-    @pot.summon("/hello")
+    @summon("/hello")
     def hello(name: str) -> str:
         """Greet someone."""
         return ""
 
-    app = build_app(pot)
+    app = build_app(summon)
     client = TestClient(app)
     response = client.post("/hello", json={"name": "world"})
     assert response.status_code == 200
@@ -55,16 +55,16 @@ def test_openapi_describes_the_endpoint_framework_not_an_agent_framework(mock_ru
 
 
 def test_build_app_uses_pydantic_request_and_response_models(mock_runtime):
-    pot = mock_runtime(
+    summon = mock_runtime(
         mock_response={"sentiment": "positive", "topics": ["agents", "apis"]}
     )
 
-    @pot.summon("/analyze")
+    @summon("/analyze")
     def analyze(request: AnalysisRequest) -> AnalysisResponse:
         """Analyze text."""
         ...
 
-    client = TestClient(build_app(pot))
+    client = TestClient(build_app(summon))
     schema = client.get("/openapi.json").json()
     operation = schema["paths"]["/analyze"]["post"]
 
@@ -78,8 +78,8 @@ def test_build_app_uses_pydantic_request_and_response_models(mock_runtime):
     valid = client.post("/analyze", json={"text": "Great framework"})
     assert valid.status_code == 200
     assert valid.json() == {"sentiment": "positive", "topics": ["agents", "apis"]}
-    pot._runtime.call.assert_awaited_once_with(
-        pot.endpoints[0], {"text": "Great framework", "maxTopics": 3}
+    summon._runtime.call.assert_awaited_once_with(
+        summon.endpoints[0], {"text": "Great framework", "maxTopics": 3}
     )
 
     invalid = client.post("/analyze", json={"text": "x"})
@@ -91,11 +91,11 @@ def test_dependency_parameters_do_not_leak_into_http_contract(mock_runtime):
         """Run exact deterministic analysis."""
         return {"text": text}
 
-    pot = mock_runtime(
+    summon = mock_runtime(
         mock_response={"sentiment": "positive", "topics": ["capabilities"]}
     )
 
-    @pot.summon("/analyze")
+    @summon("/analyze")
     def analyze(
         request: AnalysisRequest,
         records=Depends(analyze_records),
@@ -103,7 +103,7 @@ def test_dependency_parameters_do_not_leak_into_http_contract(mock_runtime):
         """Analyze using only the declared operation."""
         raise AssertionError("declarative endpoint body must not execute")
 
-    client = TestClient(build_app(pot))
+    client = TestClient(build_app(summon))
     operation = client.get("/openapi.json").json()["paths"]["/analyze"]["post"]
 
     assert operation.get("parameters", []) == []
@@ -120,9 +120,9 @@ def test_dependency_parameters_do_not_leak_into_http_contract(mock_runtime):
 
 def test_request_schema_preserves_unions_generics_and_any(mock_runtime):
     """The HTTP contract must match the signature, not a parsed display string."""
-    pot = mock_runtime(mock_response="ok")
+    summon = mock_runtime(mock_response="ok")
 
-    @pot.summon("/typed")
+    @summon("/typed")
     def typed(
         q: str,
         limit: int | None = None,
@@ -132,7 +132,7 @@ def test_request_schema_preserves_unions_generics_and_any(mock_runtime):
         """Typed endpoint."""
         return ""
 
-    client = TestClient(build_app(pot))
+    client = TestClient(build_app(summon))
     properties = client.get("/openapi.json").json()["components"]["schemas"][
         "typedRequest"
     ]["properties"]
@@ -151,14 +151,14 @@ def test_request_schema_preserves_unions_generics_and_any(mock_runtime):
 
 def test_request_schema_validates_generic_element_types(mock_runtime):
     """list[int] used to fail open, handing the agent the wrong types."""
-    pot = mock_runtime(mock_response="ok")
+    summon = mock_runtime(mock_response="ok")
 
-    @pot.summon("/items")
+    @summon("/items")
     def items(values: list[int]) -> str:
         """Items endpoint."""
         return ""
 
-    client = TestClient(build_app(pot))
+    client = TestClient(build_app(summon))
 
     assert client.post("/items", json={"values": [1, 2]}).status_code == 200
     assert client.post("/items", json={"values": ["a", "b"]}).status_code == 422
@@ -194,9 +194,9 @@ def test_runtime_failures_map_to_stable_http_responses(
     raised, expected_status, expected_detail
 ):
     """Every one of these used to reach the caller as an opaque 500."""
-    pot = Pot("svc")
+    summon = Summon("svc")
 
-    @pot.summon("/research")
+    @summon("/research")
     def research(query: str) -> str:
         """Research a topic."""
         return ""
@@ -205,8 +205,8 @@ def test_runtime_failures_map_to_stable_http_responses(
         async def call(self, endpoint, params):
             raise raised
 
-    pot._runtime = FailingRuntime()
-    client = TestClient(build_app(pot), raise_server_exceptions=False)
+    summon._runtime = FailingRuntime()
+    client = TestClient(build_app(summon), raise_server_exceptions=False)
 
     response = client.post("/research", json={"query": "agents"})
 
@@ -216,9 +216,9 @@ def test_runtime_failures_map_to_stable_http_responses(
 
 def test_unexpected_capability_failure_still_surfaces_as_a_server_error():
     """An error inside user code is a genuine 500, not a mislabelled gateway error."""
-    pot = Pot("svc")
+    summon = Summon("svc")
 
-    @pot.summon("/research")
+    @summon("/research")
     def research(query: str) -> str:
         """Research a topic."""
         return ""
@@ -227,21 +227,21 @@ def test_unexpected_capability_failure_still_surfaces_as_a_server_error():
         async def call(self, endpoint, params):
             raise ValueError("the accounts database is down")
 
-    pot._runtime = FailingRuntime()
-    client = TestClient(build_app(pot), raise_server_exceptions=False)
+    summon._runtime = FailingRuntime()
+    client = TestClient(build_app(summon), raise_server_exceptions=False)
 
     assert client.post("/research", json={"query": "agents"}).status_code == 500
 
 
 def test_build_app_requires_body_fields(mock_runtime):
-    pot = mock_runtime()
+    summon = mock_runtime()
 
-    @pot.summon("/strict")
+    @summon("/strict")
     def strict(required_field: int) -> str:
         """Strict endpoint."""
         return ""
 
-    app = build_app(pot)
+    app = build_app(summon)
     client = TestClient(app)
     # Missing required field → 422 validation error
     response = client.post("/strict", json={})
@@ -249,14 +249,14 @@ def test_build_app_requires_body_fields(mock_runtime):
 
 
 def test_build_app_openapi_has_endpoints():
-    pot = Pot("svc")
+    summon = Summon("svc")
 
-    @pot.summon("/analyze")
+    @summon("/analyze")
     def analyze(text: str) -> dict:
         """Analyze text."""
         return {}
 
-    app = build_app(pot)
+    app = build_app(summon)
     client = TestClient(app)
     schema = client.get("/openapi.json").json()
     paths = schema["paths"]
@@ -269,14 +269,14 @@ def test_build_app_openapi_has_endpoints():
 
 
 def test_build_app_no_body_route_hides_internal_context(mock_runtime):
-    pot = mock_runtime(mock_response="ready")
+    summon = mock_runtime(mock_response="ready")
 
-    @pot.summon("/health")
+    @summon("/health")
     def health() -> str:
         """Report readiness."""
         return ""
 
-    client = TestClient(build_app(pot))
+    client = TestClient(build_app(summon))
     operation = client.get("/openapi.json").json()["paths"]["/health"]["post"]
 
     assert operation.get("parameters", []) == []
@@ -295,9 +295,9 @@ def test_build_app_no_body_route_hides_internal_context(mock_runtime):
 )
 def test_runtime_exception_text_is_not_returned_to_the_caller(raised, caplog):
     """Agent-loop exceptions can carry rejected model output or tool-call context."""
-    pot = Pot("svc")
+    summon = Summon("svc")
 
-    @pot.summon("/research")
+    @summon("/research")
     def research(query: str) -> str:
         """Research a topic."""
         return ""
@@ -306,8 +306,8 @@ def test_runtime_exception_text_is_not_returned_to_the_caller(raised, caplog):
         async def call(self, endpoint, params):
             raise raised
 
-    pot._runtime = FailingRuntime()
-    client = TestClient(build_app(pot), raise_server_exceptions=False)
+    summon._runtime = FailingRuntime()
+    client = TestClient(build_app(summon), raise_server_exceptions=False)
 
     with caplog.at_level(logging.WARNING, logger="summonpot.server"):
         response = client.post("/research", json={"query": "agents"})
@@ -319,14 +319,14 @@ def test_runtime_exception_text_is_not_returned_to_the_caller(raised, caplog):
 
 def test_get_endpoint_is_registered_as_get_with_query_parameters(mock_runtime):
     """method= used to be accepted and discarded, always producing a POST route."""
-    pot = mock_runtime(mock_response="Berlin is sunny.")
+    summon = mock_runtime(mock_response="Berlin is sunny.")
 
-    @pot.summon("/forecast", method="GET")
+    @summon("/forecast", method="GET")
     def forecast(city: str, days: int = 3) -> str:
         """Report the forecast."""
         return ""
 
-    client = TestClient(build_app(pot))
+    client = TestClient(build_app(summon))
     operation = client.get("/openapi.json").json()["paths"]["/forecast"]
 
     assert set(operation) == {"get"}
@@ -340,38 +340,38 @@ def test_get_endpoint_is_registered_as_get_with_query_parameters(mock_runtime):
     response = client.get("/forecast?city=Berlin&days=5")
     assert response.status_code == 200
     assert response.json() == "Berlin is sunny."
-    pot._runtime.call.assert_awaited_once_with(
-        pot.endpoints[0], {"city": "Berlin", "days": 5}
+    summon._runtime.call.assert_awaited_once_with(
+        summon.endpoints[0], {"city": "Berlin", "days": 5}
     )
 
 
 def test_get_endpoint_rejects_a_post(mock_runtime):
-    pot = mock_runtime(mock_response="ok")
+    summon = mock_runtime(mock_response="ok")
 
-    @pot.summon("/forecast", method="GET")
+    @summon("/forecast", method="GET")
     def forecast(city: str) -> str:
         """Report the forecast."""
         return ""
 
-    client = TestClient(build_app(pot))
+    client = TestClient(build_app(summon))
 
     assert client.post("/forecast", json={"city": "Berlin"}).status_code == 405
 
 
 def test_put_and_delete_methods_are_registered(mock_runtime):
-    pot = mock_runtime(mock_response="ok")
+    summon = mock_runtime(mock_response="ok")
 
-    @pot.summon("/records", method="PUT")
+    @summon("/records", method="PUT")
     def replace_record(record_id: str, payload: str) -> str:
         """Replace a record."""
         return ""
 
-    @pot.summon("/records/purge", method="DELETE")
+    @summon("/records/purge", method="DELETE")
     def purge_record(record_id: str) -> str:
         """Purge a record."""
         return ""
 
-    paths = TestClient(build_app(pot)).get("/openapi.json").json()["paths"]
+    paths = TestClient(build_app(summon)).get("/openapi.json").json()["paths"]
 
     # PUT keeps a JSON body; DELETE takes query parameters.
     assert set(paths["/records"]) == {"put"}
@@ -382,9 +382,9 @@ def test_put_and_delete_methods_are_registered(mock_runtime):
 
 def test_query_parameters_keep_their_resolved_type_contract(mock_runtime):
     """A GET must honour the signature, not a lossy display-string approximation."""
-    pot = mock_runtime(mock_response="ok")
+    summon = mock_runtime(mock_response="ok")
 
-    @pot.summon("/lookup", method="GET")
+    @summon("/lookup", method="GET")
     def lookup(
         value: int | str,
         count: int = 1,
@@ -393,7 +393,7 @@ def test_query_parameters_keep_their_resolved_type_contract(mock_runtime):
         """Look up a record."""
         return ""
 
-    client = TestClient(build_app(pot))
+    client = TestClient(build_app(summon))
     operation = client.get("/openapi.json").json()["paths"]["/lookup"]["get"]
     assert {p["name"]: p["in"] for p in operation["parameters"]} == {
         "value": "query",
@@ -411,16 +411,16 @@ def test_query_parameters_keep_their_resolved_type_contract(mock_runtime):
     # Required-ness survives.
     assert client.get("/lookup").status_code == 422
 
-    pot._runtime.call.assert_any_await(
-        pot.endpoints[0], {"value": "x", "count": 1, "tags": [1, 2]}
+    summon._runtime.call.assert_any_await(
+        summon.endpoints[0], {"value": "x", "count": 1, "tags": [1, 2]}
     )
 
 
 def test_query_route_uses_the_shared_runtime_error_mapping():
     """A parameterised GET must get the same stable statuses as a body route."""
-    pot = Pot("svc")
+    summon = Summon("svc")
 
-    @pot.summon("/forecast", method="GET")
+    @summon("/forecast", method="GET")
     def forecast(city: str) -> str:
         """Report the forecast."""
         return ""
@@ -429,8 +429,8 @@ def test_query_route_uses_the_shared_runtime_error_mapping():
         async def call(self, endpoint, params):
             raise UnexpectedModelBehavior("invalid output: PRIVATE_SENTINEL_123")
 
-    pot._runtime = FailingRuntime()
-    client = TestClient(build_app(pot), raise_server_exceptions=False)
+    summon._runtime = FailingRuntime()
+    client = TestClient(build_app(summon), raise_server_exceptions=False)
 
     response = client.get("/forecast?city=Berlin")
 
@@ -440,26 +440,26 @@ def test_query_route_uses_the_shared_runtime_error_mapping():
 
 def test_build_app_never_raises_for_a_registered_endpoint(mock_runtime):
     """Unsupported query shapes are refused at registration, not inside FastAPI."""
-    pot = mock_runtime(mock_response="ok")
+    summon = mock_runtime(mock_response="ok")
 
-    @pot.summon("/forecast", method="GET")
+    @summon("/forecast", method="GET")
     def forecast(city: str, days: list[int] | None = None) -> str:
         """Report the forecast."""
         return ""
 
-    assert build_app(pot) is not None
+    assert build_app(summon) is not None
 
 
 def test_literal_query_parameter_enforces_its_allowed_values(mock_runtime):
     """A Literal is a valid query contract: accepted in-set, 422 out of set."""
-    pot = mock_runtime(mock_response="ok")
+    summon = mock_runtime(mock_response="ok")
 
-    @pot.summon("/tickets", method="GET")
+    @summon("/tickets", method="GET")
     def tickets(status: Literal["open", "closed"] = "open") -> str:
         """List tickets by status."""
         return ""
 
-    client = TestClient(build_app(pot))
+    client = TestClient(build_app(summon))
     parameter = client.get("/openapi.json").json()["paths"]["/tickets"]["get"][
         "parameters"
     ][0]
@@ -471,14 +471,14 @@ def test_literal_query_parameter_enforces_its_allowed_values(mock_runtime):
 
 
 def test_annotated_query_parameter_enforces_its_constraint(mock_runtime):
-    pot = mock_runtime(mock_response="ok")
+    summon = mock_runtime(mock_response="ok")
 
-    @pot.summon("/search", method="GET")
+    @summon("/search", method="GET")
     def search(term: Annotated[str, Field(min_length=3)]) -> str:
         """Search for a term."""
         return ""
 
-    client = TestClient(build_app(pot))
+    client = TestClient(build_app(summon))
 
     assert client.get("/search?term=abc").status_code == 200
     assert client.get("/search?term=ab").status_code == 422
@@ -486,14 +486,14 @@ def test_annotated_query_parameter_enforces_its_constraint(mock_runtime):
 
 def test_sequence_query_parameter_keeps_its_own_constraint(mock_runtime):
     """The query marker must not replace the annotation's declared FieldInfo."""
-    pot = mock_runtime(mock_response="ok")
+    summon = mock_runtime(mock_response="ok")
 
-    @pot.summon("/batch", method="GET")
+    @summon("/batch", method="GET")
     def batch(ids: Annotated[list[int], Field(min_length=2)]) -> str:
         """Look up several records."""
         return ""
 
-    client = TestClient(build_app(pot))
+    client = TestClient(build_app(summon))
 
     assert client.get("/batch?ids=1&ids=2").status_code == 200
     # One value violates min_length=2, which the signature declares.
@@ -501,14 +501,14 @@ def test_sequence_query_parameter_keeps_its_own_constraint(mock_runtime):
 
 
 def test_sequence_query_parameter_keeps_its_element_constraint(mock_runtime):
-    pot = mock_runtime(mock_response="ok")
+    summon = mock_runtime(mock_response="ok")
 
-    @pot.summon("/batch", method="GET")
+    @summon("/batch", method="GET")
     def batch(ids: list[Annotated[int, Field(ge=1)]] | None = None) -> str:
         """Look up several records."""
         return ""
 
-    client = TestClient(build_app(pot))
+    client = TestClient(build_app(summon))
 
     assert client.get("/batch?ids=1&ids=2").status_code == 200
     # 0 violates the element constraint ge=1.
@@ -517,35 +517,35 @@ def test_sequence_query_parameter_keeps_its_element_constraint(mock_runtime):
 
 def test_unconstrained_sequence_query_parameter_still_binds(mock_runtime):
     """The marker is still required for a sequence to bind at all."""
-    pot = mock_runtime(mock_response="ok")
+    summon = mock_runtime(mock_response="ok")
 
-    @pot.summon("/batch", method="GET")
+    @summon("/batch", method="GET")
     def batch(ids: list[int] | None = None) -> str:
         """Look up several records."""
         return ""
 
-    client = TestClient(build_app(pot))
+    client = TestClient(build_app(summon))
 
     assert client.get("/batch?ids=1&ids=2").status_code == 200
-    pot._runtime.call.assert_any_await(pot.endpoints[0], {"ids": [1, 2]})
+    summon._runtime.call.assert_any_await(summon.endpoints[0], {"ids": [1, 2]})
     assert client.get("/batch?ids=a").status_code == 422
 
 
 def test_one_path_serves_both_methods(mock_runtime):
     """The pair must reach FastAPI as two operations on a single path."""
-    pot = mock_runtime(mock_response="ok")
+    summon = mock_runtime(mock_response="ok")
 
-    @pot.summon("/orders", method="GET")
+    @summon("/orders", method="GET")
     def list_orders(status: str = "open") -> str:
         """List orders."""
         return ""
 
-    @pot.summon("/orders", method="POST")
+    @summon("/orders", method="POST")
     def place_order(item: str) -> str:
         """Place an order."""
         return ""
 
-    client = TestClient(build_app(pot))
+    client = TestClient(build_app(summon))
     operations = client.get("/openapi.json").json()["paths"]["/orders"]
 
     assert set(operations) == {"get", "post"}
@@ -557,9 +557,9 @@ def test_provider_misconfiguration_is_reported_not_swallowed(caplog):
     """A missing API key is the most likely first-run failure."""
     from pydantic_ai.exceptions import UserError
 
-    pot = Pot("svc")
+    summon = Summon("svc")
 
-    @pot.summon("/research")
+    @summon("/research")
     def research(query: str) -> str:
         """Research a topic."""
         return ""
@@ -568,8 +568,8 @@ def test_provider_misconfiguration_is_reported_not_swallowed(caplog):
         async def call(self, endpoint, params):
             raise UserError("Set the `OPENAI_API_KEY` environment variable")
 
-    pot._runtime = UnconfiguredRuntime()
-    client = TestClient(build_app(pot), raise_server_exceptions=False)
+    summon._runtime = UnconfiguredRuntime()
+    client = TestClient(build_app(summon), raise_server_exceptions=False)
 
     with caplog.at_level(logging.ERROR, logger="summonpot.server"):
         response = client.post("/research", json={"query": "agents"})

@@ -10,7 +10,7 @@ rejected; execution goes through the served endpoint.
 
 ```python
 from pydantic import BaseModel, Field
-from summonpot import Depends, Pot, Required
+from summonpot import Depends, Required, Summon
 
 from my_service.operations import record_research, search_web
 
@@ -25,10 +25,10 @@ class ResearchResponse(BaseModel):
     sources: list[str]
 
 
-pot = Pot("my-service")
+summon = Summon("my-service")
 
 
-@pot.summon("/research")
+@summon("/research")
 def research_topic(
     request: ResearchRequest,
     sources=Depends(search_web),
@@ -66,8 +66,8 @@ These are the mistakes to avoid, because they contradict the framework's model:
 
 ## Rules enforced at registration
 
-summonpot raises when the pot is imported, not at request time. Each of these is a
-hard error:
+summonpot raises when the application module is imported, not at request time. Each of
+these is a hard error:
 
 - **Every endpoint needs a docstring.** It is the goal, so it cannot be empty.
 - **Paths start with `/`.**
@@ -102,8 +102,8 @@ from summonpot import (
     FromRequest,
     FromResult,
     Operation,
-    Pot,
     Required,
+    Summon,
 )
 
 
@@ -128,10 +128,10 @@ order = Operation(
     after=(customer, options),
 )
 
-pot = Pot("order-api")
+summon = Summon("order-api")
 
 
-@pot.summon("/orders")
+@summon("/orders")
 def create_order(
     request: OrderRequest,
     customer_result=Required(customer),
@@ -188,7 +188,7 @@ parameters become **query-string parameters** and a Pydantic request model is re
 from typing import Literal
 
 
-@pot.summon("/tickets", method="GET")
+@summon("/tickets", method="GET")
 def list_tickets(
     status: Literal["open", "closed"] = "open",
     ids: list[int] | None = None,
@@ -203,12 +203,12 @@ Query parameters must be scalars or sequences of scalars. A mapping such as
 ## Running it
 
 ```python
-pot.serve()  # 0.0.0.0:8000
-pot.serve(host="127.0.0.1", port=9000)
+summon.serve()  # 0.0.0.0:8000
+summon.serve(host="127.0.0.1", port=9000)
 ```
 
 ```bash
-summonpot serve app.py                   # the pot must be named `pot`
+summonpot serve app.py                   # application variable: `summon`
 ```
 
 To run with no provider account at all — useful for checking routing, validation and
@@ -231,10 +231,10 @@ An endpoint served against a configured provider spends the operator's credit on
 request, so cap it:
 
 ```python
-from summonpot import Pot, UsageLimits
+from summonpot import Summon, UsageLimits
 from summonpot.runtime import Runtime
 
-pot = Pot(
+summon = Summon(
     "my-service",
     runtime=Runtime(
         usage_limits=UsageLimits(request_limit=8, total_tokens_limit=40_000),
@@ -243,7 +243,7 @@ pot = Pot(
 )
 ```
 
-`Pot(model=...)` sets the default model instead; the two are mutually exclusive,
+`Summon(model=...)` sets the default model instead; the two are mutually exclusive,
 because a supplied runtime already carries its own.
 
 The timeout releases the caller on the deadline, but it **cannot interrupt a

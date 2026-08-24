@@ -1,4 +1,4 @@
-"""summonpot CLI — serve your Pot from the command line."""
+"""summonpot CLI — serve your Summon application from the command line."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from pathlib import Path
 import typer
 
 from summonpot.commands.add_skills import add_skills
-from summonpot.pot import Pot
+from summonpot.summon import Summon
 
 
 def _version_callback(value: bool) -> None:
@@ -54,19 +54,19 @@ add_app.command("skills")(add_skills)
 def serve_command(
     source: str = typer.Argument(
         ...,
-        help="Path to a Python file containing a Pot instance named 'pot'.",
+        help="Path to a Python file containing a Summon instance named 'summon'.",
     ),
     host: str = typer.Option("0.0.0.0", "--host", help="Host to bind to."),
     port: int = typer.Option(8000, "--port", "-p", help="Port to bind to."),
 ) -> None:
-    """Serve a Pot file as an HTTP API."""
-    pot = _load_pot(source)
-    typer.echo(f"Summoning {pot.name} on http://{host}:{port}")
-    pot.serve(host=host, port=port)
+    """Serve a Summon application as an HTTP API."""
+    summon = _load_summon(source)
+    typer.echo(f"Summoning {summon.name} on http://{host}:{port}")
+    summon.serve(host=host, port=port)
 
 
-def _load_pot(source: str) -> Pot:
-    """Load a Pot instance from a Python file."""
+def _load_summon(source: str) -> Summon:
+    """Load a Summon instance from a Python file."""
     filepath = Path(source).resolve()
     if not filepath.exists():
         typer.echo(f"Error: file not found: {filepath}", err=True)
@@ -102,12 +102,12 @@ def _load_pot(source: str) -> Pot:
         sys.modules.pop(spec.name, None)
         raise
 
-    pot = getattr(mod, "pot", None)
-    if pot is None:
+    summon = getattr(mod, "summon", None)
+    if summon is None:
         typer.echo(
-            f"Error: no 'pot' variable found in {filepath}. "
-            "Define a Pot instance named 'pot'.",
+            f"Error: no 'summon' variable found in {filepath}. "
+            "Define a Summon instance named 'summon'.",
             err=True,
         )
         raise typer.Exit(1)
-    return pot
+    return summon

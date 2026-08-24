@@ -13,7 +13,7 @@ from pydantic_ai import UnexpectedModelBehavior, UsageLimitExceeded
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
-from summonpot import Depends, Pot, Required, UsageLimits
+from summonpot import Depends, Required, Summon, UsageLimits
 from summonpot.runtime import Runtime
 
 
@@ -26,8 +26,8 @@ class ResearchResponse(BaseModel):
     confidence: float
 
 
-def _register_endpoint(pot: Pot, *, model: str | None = None) -> None:
-    @pot.summon("/research", model=model)
+def _register_endpoint(summon: Summon, *, model: str | None = None) -> None:
+    @summon("/research", model=model)
     def research(request: ResearchRequest) -> ResearchResponse:
         """Research a topic."""
         ...
@@ -44,11 +44,11 @@ def test_runtime_normalizes_explicit_and_legacy_model_names():
 
 
 def test_endpoint_model_override_wins_without_provider_specific_logic():
-    pot = Pot("svc")
-    _register_endpoint(pot, model="groq:llama-3.3-70b-versatile")
+    summon = Summon("svc")
+    _register_endpoint(summon, model="groq:llama-3.3-70b-versatile")
     runtime = Runtime(model="anthropic:claude-sonnet-4-5")
 
-    assert runtime.model_for(pot.endpoints[0]) == "groq:llama-3.3-70b-versatile"
+    assert runtime.model_for(summon.endpoints[0]) == "groq:llama-3.3-70b-versatile"
 
 
 def test_runtime_returns_declared_model_with_provider_neutral_engine():
@@ -66,11 +66,11 @@ def test_runtime_returns_declared_model_with_provider_neutral_engine():
             ]
         )
 
-    pot = Pot("svc")
-    _register_endpoint(pot)
+    summon = Summon("svc")
+    _register_endpoint(summon)
     runtime = Runtime(model=FunctionModel(model_function))
 
-    result = asyncio.run(runtime.call(pot.endpoints[0], {"query": "agents"}))
+    result = asyncio.run(runtime.call(summon.endpoints[0], {"query": "agents"}))
 
     assert result == ResearchResponse(
         summary="Provider-neutral contracts",
@@ -89,12 +89,12 @@ def test_runtime_rejects_output_that_violates_response_model():
             ]
         )
 
-    pot = Pot("svc")
-    _register_endpoint(pot)
+    summon = Summon("svc")
+    _register_endpoint(summon)
     runtime = Runtime(model=FunctionModel(model_function), retries=0)
 
     with pytest.raises(UnexpectedModelBehavior, match="maximum output retries"):
-        asyncio.run(runtime.call(pot.endpoints[0], {"query": "agents"}))
+        asyncio.run(runtime.call(summon.endpoints[0], {"query": "agents"}))
 
 
 def test_runtime_executes_tools_through_provider_neutral_agent_loop():
@@ -123,11 +123,11 @@ def test_runtime_executes_tools_through_provider_neutral_agent_loop():
             ]
         )
 
-    pot = Pot("svc", tools=[search_web])
-    _register_endpoint(pot)
+    summon = Summon("svc", tools=[search_web])
+    _register_endpoint(summon)
     runtime = Runtime(model=FunctionModel(model_function))
 
-    result = asyncio.run(runtime.call(pot.endpoints[0], {"query": "agents"}))
+    result = asyncio.run(runtime.call(summon.endpoints[0], {"query": "agents"}))
 
     assert tool_calls == ["agents"]
     assert model_turns == 2
@@ -141,8 +141,8 @@ def test_declared_parameters_match_the_schema_the_model_receives():
         """Archive one approved record."""
         return identifier
 
-    pot = Pot("svc", tools=[archive_record])
-    _register_endpoint(pot)
+    summon = Summon("svc", tools=[archive_record])
+    _register_endpoint(summon)
     observed: dict[str, object] = {}
 
     def model_function(messages, info: AgentInfo):
@@ -160,11 +160,11 @@ def test_declared_parameters_match_the_schema_the_model_receives():
 
     asyncio.run(
         Runtime(model=FunctionModel(model_function)).call(
-            pot.endpoints[0], {"query": "agents"}
+            summon.endpoints[0], {"query": "agents"}
         )
     )
 
-    declared = pot.endpoints[0].tools[0].parameters
+    declared = summon.endpoints[0].tools[0].parameters
     assert observed["properties"] == sorted(p.name for p in declared)
     assert observed["required"] == sorted(p.name for p in declared if p.required)
 
@@ -193,9 +193,9 @@ def test_runtime_exposes_capabilities_that_are_not_plain_functions(capability_ki
         capability = LookupAccount("accounts")
         expected_name = "LookupAccount"
 
-    pot = Pot("svc")
+    summon = Summon("svc")
 
-    @pot.summon("/research")
+    @summon("/research")
     def research(
         request: ResearchRequest, record=Depends(capability)
     ) -> ResearchResponse:
@@ -227,7 +227,7 @@ def test_runtime_exposes_capabilities_that_are_not_plain_functions(capability_ki
 
     result = asyncio.run(
         Runtime(model=FunctionModel(model_function)).call(
-            pot.endpoints[0], {"query": "agents"}
+            summon.endpoints[0], {"query": "agents"}
         )
     )
 
@@ -246,9 +246,9 @@ def test_runtime_rejects_final_output_until_required_capability_runs():
         capability_calls.append(query)
         return "Required result"
 
-    pot = Pot("svc")
+    summon = Summon("svc")
 
-    @pot.summon("/research")
+    @summon("/research")
     def research(
         request: ResearchRequest,
         sources=Required(load_sources),
@@ -282,7 +282,7 @@ def test_runtime_rejects_final_output_until_required_capability_runs():
         )
 
     runtime = Runtime(model=FunctionModel(model_function), retries=2)
-    result = asyncio.run(runtime.call(pot.endpoints[0], {"query": "agents"}))
+    result = asyncio.run(runtime.call(summon.endpoints[0], {"query": "agents"}))
 
     assert capability_calls == ["agents"]
     assert model_turns == 3
@@ -298,9 +298,9 @@ def test_runtime_fails_when_required_capability_never_runs():
         capability_calls += 1
         return query
 
-    pot = Pot("svc")
+    summon = Summon("svc")
 
-    @pot.summon("/research")
+    @summon("/research")
     def research(
         request: ResearchRequest,
         sources=Required(load_sources),
@@ -323,7 +323,7 @@ def test_runtime_fails_when_required_capability_never_runs():
     runtime = Runtime(model=FunctionModel(model_function), retries=0)
 
     with pytest.raises(UnexpectedModelBehavior, match="maximum output retries"):
-        asyncio.run(runtime.call(pot.endpoints[0], {"query": "agents"}))
+        asyncio.run(runtime.call(summon.endpoints[0], {"query": "agents"}))
     assert capability_calls == 0
     assert model_turns == 1
 
@@ -336,8 +336,8 @@ def test_optional_capability_may_be_skipped():
         calls += 1
         return query
 
-    pot = Pot("svc", tools=[search_web])
-    _register_endpoint(pot)
+    summon = Summon("svc", tools=[search_web])
+    _register_endpoint(summon)
 
     def model_function(messages, info: AgentInfo):
         return ModelResponse(
@@ -351,7 +351,7 @@ def test_optional_capability_may_be_skipped():
 
     result = asyncio.run(
         Runtime(model=FunctionModel(model_function)).call(
-            pot.endpoints[0], {"query": "agents"}
+            summon.endpoints[0], {"query": "agents"}
         )
     )
 
@@ -367,9 +367,9 @@ def test_optional_capability_may_be_skipped():
     ],
 )
 def test_legacy_structured_return_parses_json_when_possible(model_output, expected):
-    pot = Pot("svc")
+    summon = Summon("svc")
 
-    @pot.summon("/legacy")
+    @summon("/legacy")
     def legacy(value: str) -> dict:
         """Return a legacy structured payload."""
         return {}
@@ -379,7 +379,7 @@ def test_legacy_structured_return_parses_json_when_possible(model_output, expect
 
     result = asyncio.run(
         Runtime(model=FunctionModel(model_function)).call(
-            pot.endpoints[0], {"value": "input"}
+            summon.endpoints[0], {"value": "input"}
         )
     )
 
@@ -421,9 +421,9 @@ def test_runtime_supports_every_callable_capability_form(
         "positional_only_callable": PositionalLookup(),
     }[capability_kind]
 
-    pot = Pot("svc")
+    summon = Summon("svc")
 
-    @pot.summon("/research")
+    @summon("/research")
     def research(
         request: ResearchRequest, record=Depends(capability)
     ) -> ResearchResponse:
@@ -455,7 +455,7 @@ def test_runtime_supports_every_callable_capability_form(
 
     result = asyncio.run(
         Runtime(model=FunctionModel(model_function)).call(
-            pot.endpoints[0], {"query": "agents"}
+            summon.endpoints[0], {"query": "agents"}
         )
     )
 
@@ -466,7 +466,7 @@ def test_runtime_supports_every_callable_capability_form(
 
 
 def test_default_model_is_resolved_lazily(monkeypatch):
-    """Setting SUMMONPOT_MODEL after the pot is built must still take effect."""
+    """Setting SUMMONPOT_MODEL after the application is built must still take effect."""
     monkeypatch.delenv("SUMMONPOT_MODEL", raising=False)
     runtime = Runtime()
 
@@ -495,8 +495,8 @@ def test_usage_limits_bound_a_runaway_agent_loop():
         calls += 1
         return "result"
 
-    pot = Pot("svc", tools=[search_web])
-    _register_endpoint(pot)
+    summon = Summon("svc", tools=[search_web])
+    _register_endpoint(summon)
 
     def model_function(messages, info: AgentInfo):
         # Never finishes on its own.
@@ -508,7 +508,7 @@ def test_usage_limits_bound_a_runaway_agent_loop():
     )
 
     with pytest.raises(UsageLimitExceeded):
-        asyncio.run(runtime.call(pot.endpoints[0], {"query": "agents"}))
+        asyncio.run(runtime.call(summon.endpoints[0], {"query": "agents"}))
     assert calls <= 2
 
 
@@ -524,12 +524,12 @@ def test_timeout_bounds_a_single_endpoint_call():
             ]
         )
 
-    pot = Pot("svc")
-    _register_endpoint(pot)
+    summon = Summon("svc")
+    _register_endpoint(summon)
     runtime = Runtime(model=FunctionModel(slow_model), timeout=0.05)
 
     with pytest.raises(TimeoutError):
-        asyncio.run(runtime.call(pot.endpoints[0], {"query": "agents"}))
+        asyncio.run(runtime.call(summon.endpoints[0], {"query": "agents"}))
 
 
 def test_runtime_is_unbounded_by_default():
@@ -549,9 +549,9 @@ def test_timeout_bounds_a_slow_synchronous_capability():
         finished.set()
         return "written"
 
-    pot = Pot("svc")
+    summon = Summon("svc")
 
-    @pot.summon("/research")
+    @summon("/research")
     def research(
         request: ResearchRequest, sources=Required(slow_write)
     ) -> ResearchResponse:
@@ -569,7 +569,7 @@ def test_timeout_bounds_a_slow_synchronous_capability():
         # abandoned worker thread.
         started = time.perf_counter()
         with pytest.raises(TimeoutError):
-            await runtime.call(pot.endpoints[0], {"query": "agents"})
+            await runtime.call(summon.endpoints[0], {"query": "agents"})
         return time.perf_counter() - started
 
     elapsed = asyncio.run(scenario())
@@ -583,8 +583,8 @@ def test_timeout_bounds_a_slow_synchronous_capability():
 
 
 def test_agent_is_built_once_per_endpoint():
-    pot = Pot("svc")
-    _register_endpoint(pot)
+    summon = Summon("svc")
+    _register_endpoint(summon)
 
     def model_function(messages, info: AgentInfo):
         return ModelResponse(
@@ -597,7 +597,7 @@ def test_agent_is_built_once_per_endpoint():
         )
 
     runtime = Runtime(model=FunctionModel(model_function))
-    endpoint = pot.endpoints[0]
+    endpoint = summon.endpoints[0]
 
     asyncio.run(runtime.call(endpoint, {"query": "a"}))
     first = runtime._agent_for(endpoint)
@@ -614,9 +614,9 @@ def test_required_capability_state_does_not_leak_between_calls():
         """Load sources."""
         return "loaded"
 
-    pot = Pot("svc")
+    summon = Summon("svc")
 
-    @pot.summon("/research")
+    @summon("/research")
     def research(
         request: ResearchRequest, sources=Required(load_sources)
     ) -> ResearchResponse:
@@ -639,7 +639,7 @@ def test_required_capability_state_does_not_leak_between_calls():
         )
 
     runtime = Runtime(model=FunctionModel(model_function), retries=0)
-    endpoint = pot.endpoints[0]
+    endpoint = summon.endpoints[0]
 
     assert asyncio.run(runtime.call(endpoint, {"query": "a"})).summary == "done"
 
@@ -653,9 +653,9 @@ def test_concurrent_calls_track_required_capabilities_independently():
         """Load sources."""
         return "loaded"
 
-    pot = Pot("svc")
+    summon = Summon("svc")
 
-    @pot.summon("/research")
+    @summon("/research")
     def research(
         request: ResearchRequest, sources=Required(load_sources)
     ) -> ResearchResponse:
@@ -679,7 +679,7 @@ def test_concurrent_calls_track_required_capabilities_independently():
         )
 
     runtime = Runtime(model=FunctionModel(model_function))
-    endpoint = pot.endpoints[0]
+    endpoint = summon.endpoints[0]
 
     async def run_all():
         return await asyncio.gather(
@@ -696,9 +696,9 @@ def test_capability_may_declare_a_business_field_named_ctx():
         """Inspect an application context value."""
         return f"seen:{ctx}"
 
-    pot = Pot("svc")
+    summon = Summon("svc")
 
-    @pot.summon("/research")
+    @summon("/research")
     def research(
         request: ResearchRequest, dep=Depends(inspect_context)
     ) -> ResearchResponse:
@@ -729,7 +729,7 @@ def test_capability_may_declare_a_business_field_named_ctx():
 
     result = asyncio.run(
         Runtime(model=FunctionModel(model_function)).call(
-            pot.endpoints[0], {"query": "agents"}
+            summon.endpoints[0], {"query": "agents"}
         )
     )
 
@@ -755,9 +755,9 @@ def test_legacy_openai_names_are_still_prefixed():
 
 def test_endpoint_runs_on_the_keyless_test_model():
     """The end-to-end path a new user takes before they have an API key."""
-    pot = Pot("svc", model="test")
-    _register_endpoint(pot)
+    summon = Summon("svc", model="test")
+    _register_endpoint(summon)
 
-    result = asyncio.run(pot._runtime.call(pot.endpoints[0], {"query": "agents"}))
+    result = asyncio.run(summon._runtime.call(summon.endpoints[0], {"query": "agents"}))
 
     assert isinstance(result, ResearchResponse)

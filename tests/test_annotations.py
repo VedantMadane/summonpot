@@ -1,6 +1,6 @@
 """Tests for the shared annotation helpers.
 
-These branches were previously duplicated between pot.py and tools.py, and several
+These branches were previously duplicated between summon.py and tools.py, and several
 were untested in both copies.
 """
 

@@ -2,7 +2,7 @@
 
 from pydantic import BaseModel, Field
 
-from summonpot import Pot, UsageLimits
+from summonpot import Summon, UsageLimits
 from summonpot.runtime import Runtime
 
 
@@ -21,20 +21,20 @@ runtime = Runtime(
     usage_limits=UsageLimits(request_limit=6, total_tokens_limit=8_000),
     timeout=45.0,
 )
-pot = Pot("bounded-summaries", runtime=runtime)
+summon = Summon("bounded-summaries", runtime=runtime)
 
 
-@pot.summon("/summaries")
+@summon("/summaries")
 def summarize(request: SummaryRequest) -> SummaryResponse:
     """Summarize the text within max_sentences and extract up to five concrete key points."""
     ...
 
 
-@pot.summon("/summaries/fast", model="openai:gpt-4o-mini")
+@summon("/summaries/fast", model="openai:gpt-4o-mini")
 def summarize_fast(request: SummaryRequest) -> SummaryResponse:
     """Produce a concise summary within max_sentences and extract up to three key points."""
     ...
 
 
 if __name__ == "__main__":
-    pot.serve(host="127.0.0.1", port=8000)
+    summon.serve(host="127.0.0.1", port=8000)

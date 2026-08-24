@@ -6,7 +6,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from summonpot import Depends, Pot, Required
+from summonpot import Depends, Summon, Required
 
 INVENTORY = {"red-mug": 0, "blue-mug": 8, "green-mug": 3}
 SUBSTITUTES = {"red-mug": ["blue-mug", "green-mug"]}
@@ -64,10 +64,10 @@ def create_order(customer_id: str, sku: str, quantity: int) -> dict[str, str]:
     return {"order_id": order_id, "status": "created"}
 
 
-pot = Pot("agentic-orders")
+summon = Summon("agentic-orders")
 
 
-@pot.summon("/orders")
+@summon("/orders")
 def fulfill_order(
     request: OrderRequest,
     inventory=Depends(check_inventory),
@@ -79,4 +79,4 @@ def fulfill_order(
 
 
 if __name__ == "__main__":
-    pot.serve(host="127.0.0.1", port=8000)
+    summon.serve(host="127.0.0.1", port=8000)

@@ -23,8 +23,8 @@ from summonpot import (
     FromRequest,
     FromResult,
     Operation,
-    Pot,
     Required,
+    Summon,
 )
 from summonpot._validation import (
     _is_compatible as is_compatible,
@@ -55,7 +55,7 @@ class Response(BaseModel):
     ok: bool
 
 
-def _register(pot: Pot, *contracts: Operation) -> None:
+def _register(summon: Summon, *contracts: Operation) -> None:
     """Register an endpoint declaring the given contracts."""
     import inspect as _inspect
 
@@ -81,7 +81,7 @@ def _register(pot: Pot, *contracts: Operation) -> None:
         params, return_annotation=Response
     )
     endpoint.__annotations__ = {"request": Request, "return": Response}
-    pot.summon("/thing")(endpoint)
+    summon("/thing")(endpoint)
 
 
 # --- the comparison itself ---------------------------------------------------
@@ -155,11 +155,11 @@ def wants_int(quantity: int) -> Customer:
 
 
 def test_a_request_field_of_the_wrong_type_is_rejected():
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     with pytest.raises(TypeError, match="incompatible"):
         _register(
-            pot,
+            summon,
             Operation(
                 wants_str,
                 bind={"customer_id": FromRequest("quantity")},
@@ -169,16 +169,16 @@ def test_a_request_field_of_the_wrong_type_is_rejected():
 
 
 def test_a_request_field_of_the_right_type_is_accepted():
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     _register(
-        pot,
+        summon,
         Operation(
             wants_str, bind={"customer_id": FromRequest("customer_id")}, output=Customer
         ),
     )
 
-    assert pot.endpoints[0].tools[0].contract is not None
+    assert summon.endpoints[0].tools[0].contract is not None
 
 
 def test_a_widening_request_field_is_accepted():
@@ -188,41 +188,41 @@ def test_a_widening_request_field_is_accepted():
         """Take a float."""
         return Customer(name="n", tier="t")
 
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     _register(
-        pot,
+        summon,
         Operation(
             wants_float, bind={"ratio": FromRequest("quantity")}, output=Customer
         ),
     )
 
-    assert pot.endpoints[0].tools[0].contract is not None
+    assert summon.endpoints[0].tools[0].contract is not None
 
 
 def test_an_untyped_request_field_is_accepted():
     """`Any` proves nothing, so it cannot disprove anything either."""
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     _register(
-        pot,
+        summon,
         Operation(
             wants_str, bind={"customer_id": FromRequest("anything")}, output=Customer
         ),
     )
 
-    assert pot.endpoints[0].tools[0].contract is not None
+    assert summon.endpoints[0].tools[0].contract is not None
 
 
 def test_a_result_field_of_the_wrong_type_is_rejected():
     producer = Operation(
         wants_str, bind={"customer_id": FromRequest("customer_id")}, output=Customer
     )
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     with pytest.raises(TypeError, match="incompatible"):
         _register(
-            pot,
+            summon,
             producer,
             Operation(
                 wants_int,
@@ -240,10 +240,10 @@ def test_a_result_field_of_the_right_type_is_accepted():
     producer = Operation(
         wants_str, bind={"customer_id": FromRequest("customer_id")}, output=Customer
     )
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     _register(
-        pot,
+        summon,
         producer,
         Operation(
             consume_tier,
@@ -252,21 +252,21 @@ def test_a_result_field_of_the_right_type_is_accepted():
         ),
     )
 
-    assert len(pot.endpoints[0].tools) == 2
+    assert len(summon.endpoints[0].tools) == 2
 
 
 def test_a_context_binding_is_never_rejected():
     """Framework context has no type registry, so nothing about it is provable."""
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     _register(
-        pot,
+        summon,
         Operation(
             wants_str, bind={"customer_id": FromContext("trace_id")}, output=Customer
         ),
     )
 
-    assert pot.endpoints[0].tools[0].contract is not None
+    assert summon.endpoints[0].tools[0].contract is not None
 
 
 # --- what a model may be asked to choose from --------------------------------
@@ -298,10 +298,10 @@ def test_a_choice_from_a_collection_is_accepted():
     producer = Operation(
         list_tiers, bind={"customer_id": FromRequest("customer_id")}, output=list[str]
     )
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     _register(
-        pot,
+        summon,
         producer,
         Operation(
             wants_str,
@@ -310,7 +310,7 @@ def test_a_choice_from_a_collection_is_accepted():
         ),
     )
 
-    assert len(pot.endpoints[0].tools) == 2
+    assert len(summon.endpoints[0].tools) == 2
 
 
 def test_a_choice_whose_item_type_contradicts_the_collection_is_rejected():
@@ -321,11 +321,11 @@ def test_a_choice_whose_item_type_contradicts_the_collection_is_rejected():
     producer = Operation(
         list_tiers, bind={"customer_id": FromRequest("customer_id")}, output=list[str]
     )
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     with pytest.raises(TypeError, match="returns a collection of"):
         _register(
-            pot,
+            summon,
             producer,
             Operation(
                 wants_int,
@@ -379,10 +379,10 @@ def test_a_protocol_argument_registers():
         """Take a protocol."""
         return Customer(name="n", tier="t")
 
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     _register(
-        pot,
+        summon,
         Operation(
             wants_protocol,
             bind={"customer_id": FromRequest("customer_id")},
@@ -390,7 +390,7 @@ def test_a_protocol_argument_registers():
         ),
     )
 
-    assert pot.endpoints[0].tools[0].contract is not None
+    assert summon.endpoints[0].tools[0].contract is not None
 
 
 @pytest.mark.parametrize(
@@ -424,11 +424,11 @@ def _tier_producer() -> Operation:
 
 def test_a_declared_item_type_must_fit_the_argument():
     producer = _tier_producer()
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     with pytest.raises(TypeError, match="incompatible"):
         _register(
-            pot,
+            summon,
             producer,
             Operation(
                 wants_int,
@@ -441,11 +441,11 @@ def test_a_declared_item_type_must_fit_the_argument():
 def test_an_inferred_item_type_must_fit_the_argument():
     """With no explicit item_type, the collection's element type is the choice."""
     producer = _tier_producer()
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     with pytest.raises(TypeError, match="incompatible"):
         _register(
-            pot,
+            summon,
             producer,
             Operation(
                 wants_int,
@@ -457,11 +457,11 @@ def test_an_inferred_item_type_must_fit_the_argument():
 
 def test_a_direct_choice_must_also_fit_the_argument():
     """A choice with no producer behind it was skipping type validation entirely."""
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     with pytest.raises(TypeError, match="incompatible"):
         _register(
-            pot,
+            summon,
             Operation(
                 wants_int,
                 bind={"quantity": AgentChoice(item_type=str)},
@@ -472,22 +472,22 @@ def test_a_direct_choice_must_also_fit_the_argument():
 
 def test_an_unconstrained_choice_is_still_accepted():
     """Nothing declares the type, so nothing can be disproven."""
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     _register(
-        pot,
+        summon,
         Operation(wants_int, bind={"quantity": AgentChoice()}, output=Customer),
     )
 
-    assert pot.endpoints[0].tools[0].contract is not None
+    assert summon.endpoints[0].tools[0].contract is not None
 
 
 def test_a_choice_that_fits_is_accepted():
     producer = _tier_producer()
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     _register(
-        pot,
+        summon,
         producer,
         Operation(
             wants_str,
@@ -496,7 +496,7 @@ def test_a_choice_that_fits_is_accepted():
         ),
     )
 
-    assert len(pot.endpoints[0].tools) == 2
+    assert len(summon.endpoints[0].tools) == 2
 
 
 # --- an unknown item_type must not erase what the producer proved ------------
@@ -507,11 +507,11 @@ def test_an_unknown_item_type_does_not_mask_the_producer(item_type):
     """The model can only pick values the producer returned, so its element type
     is a fact that a broader `item_type` cannot widen away."""
     producer = _tier_producer()
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     with pytest.raises(TypeError, match="incompatible"):
         _register(
-            pot,
+            summon,
             producer,
             Operation(
                 wants_int,
@@ -533,11 +533,11 @@ def test_an_unparameterised_producer_falls_back_to_the_item_type():
     producer = Operation(
         list_anything, bind={"customer_id": FromRequest("customer_id")}, output=list
     )
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     with pytest.raises(TypeError, match="incompatible"):
         _register(
-            pot,
+            summon,
             producer,
             Operation(
                 wants_int,
@@ -555,10 +555,10 @@ def test_an_unparameterised_producer_with_no_item_type_is_accepted():
     producer = Operation(
         list_anything, bind={"customer_id": FromRequest("customer_id")}, output=list
     )
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     _register(
-        pot,
+        summon,
         producer,
         Operation(
             wants_int,
@@ -567,7 +567,7 @@ def test_an_unparameterised_producer_with_no_item_type_is_accepted():
         ),
     )
 
-    assert len(pot.endpoints[0].tools) == 2
+    assert len(summon.endpoints[0].tools) == 2
 
 
 # --- a fixed tuple against a homogeneous one ---------------------------------
@@ -653,10 +653,10 @@ def test_a_choice_from_a_union_of_collections_is_accepted():
         bind={"customer_id": FromRequest("customer_id")},
         output=list[str] | set[str],
     )
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     _register(
-        pot,
+        summon,
         producer,
         Operation(
             wants_str,
@@ -665,7 +665,7 @@ def test_a_choice_from_a_union_of_collections_is_accepted():
         ),
     )
 
-    assert len(pot.endpoints[0].tools) == 2
+    assert len(summon.endpoints[0].tools) == 2
 
 
 def test_a_choice_from_a_union_containing_a_scalar_is_rejected():
@@ -678,11 +678,11 @@ def test_a_choice_from_a_union_containing_a_scalar_is_rejected():
         bind={"customer_id": FromRequest("customer_id")},
         output=list[str] | str,
     )
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     with pytest.raises(TypeError, match="not a collection of selectable items"):
         _register(
-            pot,
+            summon,
             producer,
             Operation(
                 wants_str,
@@ -751,11 +751,11 @@ def test_a_choice_of_differing_elements_must_still_fit_the_argument():
         bind={"customer_id": FromRequest("customer_id")},
         output=list[str] | list[int],
     )
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     with pytest.raises(TypeError, match="incompatible"):
         _register(
-            pot,
+            summon,
             producer,
             Operation(
                 wants_int,
@@ -779,10 +779,10 @@ def test_a_choice_of_differing_elements_fits_a_matching_union_argument():
         bind={"customer_id": FromRequest("customer_id")},
         output=list[str] | list[int],
     )
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     _register(
-        pot,
+        summon,
         producer,
         Operation(
             accepts_either,
@@ -791,7 +791,7 @@ def test_a_choice_of_differing_elements_fits_a_matching_union_argument():
         ),
     )
 
-    assert len(pot.endpoints[0].tools) == 2
+    assert len(summon.endpoints[0].tools) == 2
 
 
 def test_a_variadic_source_cannot_satisfy_an_empty_fixed_tuple():
@@ -825,11 +825,11 @@ def test_a_known_incompatible_possibility_survives_an_unknown_branch():
         bind={"customer_id": FromRequest("customer_id")},
         output=list[str] | Any,
     )
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     with pytest.raises(TypeError, match="incompatible"):
         _register(
-            pot,
+            summon,
             producer,
             Operation(
                 wants_int,
@@ -849,10 +849,10 @@ def test_a_compatible_known_possibility_still_passes_with_an_unknown_branch():
         bind={"customer_id": FromRequest("customer_id")},
         output=list[int] | Any,
     )
-    pot = Pot("svc")
+    summon = Summon("svc")
 
     _register(
-        pot,
+        summon,
         producer,
         Operation(
             wants_int,
@@ -861,4 +861,4 @@ def test_a_compatible_known_possibility_still_passes_with_an_unknown_branch():
         ),
     )
 
-    assert len(pot.endpoints[0].tools) == 2
+    assert len(summon.endpoints[0].tools) == 2
