@@ -1,9 +1,10 @@
 # summonpot
 
-summonpot is an API framework where an endpoint's **signature is its execution
-contract**. You declare the request model, the goal, the exact capabilities, and the
-response model. The framework owns the agent loop. **The decorated function body is
-never executed** — it exists only to carry the declaration.
+summonpot is an API framework where an endpoint declaration is its execution contract.
+You declare the request model, the goal, the exact capabilities, and the response model.
+The framework owns the agent loop. **The ellipsis is a complete declaration body**, not
+an implementation waiting to be written. Calling the decorated declaration directly is
+rejected; execution goes through the served endpoint.
 
 ## The endpoint shape
 
@@ -34,7 +35,7 @@ def research_topic(
     receipt=Required(record_research),
 ) -> ResearchResponse:
     """Research this topic thoroughly and return a sourced report."""
-    raise NotImplementedError
+    ...
 ```
 
 Four parts, all load-bearing:
@@ -54,8 +55,8 @@ asked for in the prompt.
 
 These are the mistakes to avoid, because they contradict the framework's model:
 
-- **Do not implement the function body.** Use `raise NotImplementedError`. Business
-  logic lives in the capabilities passed to `Depends`/`Required`.
+- **Do not implement the declaration body.** Use `...`. Business logic lives in the
+  capabilities passed to `Depends`/`Required`.
 - **Do not build an agent, chain, graph, or planner.** There is no agent object to
   configure. You declare an endpoint; the runtime owns whatever execution it needs.
 - **Do not add an `action` field** to the request model. The endpoint's goal is fixed
@@ -138,7 +139,7 @@ def create_order(
     order_result=Required(order),
 ) -> OrderResponse:
     """Place an order using one approved option."""
-    raise NotImplementedError
+    ...
 ```
 
 The argument sources mean:
@@ -193,7 +194,7 @@ def list_tickets(
     ids: list[int] | None = None,
 ) -> TicketPage:
     """List tickets matching the given status."""
-    raise NotImplementedError
+    ...
 ```
 
 Query parameters must be scalars or sequences of scalars. A mapping such as

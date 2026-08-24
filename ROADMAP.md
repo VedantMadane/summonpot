@@ -29,6 +29,7 @@ The current release line provides:
 - GET, POST, PUT, PATCH, DELETE, and HEAD routing with validated body or query contracts.
 - A keyless test model for exercising routing and capability wiring without provider credentials.
 - Installable coding-agent skills describing the endpoint contract, typed operation bindings, and the current runtime boundary for Claude Code, Cursor, Windsurf, GitHub Copilot, Cline, and OpenAI Codex.
+- Ellipsis declaration bodies that avoid abstract-method semantics, with direct Python calls rejected at the decorator boundary.
 - Immutable `Operation` declarations with `FromRequest`, `FromResult`, `FromContext`, and `AgentChoice` argument sources.
 - Declarative call bounds and ordering references without adding decorator configuration.
 - Registration-time validation for complete bindings, request and result references, operation ordering, selectable collections, and provable type incompatibility.

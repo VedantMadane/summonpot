@@ -61,7 +61,7 @@ def _register(pot: Pot, *contracts: Operation) -> None:
 
     def endpoint(request: Request, **_: object) -> Response:
         """Do the thing."""
-        raise NotImplementedError
+        ...
 
     params = [
         _inspect.Parameter(

@@ -17,7 +17,7 @@ SKILL_TITLE = "summonpot endpoints"
 SKILL_DESCRIPTION = (
     "Write and review summonpot @pot.summon endpoint contracts. Use when declaring "
     "request and response models, Depends, Required, Operation bindings, model and "
-    "runtime limits, HTTP methods, or serving a pot. The function body is never run."
+    "runtime limits, HTTP methods, or serving a pot. The declaration body is `...`."
 )
 
 

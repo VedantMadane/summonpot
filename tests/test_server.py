@@ -62,7 +62,7 @@ def test_build_app_uses_pydantic_request_and_response_models(mock_runtime):
     @pot.summon("/analyze")
     def analyze(request: AnalysisRequest) -> AnalysisResponse:
         """Analyze text."""
-        raise NotImplementedError
+        ...
 
     client = TestClient(build_app(pot))
     schema = client.get("/openapi.json").json()

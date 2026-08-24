@@ -153,7 +153,7 @@ class Operation:
             customer=Required(lookup_by_customer_id),
         ) -> OrderResponse:
             \"\"\"Place an order for this customer.\"\"\"
-            raise NotImplementedError
+            ...
     """
 
     operation: Callable[..., Any]

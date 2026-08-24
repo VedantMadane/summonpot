@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from typing import Annotated, Literal
 
 import pytest
@@ -47,13 +48,48 @@ def test_summon_registers_endpoint():
     assert ep.parameters[1].default == "standard"
 
 
+def test_registered_endpoint_declaration_is_not_directly_callable():
+    pot = Pot("svc")
+    executed: list[str] = []
+
+    @pot.summon("/research")
+    def research_topic(query: str) -> str:
+        """Research this topic."""
+        executed.append(query)
+        return query
+
+    with pytest.raises(TypeError) as error:
+        research_topic("typed contracts")
+
+    assert str(error.value) == (
+        "Summonpot endpoint declaration 'research_topic' is not directly callable. "
+        "Serve the Pot or invoke POST /research."
+    )
+    assert executed == []
+
+
+def test_registered_declaration_preserves_its_public_signature():
+    pot = Pot("svc")
+
+    def expected(query: str, depth: int = 1) -> str: ...
+
+    @pot.summon("/research")
+    def research_topic(query: str, depth: int = 1) -> str:
+        """Research this topic."""
+        ...
+
+    assert research_topic.__name__ == "research_topic"
+    assert research_topic.__doc__ == "Research this topic."
+    assert inspect.signature(research_topic) == inspect.signature(expected)
+
+
 def test_summon_registers_pydantic_input_and_output_contracts():
     pot = Pot("svc")
 
     @pot.summon("/research")
     def research(request: ResearchRequest) -> ResearchResponse:
         """Research a topic."""
-        raise NotImplementedError
+        ...
 
     endpoint = pot.endpoints[0]
     assert endpoint.input_model is ResearchRequest
@@ -78,7 +114,7 @@ def test_summon_rejects_an_unresolvable_parameter_annotation():
             "@pot.summon('/research')\n"
             "def research(request: OnlyUnderTypeChecking) -> str:\n"
             "    '''Research a topic.'''\n"
-            "    raise NotImplementedError\n"
+            "    ...\n"
         )
 
 
@@ -90,7 +126,7 @@ def test_summon_rejects_an_unresolvable_return_annotation():
             "@pot.summon('/research')\n"
             "def research(query: str) -> MissingResponseModel:\n"
             "    '''Research a topic.'''\n"
-            "    raise NotImplementedError\n"
+            "    ...\n"
         )
 
 
@@ -106,7 +142,7 @@ def test_summon_rejects_a_model_defined_in_a_local_scope():
         @pot.summon("/research")
         def research(request: LocalRequest) -> str:
             """Research a topic."""
-            raise NotImplementedError
+            ...
 
         return pot
 
@@ -121,8 +157,7 @@ def test_summon_requires_a_docstring_goal():
     with pytest.raises(TypeError, match="has no docstring"):
 
         @pot.summon("/research")
-        def research(request: ResearchRequest) -> ResearchResponse:
-            raise NotImplementedError
+        def research(request: ResearchRequest) -> ResearchResponse: ...
 
 
 def test_summon_rejects_a_whitespace_only_docstring():
@@ -133,7 +168,7 @@ def test_summon_rejects_a_whitespace_only_docstring():
         @pot.summon("/research")
         def research(request: ResearchRequest) -> ResearchResponse:
             """ """
-            raise NotImplementedError
+            ...
 
 
 def test_summon_rejects_mixed_pydantic_and_scalar_inputs():
@@ -144,7 +179,7 @@ def test_summon_rejects_mixed_pydantic_and_scalar_inputs():
         @pot.summon("/research")
         def research(request: ResearchRequest, trace_id: str) -> ResearchResponse:
             """Research a topic."""
-            raise NotImplementedError
+            ...
 
 
 def test_summon_compiles_dependency_parameters_as_closed_capabilities():
@@ -165,7 +200,7 @@ def test_summon_compiles_dependency_parameters_as_closed_capabilities():
         ranking=Required(rank_sources),
     ) -> ResearchResponse:
         """Research a topic using only the declared capabilities."""
-        raise NotImplementedError
+        ...
 
     endpoint = pot.endpoints[0]
     assert endpoint.input_model is ResearchRequest
@@ -193,7 +228,7 @@ def test_summon_rejects_duplicate_capability_names():
             second=Depends(second_lookup),
         ) -> ResearchResponse:
             """Research a topic."""
-            raise NotImplementedError
+            ...
 
 
 def test_pot_level_tools_shared_across_endpoints():
@@ -273,7 +308,7 @@ def test_summon_accepts_explicitly_quoted_forward_references():
     @pot.summon("/research")
     def research(request: "ResearchRequest") -> "ResearchResponse":  # noqa: UP037
         """Research a topic."""
-        raise NotImplementedError
+        ...
 
     endpoint = pot.endpoints[0]
     assert endpoint.input_model is ResearchRequest
@@ -288,7 +323,7 @@ def test_summon_still_rejects_a_quoted_name_that_does_not_exist():
             "@pot.summon('/research')\n"
             'def research(request: "StillMissing") -> str:\n'
             "    '''Research a topic.'''\n"
-            "    raise NotImplementedError\n"
+            "    ...\n"
         )
 
 
@@ -299,12 +334,12 @@ def test_summon_resolves_forward_references_inside_container_annotations():
     @pot.summon("/research")
     def research(request: "ResearchRequest") -> "ResearchResponse":  # noqa: UP037
         """Research a topic."""
-        raise NotImplementedError
+        ...
 
     @pot.summon("/batch")
     def batch(items: list["ResearchRequest"]) -> dict[str, "ResearchResponse"]:  # noqa: UP037
         """Research several topics."""
-        raise NotImplementedError
+        ...
 
     assert pot.endpoints[0].input_model is ResearchRequest
     # The container resolved to real classes, so it renders with their names rather
@@ -322,7 +357,7 @@ def test_summon_rejects_a_missing_name_nested_in_a_container():
             "@pot.summon('/research')\n"
             'def research(items: list["MissingInside"]) -> str:\n'
             "    '''Research topics.'''\n"
-            "    raise NotImplementedError\n"
+            "    ...\n"
         )
 
 
@@ -335,7 +370,7 @@ def test_summon_rejects_a_path_without_a_leading_slash():
         @pot.summon("research")
         def research(request: ResearchRequest) -> ResearchResponse:
             """Research a topic."""
-            raise NotImplementedError
+            ...
 
 
 def test_summon_rejects_a_duplicate_path():
@@ -345,14 +380,14 @@ def test_summon_rejects_a_duplicate_path():
     @pot.summon("/research")
     def research(request: ResearchRequest) -> ResearchResponse:
         """Research a topic."""
-        raise NotImplementedError
+        ...
 
     with pytest.raises(ValueError, match="POST /research is already registered"):
 
         @pot.summon("/research")
         def research_again(request: ResearchRequest) -> ResearchResponse:
             """Research a topic differently."""
-            raise NotImplementedError
+            ...
 
     assert len(pot.endpoints) == 1
 
@@ -399,7 +434,7 @@ def test_summon_rejects_unimplemented_streaming():
         @pot.summon("/research", stream=True)
         def research(request: ResearchRequest) -> ResearchResponse:
             """Research a topic."""
-            raise NotImplementedError
+            ...
 
     assert pot.endpoints == []
 
@@ -410,7 +445,7 @@ def test_summon_still_accepts_the_default_non_streaming_endpoint():
     @pot.summon("/research")
     def research(request: ResearchRequest) -> ResearchResponse:
         """Research a topic."""
-        raise NotImplementedError
+        ...
 
     assert pot.endpoints[0].stream is False
 
@@ -484,7 +519,7 @@ def test_summon_rejects_a_request_model_on_a_bodyless_method():
         @pot.summon("/research", method="GET")
         def research(request: ResearchRequest) -> ResearchResponse:
             """Research a topic."""
-            raise NotImplementedError
+            ...
 
 
 @pytest.mark.parametrize(
@@ -601,7 +636,7 @@ def test_summon_accepts_a_local_model_passed_as_a_live_annotation():
         "    @pot.summon('/research')\n"
         "    def research(request: LocalRequest) -> str:\n"
         '        """Research a topic."""\n'
-        "        raise NotImplementedError\n"
+        "        ...\n"
         "    return pot\n"
     )
     # dont_inherit: this module uses postponed annotations, and exec would

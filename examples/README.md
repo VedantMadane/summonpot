@@ -6,11 +6,14 @@ These examples grow from one typed endpoint to a multi-file service with bounded
 request model + fixed docstring goal + declared capabilities + response model
 ```
 
-The function body stays declarative:
+The ellipsis is a complete declaration body, not an implementation waiting to be written:
 
 ```python
-raise NotImplementedError
+...
 ```
+
+Summonpot never calls that body. Calling the decorated declaration directly raises an
+error; serve the `Pot` or invoke the generated HTTP route.
 
 ## Before running
 

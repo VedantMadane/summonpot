@@ -6,6 +6,7 @@ import inspect
 from collections.abc import Callable, Mapping
 from dataclasses import replace
 from enum import Enum
+from functools import wraps
 from types import UnionType
 from typing import Annotated, Any, Literal, Union, get_args, get_origin
 
@@ -43,7 +44,7 @@ class Pot:
         @pot.summon("/research")
         def research_topic(request: ResearchRequest) -> ResearchResponse:
             \"\"\"Research this topic thoroughly.\"\"\"
-            raise NotImplementedError
+            ...
 
         pot.serve()
     """
@@ -276,7 +277,15 @@ class Pot:
             )
             self._routes[route] = endpoint_name
             self._endpoints.append(endpoint)
-            return func
+
+            @wraps(func)
+            def declaration(*args: Any, **kwargs: Any) -> Any:
+                raise TypeError(
+                    f"Summonpot endpoint declaration {endpoint_name!r} is not directly "
+                    f"callable. Serve the Pot or invoke {normalized_method} {path}."
+                )
+
+            return declaration
 
         return decorator
 

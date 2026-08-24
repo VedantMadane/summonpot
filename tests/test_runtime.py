@@ -30,7 +30,7 @@ def _register_endpoint(pot: Pot, *, model: str | None = None) -> None:
     @pot.summon("/research", model=model)
     def research(request: ResearchRequest) -> ResearchResponse:
         """Research a topic."""
-        raise NotImplementedError
+        ...
 
 
 def test_runtime_normalizes_explicit_and_legacy_model_names():
@@ -200,7 +200,7 @@ def test_runtime_exposes_capabilities_that_are_not_plain_functions(capability_ki
         request: ResearchRequest, record=Depends(capability)
     ) -> ResearchResponse:
         """Research using a stateful capability."""
-        raise NotImplementedError
+        ...
 
     observed: dict[str, object] = {}
     turns = 0
@@ -254,7 +254,7 @@ def test_runtime_rejects_final_output_until_required_capability_runs():
         sources=Required(load_sources),
     ) -> ResearchResponse:
         """Research using the declared source capability."""
-        raise NotImplementedError
+        ...
 
     def model_function(messages, info: AgentInfo):
         nonlocal model_turns
@@ -306,7 +306,7 @@ def test_runtime_fails_when_required_capability_never_runs():
         sources=Required(load_sources),
     ) -> ResearchResponse:
         """Research a topic."""
-        raise NotImplementedError
+        ...
 
     def model_function(messages, info: AgentInfo):
         nonlocal model_turns
@@ -428,7 +428,7 @@ def test_runtime_supports_every_callable_capability_form(
         request: ResearchRequest, record=Depends(capability)
     ) -> ResearchResponse:
         """Research a topic."""
-        raise NotImplementedError
+        ...
 
     observed: dict[str, object] = {}
     turns = 0
@@ -556,7 +556,7 @@ def test_timeout_bounds_a_slow_synchronous_capability():
         request: ResearchRequest, sources=Required(slow_write)
     ) -> ResearchResponse:
         """Research a topic."""
-        raise NotImplementedError
+        ...
 
     def model_function(messages, info: AgentInfo):
         return ModelResponse(parts=[ToolCallPart("slow_write", {"query": "a"})])
@@ -621,7 +621,7 @@ def test_required_capability_state_does_not_leak_between_calls():
         request: ResearchRequest, sources=Required(load_sources)
     ) -> ResearchResponse:
         """Research a topic."""
-        raise NotImplementedError
+        ...
 
     def model_function(messages, info: AgentInfo):
         nonlocal turns
@@ -660,7 +660,7 @@ def test_concurrent_calls_track_required_capabilities_independently():
         request: ResearchRequest, sources=Required(load_sources)
     ) -> ResearchResponse:
         """Research a topic."""
-        raise NotImplementedError
+        ...
 
     async def model_function(messages, info: AgentInfo):
         called = any(
@@ -703,7 +703,7 @@ def test_capability_may_declare_a_business_field_named_ctx():
         request: ResearchRequest, dep=Depends(inspect_context)
     ) -> ResearchResponse:
         """Research a topic."""
-        raise NotImplementedError
+        ...
 
     observed: dict[str, object] = {}
     turns = 0

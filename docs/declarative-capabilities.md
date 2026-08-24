@@ -10,7 +10,7 @@ def research(
     ranking=Depends(rank_sources),
 ) -> ResearchResponse:
     """Research using only the declared operations."""
-    raise NotImplementedError
+    ...
 ```
 
 The signature defines four things:
@@ -40,7 +40,9 @@ no legal path → typed deterministic error
 
 The public endpoint declaration stays the same. The fixed docstring goal and validated request determine the work; callers do not send an `action` field or select an agent framework. Automatic deterministic endpoint execution is planned—the current runtime still executes `@pot.summon` requests through the provider-neutral agent loop.
 
-Dependency parameters are declaration-only. They do not appear in the HTTP request body or OpenAPI request schema, and the decorated function body is never executed.
+Dependency parameters are declaration-only. They do not appear in the HTTP request body
+or OpenAPI request schema. The ellipsis is the complete declaration body, and direct calls
+to a registered declaration are rejected; execution goes through the generated endpoint.
 
 ## What the boundary does and does not cover
 

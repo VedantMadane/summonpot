@@ -38,14 +38,16 @@ Pydantic request model
 + Pydantic response model
 = executable endpoint
 
-function body
-= raise NotImplementedError
+declaration body
+= ...
 ```
 
-The signature is the execution contract. There is no handler body to implement, agent
-graph to configure, or caller-provided `action` to interpret. Summonpot owns routing,
-validation, the bounded model loop, capability enforcement, structured output, and
-OpenAPI generation.
+The ellipsis is declaration syntax, not an unfinished implementation. The signature,
+docstring, capabilities, and return type are the executable contract. There is no handler
+body to implement, agent graph to configure, or caller-provided `action` to interpret.
+Summonpot owns routing, validation, the bounded model loop, capability enforcement,
+structured output, and OpenAPI generation. Calling a registered declaration directly
+raises a clear error; serve the `Pot` or invoke its generated HTTP route instead.
 
 > [!IMPORTANT]
 > Every current production `@pot.summon` request runs through the configured model.
@@ -66,7 +68,7 @@ def research(
     receipt=Required(save_report),
 ) -> ResearchResponse:
     """Research the topic and return a sourced report."""
-    raise NotImplementedError
+    ...
 ```
 
 That declaration answers the questions an API framework needs to answer:
@@ -169,10 +171,11 @@ pot = Pot("review-api")
 @pot.summon("/review")
 def review(request: ReviewRequest) -> ReviewResponse:
     """Classify the text's sentiment and summarize it in one short sentence."""
-    raise NotImplementedError
+    ...
 ```
 
-The function body is intentionally empty. Summonpot never calls it.
+The ellipsis marks a complete endpoint declaration. Summonpot never calls that body, and
+direct Python calls are rejected at the decorator boundary.
 
 ### 3. Serve it
 
@@ -231,7 +234,7 @@ def create_quote(
     calculation=Required(calculate_quote),
 ) -> QuoteResponse:
     """Calculate and return the exact approved quote."""
-    raise NotImplementedError
+    ...
 ```
 
 | Declaration | Runtime contract |
@@ -283,7 +286,7 @@ def get_customer(
     customer=Required(customer_from_request),
 ) -> CustomerResponse:
     """Load this customer and return the approved customer view."""
-    raise NotImplementedError
+    ...
 ```
 
 The contract is immutable after construction. At registration, summonpot verifies that:
@@ -383,7 +386,7 @@ def list_tickets(
     ids: list[int] | None = None,
 ) -> TicketPage:
     """List tickets matching the requested filters."""
-    raise NotImplementedError
+    ...
 ```
 
 `GET /tickets` and `POST /tickets` may coexist. Registering the same normalized
@@ -415,7 +418,7 @@ Override it for one endpoint without changing that endpoint's HTTP contract:
 @pot.summon("/research", model="anthropic:claude-sonnet-4-5")
 def research(request: ResearchRequest) -> ResearchResponse:
     """Research the topic and return a sourced report."""
-    raise NotImplementedError
+    ...
 ```
 
 OpenRouter keeps the upstream provider and model after the first colon. Legacy
@@ -481,10 +484,10 @@ explains what runs today and what remains planned.
 
 ## Give your coding agent the contract
 
-Summonpot's function body is declarative, which is easy for a coding agent to mistake for
-a normal handler. Install the bundled skill so the agent knows the endpoint shape, typed
-operation sources, registration rules, capability boundary, HTTP behavior, and runtime
-caveats:
+Summonpot uses an ellipsis as a declaration body, which is easy for a coding agent to
+mistake for an unfinished handler. Install the bundled skill so the agent knows the
+endpoint shape, typed operation sources, registration rules, capability boundary, HTTP
+behavior, and runtime caveats:
 
 ```bash
 summonpot add skills
