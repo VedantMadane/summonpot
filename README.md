@@ -111,7 +111,7 @@ not accepted until every `Required(...)` operation has completed successfully.
 - **A keyless test model** for exercising routes and schemas before adding provider
   credentials.
 - **Coding-agent skills** for Claude Code, Cursor, Windsurf, GitHub Copilot, Cline, and
-  OpenAI Codex.
+  OpenAI Codex, including typed operation bindings and their current runtime boundary.
 
 ### New in 0.5.0
 
@@ -482,8 +482,9 @@ explains what runs today and what remains planned.
 ## Give your coding agent the contract
 
 Summonpot's function body is declarative, which is easy for a coding agent to mistake for
-a normal handler. Install the bundled skill so the agent knows the endpoint shape,
-registration rules, capability boundary, HTTP behavior, and runtime caveats:
+a normal handler. Install the bundled skill so the agent knows the endpoint shape, typed
+operation sources, registration rules, capability boundary, HTTP behavior, and runtime
+caveats:
 
 ```bash
 summonpot add skills

@@ -6,6 +6,8 @@ changes, the skill has to change with it, and this test is what forces that.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from summonpot.skills.content import SKILL_DESCRIPTION, SKILL_NAME, skill_body
@@ -45,3 +47,36 @@ def test_skill_documents_an_enforced_rule(rule):
 @pytest.mark.parametrize("status", ["422", "429", "502", "504"])
 def test_skill_documents_the_failure_statuses(status):
     assert status in skill_body()
+
+
+@pytest.mark.parametrize(
+    "contract_term",
+    [
+        "Operation(",
+        "FromRequest",
+        "FromResult",
+        "FromContext",
+        "AgentChoice",
+        "output=",
+        "after=",
+        "reject only provable incompatibility",
+    ],
+)
+def test_skill_documents_typed_operation_contracts(contract_term):
+    assert contract_term in skill_body()
+
+
+def test_skill_states_the_current_binding_execution_boundary():
+    body = " ".join(skill_body().split())
+
+    assert "does not inject" in body
+    assert "model still supplies capability arguments" in body
+    assert "automatic no-model execution" in body
+
+
+def test_skill_python_examples_compile():
+    blocks = re.findall(r"```python\n(.*?)```", skill_body(), re.DOTALL)
+
+    assert len(blocks) >= 4
+    for index, block in enumerate(blocks, 1):
+        compile(block, f"summonpot-skill:{index}", "exec")
