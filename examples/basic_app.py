@@ -22,7 +22,7 @@ pot = Pot("minimal-review")
 @pot.summon("/review")
 def review(request: ReviewRequest) -> ReviewResponse:
     """Classify the text's sentiment and summarize it in one short sentence."""
-    raise NotImplementedError
+    ...
 
 
 if __name__ == "__main__":

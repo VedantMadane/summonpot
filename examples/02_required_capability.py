@@ -46,7 +46,7 @@ def create_quote(
     calculation=Required(calculate_quote),
 ) -> QuoteResponse:
     """Call calculate_quote and return its exact monetary values with a brief explanation. Never perform the calculation yourself."""
-    raise NotImplementedError
+    ...
 
 
 if __name__ == "__main__":

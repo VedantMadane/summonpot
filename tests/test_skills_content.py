@@ -27,7 +27,7 @@ def test_description_says_when_to_load_it():
 @pytest.mark.parametrize(
     "rule",
     [
-        "raise NotImplementedError",  # the body is never executed
+        "Use `...`",  # complete declaration syntax, not an abstract implementation
         "docstring",  # required, and it is the goal
         "start with `/`",  # path validation
         "(path, method)",  # duplicate-route rule

@@ -63,7 +63,7 @@ def test_a_bare_callable_needs_no_contract():
         request: OrderRequest, customer=Required(lookup_customer)
     ) -> OrderResponse:
         """Place an order."""
-        raise NotImplementedError
+        ...
 
     assert pot.endpoints[0].tools[0].contract is None
 
@@ -78,7 +78,7 @@ def test_an_operation_may_declare_an_output_without_bindings():
         customer=Required(Operation(lookup_customer, output=Customer)),
     ) -> OrderResponse:
         """Place an order."""
-        raise NotImplementedError
+        ...
 
     assert pot.endpoints[0].tools[0].contract is not None
 
@@ -108,7 +108,7 @@ def test_a_complete_chain_of_bindings_is_accepted():
         ),
     ) -> OrderResponse:
         """Place an order."""
-        raise NotImplementedError
+        ...
 
     assert len(pot.endpoints[0].tools) == 2
 
@@ -125,7 +125,7 @@ def test_non_request_sources_are_accepted(source):
         ),
     ) -> OrderResponse:
         """Place an order."""
-        raise NotImplementedError
+        ...
 
     assert pot.endpoints[0].tools[0].contract is not None
 
@@ -146,7 +146,7 @@ def test_from_request_resolves_against_a_scalar_endpoint():
         ),
     ) -> str:
         """Place an order."""
-        raise NotImplementedError
+        ...
 
     assert pot.endpoints[0].tools[0].contract is not None
 
@@ -183,7 +183,7 @@ def test_a_diamond_of_dependencies_is_not_a_cycle():
         c=Required(third),
     ) -> OrderResponse:
         """Place an order."""
-        raise NotImplementedError
+        ...
 
     assert len(pot.endpoints[0].tools) == 3
 
@@ -208,7 +208,7 @@ def test_a_binding_for_an_unknown_argument_is_rejected():
             ),
         ) -> OrderResponse:
             """Place an order."""
-            raise NotImplementedError
+            ...
 
 
 def test_a_partially_bound_operation_is_rejected():
@@ -229,7 +229,7 @@ def test_a_partially_bound_operation_is_rejected():
             ),
         ) -> OrderResponse:
             """Place an order."""
-            raise NotImplementedError
+            ...
 
 
 def test_from_request_naming_a_missing_field_is_rejected():
@@ -249,7 +249,7 @@ def test_from_request_naming_a_missing_field_is_rejected():
             ),
         ) -> OrderResponse:
             """Place an order."""
-            raise NotImplementedError
+            ...
 
 
 def test_from_result_on_an_undeclared_operation_is_rejected():
@@ -274,7 +274,7 @@ def test_from_result_on_an_undeclared_operation_is_rejected():
             ),
         ) -> OrderResponse:
             """Place an order."""
-            raise NotImplementedError
+            ...
 
 
 def test_from_result_on_an_operation_without_an_output_is_rejected():
@@ -303,7 +303,7 @@ def test_from_result_on_an_operation_without_an_output_is_rejected():
             ),
         ) -> OrderResponse:
             """Place an order."""
-            raise NotImplementedError
+            ...
 
 
 def test_from_result_naming_a_missing_output_field_is_rejected():
@@ -333,7 +333,7 @@ def test_from_result_naming_a_missing_output_field_is_rejected():
             ),
         ) -> OrderResponse:
             """Place an order."""
-            raise NotImplementedError
+            ...
 
 
 # --- arguments the caller need not supply ------------------------------------
@@ -353,7 +353,7 @@ def _register(pot: Pot, contract: Operation) -> None:
     @pot.summon("/orders")
     def create_order(request: OrderRequest, op=Required(contract)) -> OrderResponse:
         """Place an order."""
-        raise NotImplementedError
+        ...
 
 
 def test_an_argument_with_a_default_may_be_left_unbound():
@@ -467,7 +467,7 @@ def test_after_may_only_name_a_declared_operation():
             ),
         ) -> OrderResponse:
             """Place an order."""
-            raise NotImplementedError
+            ...
 
 
 def test_agent_choice_may_only_offer_results_of_a_declared_operation():
@@ -492,7 +492,7 @@ def test_agent_choice_may_only_offer_results_of_a_declared_operation():
             ),
         ) -> OrderResponse:
             """Place an order."""
-            raise NotImplementedError
+            ...
 
 
 def test_after_naming_a_declared_operation_is_accepted():
@@ -521,7 +521,7 @@ def test_after_naming_a_declared_operation_is_accepted():
         ),
     ) -> OrderResponse:
         """Place an order."""
-        raise NotImplementedError
+        ...
 
     assert len(pot.endpoints[0].tools) == 2
 
@@ -565,7 +565,7 @@ def test_a_field_cannot_be_read_from_an_unstructured_result():
             ),
         ) -> OrderResponse:
             """Place an order."""
-            raise NotImplementedError
+            ...
 
 
 # --- a contracted operation has explicit parameters --------------------------
@@ -598,7 +598,7 @@ def test_a_contracted_operation_may_not_be_variadic(operation):
             ),
         ) -> OrderResponse:
             """Place an order."""
-            raise NotImplementedError
+            ...
 
 
 def test_a_bare_variadic_callable_is_still_allowed():
@@ -615,7 +615,7 @@ def test_a_bare_variadic_callable_is_still_allowed():
         request: OrderRequest, customer=Required(flexible)
     ) -> OrderResponse:
         """Place an order."""
-        raise NotImplementedError
+        ...
 
     assert pot.endpoints[0].tools[0].contract is None
 
@@ -649,7 +649,7 @@ def test_agent_choice_may_not_offer_a_result_with_no_declared_output():
             ),
         ) -> OrderResponse:
             """Place an order."""
-            raise NotImplementedError
+            ...
 
 
 def test_agent_choice_may_offer_a_result_with_a_declared_output():
@@ -677,7 +677,7 @@ def test_agent_choice_may_offer_a_result_with_a_declared_output():
         ),
     ) -> OrderResponse:
         """Place an order."""
-        raise NotImplementedError
+        ...
 
     assert len(pot.endpoints[0].tools) == 2
 
@@ -713,7 +713,7 @@ def test_agent_choice_may_not_offer_a_scalar_result():
             ),
         ) -> OrderResponse:
             """Place an order."""
-            raise NotImplementedError
+            ...
 
 
 def test_the_unstructured_output_error_recommends_something_accepted():
@@ -742,7 +742,7 @@ def test_the_unstructured_output_error_recommends_something_accepted():
             ),
         ) -> OrderResponse:
             """Place an order."""
-            raise NotImplementedError
+            ...
 
     message = str(error.value)
     assert "Pydantic model" in message

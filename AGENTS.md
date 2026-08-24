@@ -13,7 +13,8 @@ A contract-first API framework. An endpoint declaration is the executable contra
 request model + docstring goal + declared capabilities + response model
 ```
 
-The decorated function body is never executed. Today every request runs through the
+The ellipsis is a complete declaration body, not an unfinished implementation. The
+decorated declaration rejects direct calls. Today every request runs through the
 provider-neutral agent runtime; the target is a compiler that picks the least-powerful
 sufficient executor, skipping the model entirely when one legal path remains.
 

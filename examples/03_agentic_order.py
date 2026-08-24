@@ -75,7 +75,7 @@ def fulfill_order(
     creation=Required(create_order),
 ) -> OrderResponse:
     """Fulfill the requested order. Check inventory first. If it is unavailable and substitution is allowed, choose an approved in-stock substitute. Create exactly one order and report whether its SKU differs from the requested SKU."""
-    raise NotImplementedError
+    ...
 
 
 if __name__ == "__main__":

@@ -68,7 +68,7 @@ def list_products(
     search=Required(search_products),
 ) -> ProductList:
     """Call search_products with the supplied query filters and return every exact match under the products field."""
-    raise NotImplementedError
+    ...
 
 
 @pot.summon("/products", method="POST")
@@ -77,7 +77,7 @@ def reserve(
     reservation=Required(reserve_product),
 ) -> ReservationResponse:
     """Reserve the requested product and return the exact reservation receipt."""
-    raise NotImplementedError
+    ...
 
 
 if __name__ == "__main__":

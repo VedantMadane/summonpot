@@ -22,7 +22,7 @@ def handle_support(
     ticket=Required(create_ticket),
 ) -> SupportResponse:
     """Handle the customer's support message. Load the customer. Select the relevant approved policy. Mark confirmed outages urgent and everything else normal. Create exactly one ticket, then write a brief reply grounded in the customer record and policy."""
-    raise NotImplementedError
+    ...
 
 
 if __name__ == "__main__":

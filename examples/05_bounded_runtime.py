@@ -27,13 +27,13 @@ pot = Pot("bounded-summaries", runtime=runtime)
 @pot.summon("/summaries")
 def summarize(request: SummaryRequest) -> SummaryResponse:
     """Summarize the text within max_sentences and extract up to five concrete key points."""
-    raise NotImplementedError
+    ...
 
 
 @pot.summon("/summaries/fast", model="openai:gpt-4o-mini")
 def summarize_fast(request: SummaryRequest) -> SummaryResponse:
     """Produce a concise summary within max_sentences and extract up to three key points."""
-    raise NotImplementedError
+    ...
 
 
 if __name__ == "__main__":

@@ -173,7 +173,7 @@ def test_an_operation_registers_like_a_bare_callable():
         request: OrderRequest, customer=Required(contract)
     ) -> OrderResponse:
         """Place an order for this customer."""
-        raise NotImplementedError
+        ...
 
     (tool,) = pot.endpoints[0].tools
     assert tool.name == "lookup_customer"
@@ -191,7 +191,7 @@ def test_a_bare_callable_still_registers_with_no_contract():
         request: OrderRequest, customer=Required(lookup_customer)
     ) -> OrderResponse:
         """Place an order for this customer."""
-        raise NotImplementedError
+        ...
 
     (tool,) = pot.endpoints[0].tools
     assert tool.contract is None
@@ -240,7 +240,7 @@ def test_registered_bindings_cannot_be_changed_through_the_callers_mapping():
         request: OrderRequest, customer=Required(contract)
     ) -> OrderResponse:
         """Place an order for this customer."""
-        raise NotImplementedError
+        ...
 
     declared["customer_id"] = FromRequest("attacker_controlled")
 
