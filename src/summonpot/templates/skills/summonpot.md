@@ -86,6 +86,98 @@ hard error:
 - **Capability names must be unique** within an endpoint.
 - **`stream=True` is not implemented** and raises.
 
+## Typed operation contracts
+
+Use `Operation` when the source of each capability argument is part of the endpoint
+contract. Keep these declarations beside the application operations, then reference the
+complete contracts through `Depends` or `Required`:
+
+```python
+from my_service.models import Customer, OrderOption, OrderRequest, OrderResponse
+from my_service.operations import find_options, load_customer, place_order
+from summonpot import (
+    AgentChoice,
+    FromContext,
+    FromRequest,
+    FromResult,
+    Operation,
+    Pot,
+    Required,
+)
+
+
+customer = Operation(
+    load_customer,
+    bind={"customer_id": FromRequest("customer_id")},
+    output=Customer,
+)
+options = Operation(
+    find_options,
+    bind={"sku": FromRequest("sku")},
+    output=list[OrderOption],
+)
+order = Operation(
+    place_order,
+    bind={
+        "customer_id": FromResult(customer, "customer_id"),
+        "option": AgentChoice(from_result=options, item_type=OrderOption),
+        "actor_id": FromContext("actor_id"),
+    },
+    output=OrderResponse,
+    after=(customer, options),
+)
+
+pot = Pot("order-api")
+
+
+@pot.summon("/orders")
+def create_order(
+    request: OrderRequest,
+    customer_result=Required(customer),
+    available_options=Required(options),
+    order_result=Required(order),
+) -> OrderResponse:
+    """Place an order using one approved option."""
+    raise NotImplementedError
+```
+
+The argument sources mean:
+
+| Source | Declaration |
+|---|---|
+| validated request field | `FromRequest("field")` |
+| field from a declared producer's typed output | `FromResult(operation, "field")` |
+| framework-owned context | `FromContext("key")` |
+| direct or collection-backed model selection | `AgentChoice(...)` |
+
+Once `bind=` is present, bind every argument that has no default. Registration rejects
+unknown arguments, missing request or result fields, undeclared producers, unreadable
+outputs, invalid `after=` references, dependency cycles, and unsupported selectable
+collection shapes.
+
+Known source, element, and destination types must be compatible. The policy is to
+**reject only provable incompatibility**: missing annotations, `Any`, context values, and
+relationships that cannot be established remain unknown. An unknown branch does not
+erase a known contradiction.
+
+`output=` is required before another operation can use `FromResult` or collection-backed
+`AgentChoice`. Bare callables and `Operation` declarations without `bind` remain valid;
+in those cases the model chooses the arguments as before.
+
+Call-bound helpers can refine a marker declaratively:
+
+```python
+from summonpot import AtMost, Depends, Exactly, Required
+
+lookup = Depends(customer, calls=AtMost(2))
+write = Required(order, calls=Exactly(1))
+```
+
+The current release validates and stores bindings, `after=`, outputs, and call bounds. It
+**does not inject** bound values or enforce ordering and maximum/exact call counts at
+runtime yet. The model still supplies capability arguments, and automatic no-model
+execution remains planned. `Required` continues to enforce successful use at least once.
+
 ## HTTP methods
 
 `method=` defaults to `POST`. `GET`, `DELETE` and `HEAD` carry no body, so their

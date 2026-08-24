@@ -15,10 +15,9 @@ _SKILLS_DIR = Path(__file__).resolve().parent.parent / "templates" / "skills"
 SKILL_NAME = "summonpot"
 SKILL_TITLE = "summonpot endpoints"
 SKILL_DESCRIPTION = (
-    "Write summonpot endpoints, where the function signature is the execution "
-    "contract and the body is never run. Use when defining or reviewing an endpoint "
-    "with @pot.summon, declaring capabilities with Depends or Required, choosing a "
-    "model, bounding a call, or serving a pot."
+    "Write and review summonpot @pot.summon endpoint contracts. Use when declaring "
+    "request and response models, Depends, Required, Operation bindings, model and "
+    "runtime limits, HTTP methods, or serving a pot. The function body is never run."
 )
 
 
