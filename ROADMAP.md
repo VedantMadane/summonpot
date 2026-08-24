@@ -42,6 +42,14 @@ It does not yet inject those bindings during execution. The current model runtim
 supplies capability arguments, and every reachable capability must validate and authorize
 its inputs exactly as it did before 0.5.0.
 
+### 0.6.0 boundary
+
+Version 0.6.0 standardizes the public application API on `Summon`, a module-level
+`summon`, and direct `@summon(...)` registration. It also makes ellipsis the complete
+declaration body and rejects direct Python calls to registered declarations. The execution
+boundary is unchanged from 0.5.0: typed bindings, ordering, and call bounds are validated
+and stored, but the current runtime does not inject or enforce them yet.
+
 ## Next milestones
 
 The ordering below reflects technical dependencies, not promised release dates.
