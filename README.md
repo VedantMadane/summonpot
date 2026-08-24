@@ -124,6 +124,18 @@ not accepted until every `Required(...)` operation has completed successfully.
 - **Coding-agent skills** for Claude Code, Cursor, Windsurf, GitHub Copilot, Cline, and
   OpenAI Codex, including typed operation bindings and their current runtime boundary.
 
+### New in 0.6.0
+
+Summonpot 0.6.0 makes `Summon` the application object, a module-level `summon` the CLI
+entry point, and the application instance itself the endpoint decorator: `@summon(...)`.
+Complete declarations use `...`, and calling a registered declaration directly now raises
+instead of silently executing an empty Python body. The bundled coding-agent skill and all
+first-party examples teach the same contract.
+
+This release changes the public application API without changing the execution boundary:
+typed operation bindings, ordering, and maximum/exact call bounds are still validated and
+stored at registration, while runtime injection and enforcement remain planned.
+
 ### New in 0.5.0
 
 Summonpot 0.5.0 makes capability dataflow part of the endpoint declaration. `Operation`

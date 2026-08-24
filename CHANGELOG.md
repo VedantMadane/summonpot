@@ -10,6 +10,50 @@ release assembles them here — run `make changelog-draft` to preview them.
 
 <!-- towncrier release notes start -->
 
+## [0.6.0] - 2026-08-24
+
+### Upgrading from 0.5.0
+
+The application API is now `Summon`, the CLI loads a module-level variable named
+`summon`, and the application instance is the endpoint decorator:
+
+```python
+from pydantic import BaseModel
+from summonpot import Summon
+
+
+class Request(BaseModel):
+    query: str
+
+
+class Response(BaseModel):
+    answer: str
+
+
+summon = Summon("service")
+
+
+@summon("/route")
+def route(request: Request) -> Response:
+    """Answer the query."""
+    ...
+```
+
+Replace `from summonpot import Pot`, `pot = Pot(...)`, and `@pot.summon(...)` together.
+The package-root `Pot` export and `summonpot.pot` module are removed.
+`Summon.summon(...)` remains a temporary source-compatibility alias after constructing a
+`Summon`, but new code should use the application instance directly.
+
+### Changed
+
+- Use ellipsis for complete endpoint declaration bodies and reject direct Python calls to registered declarations. ([#67](https://github.com/tugrulguner/summonpot/pull/67))
+- Replace the `Pot` application object and `@pot.summon(...)` syntax with `Summon`, a module-level `summon` variable, and direct `@summon(...)`; `Summon.summon(...)` remains a temporary source-compatibility alias. ([#68](https://github.com/tugrulguner/summonpot/pull/68))
+
+### Fixed
+
+- Update the bundled coding-agent skill for typed operation bindings, registration validation, and the current runtime execution boundary. ([#66](https://github.com/tugrulguner/summonpot/pull/66))
+
+
 ## [0.5.0] - 2026-08-23
 
 ### Added
