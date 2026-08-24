@@ -76,7 +76,10 @@ curl -X POST http://127.0.0.1:8000/orders \
   -d '{"customer_id":"customer-7","sku":"red-mug","quantity":2,"allow_substitute":true}'
 ```
 
-The endpoint checks inventory, may choose an approved substitute, and must persist exactly one order before returning success.
+The endpoint checks inventory, may choose an approved substitute, and must call the order
+write successfully before returning success. Its goal asks for exactly one write, but the
+current runtime enforces required use—not the declared maximum—so the write itself still
+needs an idempotency policy.
 
 ### 4. HTTP methods and query parameters
 
@@ -112,7 +115,19 @@ Usage-limit, timeout, and provider failures are mapped to stable public HTTP err
 
 Directory: `06_support_service/`
 
-Shows models, application operations, runtime configuration, optional policy selection, required customer lookup, and a required persisted ticket split across normal Python modules.
+Shows models, application operations, runtime configuration, and a typed operation chain
+split across normal Python modules:
+
+- `FromRequest` declares the customer lookup's request-field source;
+- `FromResult` declares the ticket's dependency on the typed customer result;
+- `AgentChoice` marks policy, priority, and summary values that remain model-selected;
+- `after` records ordering, and `Exactly(1)` records the intended write bound.
+
+These declarations are validated and stored when the module imports. The current runtime
+does not inject bound values or enforce `after` and maximum/exact call counts yet; the model
+still supplies capability arguments, while `Required(...)` enforces successful use at
+least once. This example therefore demonstrates the shipped contract and registration
+boundary without claiming the planned capability-graph executor already exists.
 
 ```bash
 export SUMMONPOT_TICKET_LOG=/tmp/my-support-tickets.jsonl

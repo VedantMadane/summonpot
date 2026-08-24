@@ -4,7 +4,7 @@ from decimal import ROUND_HALF_UP, Decimal
 
 from pydantic import BaseModel, Field
 
-from summonpot import Summon, Required
+from summonpot import Required, Summon
 
 
 class QuoteRequest(BaseModel):

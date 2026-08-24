@@ -133,6 +133,42 @@ This release establishes the validated contract layer. Runtime binding injection
 automatic no-model execution remain the next execution milestones, so existing
 model-backed endpoint behavior does not change silently during the upgrade.
 
+## Migrating from the 0.5 API
+
+The application object is now `Summon`, and the application instance is the endpoint
+decorator. Replace all three parts of the old spelling:
+
+```python
+# 0.5
+from summonpot import Pot
+
+pot = Pot("service")
+
+
+@pot.summon("/review")
+def review(request: ReviewRequest) -> ReviewResponse:
+    """Review this request."""
+    ...
+```
+
+```python
+# current
+from summonpot import Summon
+
+summon = Summon("service")
+
+
+@summon("/review")
+def review(request: ReviewRequest) -> ReviewResponse:
+    """Review this request."""
+    ...
+```
+
+In short: `Pot` → `Summon`, `pot` → `summon`, and `@pot.summon(...)` →
+`@summon(...)`. The CLI likewise loads a module-level variable named `summon`.
+`summon.summon(...)` remains a temporary source-compatibility alias after constructing a
+`Summon`, but new code and all first-party examples use the callable application directly.
+
 ## Quick start
 
 ### 1. Install
@@ -483,7 +519,7 @@ The [`examples/`](examples/) directory grows from one endpoint to a multi-file s
 | 3 | [`03_agentic_order.py`](examples/03_agentic_order.py) | Bounded choice plus a required write |
 | 4 | [`04_http_methods.py`](examples/04_http_methods.py) | GET/POST routing and query parameters |
 | 5 | [`05_bounded_runtime.py`](examples/05_bounded_runtime.py) | Limits, timeout, and model override |
-| 6 | [`06_support_service/`](examples/06_support_service/) | Multi-file operations and persisted ticket |
+| 6 | [`06_support_service/`](examples/06_support_service/) | Multi-file typed operation chain and persisted ticket |
 
 The [examples guide](examples/README.md) includes a real HTTP call for every level and
 explains what runs today and what remains planned.

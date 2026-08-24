@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 from typing import Literal
 
+from support_models import CustomerRecord, TicketReceipt
+
 CUSTOMERS = {
     "customer-1": {"name": "Ada", "plan": "enterprise"},
     "customer-2": {"name": "Grace", "plan": "starter"},
@@ -14,12 +16,12 @@ TICKET_LOG = Path(
 )
 
 
-def load_customer(customer_id: str) -> dict[str, str]:
+def load_customer(customer_id: str) -> CustomerRecord:
     """Load the exact customer name and plan for one customer identifier."""
     customer = CUSTOMERS.get(customer_id)
     if customer is None:
         raise ValueError(f"Unknown customer: {customer_id}")
-    return {"customer_id": customer_id, **customer}
+    return CustomerRecord(customer_id=customer_id, **customer)
 
 
 def load_policy(topic: Literal["billing", "outage", "general"]) -> str:
@@ -36,7 +38,7 @@ def create_ticket(
     customer_id: str,
     priority: Literal["normal", "urgent"],
     summary: str,
-) -> dict[str, str]:
+) -> TicketReceipt:
     """Persist one support ticket and return its exact receipt."""
     ticket_id = f"ticket-{customer_id.removeprefix('customer-')}-{priority}"
     receipt = {
@@ -47,4 +49,4 @@ def create_ticket(
     }
     with TICKET_LOG.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(receipt, sort_keys=True) + "\n")
-    return {"ticket_id": ticket_id, "priority": priority}
+    return TicketReceipt(ticket_id=ticket_id, priority=priority)

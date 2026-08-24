@@ -57,8 +57,10 @@ class FromContext(ArgumentSource):
 class AgentChoice(ArgumentSource):
     """Let the model choose the value.
 
-    The only *argument source* a declaration does not determine: an argument bound to
-    any other source is filled by the runtime and never offered to the model.
+    The only *argument source* a declaration does not determine. In the target bound
+    runtime, every other source is filled by the framework and never offered to the
+    model. The current runtime validates and stores this distinction but does not inject
+    bindings yet, so the model still supplies capability arguments.
 
     This is a claim about one argument, not about an endpoint. An endpoint whose every
     argument is bound may still need a model — for an unresolved ordering, a choice

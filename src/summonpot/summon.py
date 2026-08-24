@@ -290,6 +290,9 @@ class Summon:
 
         return decorator
 
+    # Temporary source-compatibility bridge for applications that have already renamed
+    # `Pot` to `Summon` but still use `summon.summon(...)`. The callable application is
+    # the only canonical spelling and the only one taught by first-party examples.
     summon = __call__
 
     @property

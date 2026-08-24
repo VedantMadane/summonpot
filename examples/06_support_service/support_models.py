@@ -10,6 +10,17 @@ class SupportRequest(BaseModel):
     message: str = Field(min_length=10, max_length=2_000)
 
 
+class CustomerRecord(BaseModel):
+    customer_id: str
+    name: str
+    plan: str
+
+
+class TicketReceipt(BaseModel):
+    ticket_id: str
+    priority: Literal["normal", "urgent"]
+
+
 class SupportResponse(BaseModel):
     ticket_id: str
     priority: Literal["normal", "urgent"]

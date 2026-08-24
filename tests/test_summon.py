@@ -1,7 +1,10 @@
 """Tests for the canonical Summon application API."""
 
+import importlib
 import re
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -31,11 +34,29 @@ def test_summon_instance_is_the_endpoint_decorator():
     assert summon.endpoints[0].name == "research"
 
 
+def test_summon_method_remains_a_temporary_compatibility_alias():
+    from summonpot import Summon
+
+    summon = Summon("svc")
+
+    @summon.summon("/legacy-spelling")
+    def legacy_spelling(query: str) -> str:
+        """Keep source compatibility while applications migrate."""
+        ...
+
+    assert summon.endpoints[0].path == "/legacy-spelling"
+
+
 def test_pot_is_not_part_of_the_package_root_api():
     import summonpot
 
     assert not hasattr(summonpot, "Pot")
     assert "Pot" not in summonpot.__all__
+
+
+def test_legacy_pot_module_is_not_part_of_the_package():
+    with pytest.raises(ModuleNotFoundError, match=r"summonpot\.pot"):
+        importlib.import_module("summonpot.pot")
 
 
 def test_cli_loads_the_module_summon_variable(tmp_path: Path):
@@ -50,27 +71,33 @@ def test_cli_loads_the_module_summon_variable(tmp_path: Path):
 
 
 def test_public_surfaces_use_the_summon_application_vocabulary():
+    readme = (ROOT / "README.md").read_text()
+    canonical_readme = (
+        readme.split("## Migrating from the 0.5 API", 1)[0]
+        + readme.split("## Quick start", 1)[1]
+    )
     surfaces = [
-        ROOT / "README.md",
         ROOT / "ROADMAP.md",
         ROOT / "src/summonpot/templates/skills/summonpot.md",
         *sorted((ROOT / "docs").rglob("*.md")),
         *sorted((ROOT / "examples").rglob("*.md")),
         *sorted((ROOT / "examples").rglob("*.py")),
     ]
+    contents = {
+        ROOT / "README.md": canonical_readme,
+        **{path: path.read_text() for path in surfaces},
+    }
     stale = {
         str(path.relative_to(ROOT)): sorted(
             set(
                 re.findall(
                     r"\bPot\b|@pot\.summon|@summon\.summon|\bpot\s*=",
-                    path.read_text(),
+                    text,
                 )
             )
         )
-        for path in surfaces
-        if re.search(
-            r"\bPot\b|@pot\.summon|@summon\.summon|\bpot\s*=", path.read_text()
-        )
+        for path, text in contents.items()
+        if re.search(r"\bPot\b|@pot\.summon|@summon\.summon|\bpot\s*=", text)
     }
 
     assert stale == {}

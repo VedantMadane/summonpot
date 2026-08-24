@@ -6,7 +6,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from summonpot import Depends, Summon, Required
+from summonpot import Depends, Required, Summon
 
 INVENTORY = {"red-mug": 0, "blue-mug": 8, "green-mug": 3}
 SUBSTITUTES = {"red-mug": ["blue-mug", "green-mug"]}

@@ -4,7 +4,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
-from summonpot import Summon, Required
+from summonpot import Required, Summon
 
 PRODUCTS = {
     "notebook": {"category": "stationery", "price_cents": 1299},
