@@ -2,6 +2,10 @@
 
 A summonpot endpoint is a declaration, not a Python handler.
 
+The opening fragment focuses on the declaration shape and assumes the application-specific
+request models and operations are defined elsewhere. For a standalone runnable application,
+start with the [quick start](../README.md#quick-start).
+
 ```python
 from summonpot import Depends, Required, Summon
 

@@ -86,3 +86,14 @@ def test_readme_documents_the_pot_to_summon_migration():
     assert "from summonpot import Pot" in readme
     assert "from summonpot import Summon" in readme
     assert "`pot` → `summon`" in readme
+    assert "`summonpot.pot` module have been removed" in readme
+    assert "module-level variable named `summon`" in readme
+
+
+def test_examples_use_one_documented_provider_installation():
+    guide = (ROOT / "examples/README.md").read_text()
+    bounded = (ROOT / "examples/05_bounded_runtime.py").read_text()
+
+    assert "summonpot[serve,cli,openrouter]" in guide
+    assert 'model="openrouter:openai/gpt-4o-mini"' in bounded
+    assert "OPENAI_API_KEY" not in guide

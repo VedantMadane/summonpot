@@ -30,7 +30,7 @@ def summarize(request: SummaryRequest) -> SummaryResponse:
     ...
 
 
-@summon("/summaries/fast", model="openai:gpt-4o-mini")
+@summon("/summaries/fast", model="openrouter:openai/gpt-4o-mini")
 def summarize_fast(request: SummaryRequest) -> SummaryResponse:
     """Produce a concise summary within max_sentences and extract up to three key points."""
     ...

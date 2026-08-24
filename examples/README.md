@@ -33,6 +33,11 @@ summonpot serve examples/basic_app.py --host 127.0.0.1 --port 8000
 
 Then open `http://127.0.0.1:8000/docs` or call it with `curl`.
 
+Bare `Depends(...)` and `Required(...)` capabilities still receive model-selected
+arguments in the current runtime; request fields are not automatically injected into them.
+Each operation must validate its own inputs and authorization. Level 6 shows the shipped
+typed binding declarations and states their current registration-only execution boundary.
+
 ## Progression
 
 ### 1. Minimal typed endpoint
@@ -101,7 +106,9 @@ Capability dependencies do not appear as request fields or OpenAPI parameters.
 
 File: `05_bounded_runtime.py`
 
-Shows retries, usage limits, a request timeout, and a route-level model override. `/summaries` uses `SUMMONPOT_MODEL`; `/summaries/fast` explicitly uses `openai:gpt-4o-mini` and therefore needs `OPENAI_API_KEY`.
+Shows retries, usage limits, a request timeout, and a route-level model override.
+`/summaries` uses `SUMMONPOT_MODEL`; `/summaries/fast` explicitly selects
+`openrouter:openai/gpt-4o-mini`, using the same OpenRouter installation and key shown above.
 
 ```bash
 curl -X POST http://127.0.0.1:8000/summaries \

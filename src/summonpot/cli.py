@@ -110,4 +110,11 @@ def _load_summon(source: str) -> Summon:
             err=True,
         )
         raise typer.Exit(1)
+    if not isinstance(summon, Summon):
+        typer.echo(
+            f"Error: 'summon' in {filepath} is not a Summon instance. "
+            "Define a Summon instance named 'summon'.",
+            err=True,
+        )
+        raise typer.Exit(1)
     return summon

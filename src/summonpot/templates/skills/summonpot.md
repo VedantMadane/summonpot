@@ -64,6 +64,11 @@ These are the mistakes to avoid, because they contradict the framework's model:
 - **Do not expose raw database sessions, engines, connections, cursors, or arbitrary
   SQL** as capabilities. Pass exact, prepared operations.
 
+When upgrading a 0.5 project, replace legacy imports from `summonpot.pot`, application
+variables named `pot`, and method-style endpoint registration with the `Summon`, `summon`,
+and direct callable-application shape above. The CLI loads the module-level `summon`
+variable exactly.
+
 ## Rules enforced at registration
 
 summonpot raises when the application module is imported, not at request time. Each of

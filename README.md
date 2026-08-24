@@ -60,6 +60,9 @@ A conventional API asks you to write a handler. An agent-first stack asks you to
 configure an agent and then wrap it in HTTP. Summonpot starts from the endpoint contract
 instead:
 
+The following conceptual declaration omits the application-specific request models and
+operation implementations; the [quick start](#quick-start) is the standalone example.
+
 ```python
 from summonpot import Depends, Required, Summon
 
@@ -166,6 +169,8 @@ def review(request: ReviewRequest) -> ReviewResponse:
 
 In short: `Pot` → `Summon`, `pot` → `summon`, and `@pot.summon(...)` →
 `@summon(...)`. The CLI likewise loads a module-level variable named `summon`.
+The package-root `Pot` export and the `summonpot.pot` module have been removed, so update
+imports rather than relying on either legacy path.
 `summon.summon(...)` remains a temporary source-compatibility alias after constructing a
 `Summon`, but new code and all first-party examples use the callable application directly.
 
@@ -264,7 +269,7 @@ def calculate_quote(
     )
 ```
 
-Attach it to one endpoint:
+Attach it to one endpoint, continuing from the application and models defined above:
 
 ```python
 from summonpot import Required
@@ -411,6 +416,8 @@ shipped**. See
 
 `POST` is the default. Body endpoints take one Pydantic request model. Bodyless methods
 such as `GET`, `DELETE`, and `HEAD` declare scalar or scalar-sequence query parameters:
+
+This fragment continues from an existing module-level `summon` application:
 
 ```python
 from typing import Literal

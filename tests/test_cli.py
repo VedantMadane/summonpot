@@ -60,6 +60,20 @@ def test_load_summon_reports_file_without_summon(tmp_path: Path, capsys):
     )
 
 
+def test_load_summon_rejects_a_variable_of_the_wrong_type(tmp_path: Path, capsys):
+    source = tmp_path / "app.py"
+    source.write_text("summon = 1\n")
+
+    with pytest.raises(typer.Exit) as error:
+        _load_summon(str(source))
+
+    assert error.value.exit_code == 1
+    assert capsys.readouterr().err == (
+        f"Error: 'summon' in {source.resolve()} is not a Summon instance. "
+        "Define a Summon instance named 'summon'.\n"
+    )
+
+
 def test_load_summon_reports_import_error(tmp_path: Path, capsys):
     source = tmp_path / "broken.py"
     source.write_text("raise RuntimeError('broken app')\n")
