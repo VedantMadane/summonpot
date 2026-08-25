@@ -109,6 +109,10 @@ not accepted until every `Required(...)` operation has completed successfully.
 - **Closed capability sets** made from exact application-owned callables.
 - **Optional and mandatory operations** through `Depends(...)` and `Required(...)`.
 - **Runtime-enforced required use**, tracked per request rather than trusted to a prompt.
+- **Bound exactly-once operations** for the first complete runtime slice: trusted
+  `FromRequest` values and callable defaults are hidden from the model, direct
+  `AgentChoice` arguments remain visible, one start is permitted, and `output=` is locally
+  validated before success.
 - **Typed `Operation` contracts** that declare request, prior-result, context, or
   model-chosen argument sources without expanding the endpoint API.
 - **Registration-time contract validation** that rejects missing sources, invalid result
@@ -302,20 +306,23 @@ def create_quote(
 | `Depends(operation)` | The operation is available to the endpoint and may be called. |
 | `Required(operation)` | Final output is rejected until the operation succeeds. |
 
-`Required(...)` proves that the operation returned successfully at least once during
-that request. It does not prove correct arguments, exactly-once execution, ordering,
-idempotency, or that every final claim matches the operation result.
+For bare callables and broader operation graphs, `Required(...)` proves only that the
+operation returned successfully at least once during that request. The narrow bound form
+shown below additionally enforces trusted request injection, local operation-output
+validation, and `Exactly(1)`. Ordering, idempotency, and provenance-backed final claims
+remain separate concerns.
 
 Capabilities do not become request-body fields or OpenAPI parameters. Their docstrings
 and annotations define the tool schema visible to the model, while their implementations
 define the real application behavior.
 
-The capability set is closed. Typed `Operation.bind` declarations can now state and
-validate where inputs are intended to come from, but the current runtime does not inject
-those bound values yet; capability inputs remain model-selected during execution. Treat
-them like input from an untrusted caller: validate arguments and enforce authorization
-inside each operation. Pass exact operations, never raw database sessions, engines,
-connections, cursors, arbitrary SQL, shell access, or ambient filesystem authority.
+The capability set is closed. For one required typed operation with `Exactly(1)`, the
+runtime now injects `FromRequest` values, hides them and callable defaults from the model,
+offers only direct `AgentChoice` arguments, validates the declared operation output, and
+rejects a second start. Other operation shapes remain on the legacy model-supplied path
+until their execution semantics ship. Every operation must still enforce authorization.
+Pass exact operations, never raw database sessions, engines, connections, cursors,
+arbitrary SQL, shell access, or ambient filesystem authority.
 
 See the complete executable
 [`Required(...)` quote example](examples/02_required_capability.py).
@@ -328,14 +335,17 @@ than something the model should invent:
 ```python
 from my_service.models import Customer, CustomerRequest, CustomerResponse
 from my_service.operations import load_customer
-from summonpot import FromRequest, Operation, Summon, Required
+from summonpot import AgentChoice, Exactly, FromRequest, Operation, Required, Summon
 
 
 summon = Summon("customer-api")
 
 customer_from_request = Operation(
     load_customer,
-    bind={"customer_id": FromRequest("customer_id")},
+    bind={
+        "customer_id": FromRequest("customer_id"),
+        "format": AgentChoice(),
+    },
     output=Customer,
 )
 
@@ -343,7 +353,7 @@ customer_from_request = Operation(
 @summon("/customers")
 def get_customer(
     request: CustomerRequest,
-    customer=Required(customer_from_request),
+    customer=Required(customer_from_request, calls=Exactly(1)),
 ) -> CustomerResponse:
     """Load this customer and return the approved customer view."""
     ...
@@ -369,10 +379,11 @@ module is imported. A `Customer` value may feed a `Person` argument when `Custom
 subclass, and Python's numeric widening permits `int` or `bool` to feed `float`.
 
 > [!IMPORTANT]
-> Registration validates and stores `FromRequest`, `FromResult`, `FromContext`,
-> `AgentChoice`, and `after` declarations today. Runtime binding injection, ordering
-> execution, and automatic no-model paths remain planned. Until those layers ship, the
-> model-backed runtime still supplies capability arguments.
+> Registration validates and stores every binding source. Runtime enforcement currently
+> covers one required `Exactly(1)` operation using `FromRequest`, direct `AgentChoice`,
+> and callable defaults. `FromResult`, `FromContext`, `after`, broader call bounds, and
+> automatic no-model paths remain planned; unsupported shapes keep their existing
+> model-supplied argument behavior.
 
 ## How it works today
 
@@ -420,9 +431,9 @@ The roadmap adds a no-model executor without adding a second endpoint API:
 | A bounded semantic choice remains | Use the agent runtime with declared capabilities |
 | No legal path exists | Return a typed deterministic error |
 
-This compiler, runtime binding injection and ordering, SQLAlchemy/SQLite operation
-adapters, write receipts, streaming, and built-in authentication are **planned, not
-shipped**. See
+Broader graph compilation and ordering, automatic no-model execution, SQLAlchemy/SQLite
+operation adapters, write receipts, streaming, and built-in authentication are **planned,
+not shipped**. See
 [ROADMAP.md](ROADMAP.md) for the design boundaries and implementation order.
 
 ## HTTP methods and OpenAPI
@@ -540,6 +551,7 @@ The [`examples/`](examples/) directory grows from one endpoint to a multi-file s
 | 4 | [`04_http_methods.py`](examples/04_http_methods.py) | GET/POST routing and query parameters |
 | 5 | [`05_bounded_runtime.py`](examples/05_bounded_runtime.py) | Limits, timeout, and model override |
 | 6 | [`06_support_service/`](examples/06_support_service/) | Multi-file typed operation chain and persisted ticket |
+| 7 | [`07_bound_operation.py`](examples/07_bound_operation.py) | Enforced `FromRequest` + `AgentChoice` with `Exactly(1)` |
 
 The [examples guide](examples/README.md) includes a real HTTP call for every level and
 explains what runs today and what remains planned.
@@ -581,7 +593,7 @@ Useful places to contribute include:
 - executable examples for real application workflows;
 - provider and HTTP acceptance coverage;
 - clearer errors, safer defaults, and API ergonomics;
-- runtime binding injection, capability-graph execution, and operation result validation;
+- `FromResult`/`FromContext` binding, broader capability-graph execution, and ordering;
 - exact database-operation adapters;
 - the deterministic execution compiler described in the roadmap;
 - documentation, diagrams, and reproducible bug reports.

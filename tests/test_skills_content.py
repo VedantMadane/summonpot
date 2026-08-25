@@ -69,9 +69,12 @@ def test_skill_documents_typed_operation_contracts(contract_term):
 def test_skill_states_the_current_binding_execution_boundary():
     body = " ".join(skill_body().split())
 
-    assert "does not inject" in body
-    assert "model still supplies capability arguments" in body
-    assert "automatic no-model execution" in body
+    assert "one required typed operation" in body
+    assert "calls=Exactly(1)" in body
+    assert "trusted and defaulted arguments are hidden from the model" in body
+    assert "Multi-operation chains" in body
+    assert "model-supplied argument behavior" in body
+    assert "automatic no-model execution" in body.lower()
 
 
 def test_skill_python_examples_compile():

@@ -71,11 +71,16 @@ fields, undeclared producers, and types known to be incompatible. Dependency cyc
 structurally unrepresentable through the immutable public `Operation` API rather than
 discovered by a separate cycle detector.
 
-The declarations are immutable and shipped today. Runtime binding injection, ordering,
-and maximum/exact call-count enforcement are not: the current model runtime still supplies
-capability arguments. See the executable
-[`06_support_service` example](../examples/06_support_service/app.py) for a complete typed
-chain and its explicit current-runtime boundary.
+The declarations are immutable and shipped today. The first runtime-enforced slice covers
+an endpoint with one required `Exactly(1)` operation whose arguments use `FromRequest`,
+direct `AgentChoice`, or callable defaults. Trusted/defaulted arguments are absent from the
+model schema, the single start is reserved before application code, and `output=` is
+validated before the operation satisfies `Required`.
+
+Multi-operation chains, `FromResult`, `FromContext`, `after`, and broader call bounds remain
+registration-only. See [`07_bound_operation.py`](../examples/07_bound_operation.py) for the
+enforced slice and [`06_support_service`](../examples/06_support_service/app.py) for the
+broader declared chain and its explicit current-runtime boundary.
 
 ## Deterministic and agentic execution
 
@@ -107,22 +112,25 @@ For databases, the target adapter API accepts exact prepared operations rather t
 
 The agent receives the operation's typed callable schema—not the statement, SQL text, ORM metadata, session, engine, connection, or cursor. It cannot edit the query or execute another one.
 
-### Arguments are not yet constrained at runtime
+### Arguments are constrained for the first bound runtime slice
 
-The closed set covers *which* operations the agent may call. `Operation.bind` now records
-and validates intended argument sources, but the current runtime does not yet use those
-declarations to constrain *what the model may pass to them*.
+The closed set always covers *which* operations the agent may call. For one required
+`Exactly(1)` operation using `FromRequest`, direct `AgentChoice`, or callable defaults, the
+runtime now also constrains *what the model may pass*:
 
-Request data reaches the model as text, and the model chooses the arguments for every `Depends` and `Required` operation. So today:
+- `FromRequest` receives the canonical validated request value and is absent from the model schema;
+- callable defaults are absent from the model schema and remain application-owned;
+- only direct `AgentChoice` arguments are model-supplied;
+- a second start is rejected before application code; and
+- invalid `output=` data does not satisfy `Required` and is not retried automatically.
 
-- an argument may be influenced by caller-supplied request content;
-- `Required(operation)` checks that the operation ran, not that it ran with request-derived values;
-- an operation can be called with values the caller never sent.
+Broader operation shapes retain their existing model-supplied argument behavior until the
+complete graph semantics ship. In particular, `FromResult`, `FromContext`, `after`, and
+collection-backed choices are still declarations rather than runtime injection. Continue
+to validate inputs and enforce authorization inside every operation; trusted binding does
+not grant authorization or prove that final model claims match operation results.
 
-Write each capability so it validates its own inputs and enforces its own authorization, exactly as you would for an operation reachable from an untrusted caller. Do not rely on the agent to pass only sensible arguments.
-
-Enforcing declared argument sources at runtime—injecting request data, prior operation
-results, framework context, or explicitly agent-controlled values—is milestone 1 on the
+Extending these guarantees across operation graphs is milestone 1 on the
 [roadmap](../ROADMAP.md).
 
 Strict SQLAlchemy and SQLite operation objects are planned and not yet shipped. See the target API examples in the README and the implementation sequence in the roadmap.

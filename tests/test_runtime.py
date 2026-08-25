@@ -6,15 +6,25 @@ import asyncio
 import functools
 import threading
 import time
+from uuid import UUID
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pydantic_ai import UnexpectedModelBehavior, UsageLimitExceeded
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
-from summonpot import Depends, Required, Summon, UsageLimits
-from summonpot.runtime import Runtime
+from summonpot import (
+    AgentChoice,
+    Depends,
+    Exactly,
+    FromRequest,
+    Operation,
+    Required,
+    Summon,
+    UsageLimits,
+)
+from summonpot.runtime import Runtime, _OperationOutputError
 
 
 class ResearchRequest(BaseModel):
@@ -26,11 +36,442 @@ class ResearchResponse(BaseModel):
     confidence: float
 
 
+class CustomerRecord(BaseModel):
+    customer_id: str
+    format: str
+
+
+class NativeCustomerRequest(BaseModel):
+    customer_id: UUID = Field(alias="customerId")
+
+
+class NativeCustomerRecord(BaseModel):
+    customer_id: UUID
+    format: str
+
+
 def _register_endpoint(summon: Summon, *, model: str | None = None) -> None:
     @summon("/research", model=model)
     def research(request: ResearchRequest) -> ResearchResponse:
         """Research a topic."""
         ...
+
+
+def test_bound_operation_hides_and_injects_request_arguments():
+    received: list[tuple[str, str, bool]] = []
+
+    def load_customer(
+        customer_id: str,
+        format: str,
+        include_history: bool = False,
+    ) -> CustomerRecord:
+        """Load one customer in the selected format."""
+        received.append((customer_id, format, include_history))
+        return CustomerRecord(customer_id=customer_id, format=format)
+
+    lookup = Operation(
+        load_customer,
+        bind={
+            "customer_id": FromRequest("query"),
+            "format": AgentChoice(),
+        },
+        output=CustomerRecord,
+    )
+    summon = Summon("svc")
+
+    @summon("/research")
+    def research(
+        request: ResearchRequest,
+        customer=Required(lookup, calls=Exactly(1)),
+    ) -> ResearchResponse:
+        """Research using the requested customer."""
+        ...
+
+    turns = 0
+
+    def model_function(messages, info: AgentInfo):
+        nonlocal turns
+        turns += 1
+        if turns == 1:
+            schema = info.function_tools[0].parameters_json_schema
+            assert sorted(schema["properties"]) == ["format"]
+            return ModelResponse(
+                parts=[ToolCallPart("load_customer", {"format": "summary"})]
+            )
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    info.output_tools[0].name,
+                    {"summary": "customer-7", "confidence": 1.0},
+                )
+            ]
+        )
+
+    result = asyncio.run(
+        Runtime(model=FunctionModel(model_function)).call(
+            summon.endpoints[0], {"query": "customer-7"}
+        )
+    )
+
+    assert received == [("customer-7", "summary", False)]
+    assert result == ResearchResponse(summary="customer-7", confidence=1.0)
+
+
+def test_runtime_validates_and_snapshots_aliased_request_values():
+    customer_id = UUID("12345678-1234-5678-1234-567812345678")
+    received: list[UUID] = []
+
+    def load_customer(customer_id: UUID, format: str) -> NativeCustomerRecord:
+        """Load one customer from a canonical typed identifier."""
+        received.append(customer_id)
+        return NativeCustomerRecord(customer_id=customer_id, format=format)
+
+    lookup = Operation(
+        load_customer,
+        bind={
+            "customer_id": FromRequest("customer_id"),
+            "format": AgentChoice(),
+        },
+        output=NativeCustomerRecord,
+    )
+    summon = Summon("svc")
+
+    @summon("/customers")
+    def customer(
+        request: NativeCustomerRequest,
+        record=Required(lookup, calls=Exactly(1)),
+    ) -> ResearchResponse:
+        """Load the aliased customer and return a response."""
+        ...
+
+    raw = {"customerId": str(customer_id)}
+    turns = 0
+
+    def model_function(messages, info: AgentInfo):
+        nonlocal turns
+        turns += 1
+        if turns == 1:
+            raw["customerId"] = "00000000-0000-0000-0000-000000000000"
+            assert sorted(
+                info.function_tools[0].parameters_json_schema["properties"]
+            ) == ["format"]
+            return ModelResponse(
+                parts=[ToolCallPart("load_customer", {"format": "summary"})]
+            )
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    info.output_tools[0].name,
+                    {"summary": "typed", "confidence": 1.0},
+                )
+            ]
+        )
+
+    result = asyncio.run(
+        Runtime(model=FunctionModel(model_function)).call(summon.endpoints[0], raw)
+    )
+
+    assert result.summary == "typed"
+    assert received == [customer_id]
+
+
+def test_bound_operation_preserves_hidden_positional_only_defaults():
+    received: list[tuple[str, bool, str]] = []
+
+    def load_customer(
+        customer_id: str,
+        include_history: bool = False,
+        format: str = "summary",
+        /,
+    ) -> CustomerRecord:
+        """Load one customer while preserving application defaults."""
+        received.append((customer_id, include_history, format))
+        return CustomerRecord(customer_id=customer_id, format=format)
+
+    lookup = Operation(
+        load_customer,
+        bind={
+            "customer_id": FromRequest("query"),
+            "format": AgentChoice(),
+        },
+        output=CustomerRecord,
+    )
+    summon = Summon("svc")
+
+    @summon("/research")
+    def research(
+        request: ResearchRequest,
+        customer=Required(lookup, calls=Exactly(1)),
+    ) -> ResearchResponse:
+        """Research using one customer lookup."""
+        ...
+
+    turns = 0
+
+    def model_function(messages, info: AgentInfo):
+        nonlocal turns
+        turns += 1
+        if turns == 1:
+            assert sorted(
+                info.function_tools[0].parameters_json_schema["properties"]
+            ) == ["format"]
+            return ModelResponse(
+                parts=[ToolCallPart("load_customer", {"format": "detailed"})]
+            )
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    info.output_tools[0].name,
+                    {"summary": "customer-7", "confidence": 1.0},
+                )
+            ]
+        )
+
+    asyncio.run(
+        Runtime(model=FunctionModel(model_function)).call(
+            summon.endpoints[0], {"query": "customer-7"}
+        )
+    )
+
+    assert received == [("customer-7", False, "detailed")]
+
+
+def test_exactly_once_rejects_a_second_start_before_application_code():
+    starts = 0
+
+    def load_customer(customer_id: str, format: str) -> CustomerRecord:
+        """Load one customer in the selected format."""
+        nonlocal starts
+        starts += 1
+        return CustomerRecord(customer_id=customer_id, format=format)
+
+    lookup = Operation(
+        load_customer,
+        bind={
+            "customer_id": FromRequest("query"),
+            "format": AgentChoice(),
+        },
+        output=CustomerRecord,
+    )
+    summon = Summon("svc")
+
+    @summon("/research")
+    def research(
+        request: ResearchRequest,
+        customer=Required(lookup, calls=Exactly(1)),
+    ) -> ResearchResponse:
+        """Research using exactly one customer lookup."""
+        ...
+
+    turns = 0
+
+    def model_function(messages, info: AgentInfo):
+        nonlocal turns
+        turns += 1
+        if turns == 1:
+            return ModelResponse(
+                parts=[
+                    ToolCallPart("load_customer", {"format": "summary"}),
+                    ToolCallPart("load_customer", {"format": "detailed"}),
+                ]
+            )
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    info.output_tools[0].name,
+                    {"summary": "one lookup", "confidence": 1.0},
+                )
+            ]
+        )
+
+    result = asyncio.run(
+        Runtime(model=FunctionModel(model_function)).call(
+            summon.endpoints[0], {"query": "customer-7"}
+        )
+    )
+
+    assert starts == 1
+    assert result.summary == "one lookup"
+
+
+def test_invalid_operation_output_fails_without_retrying_the_operation():
+    starts = 0
+
+    def load_customer(customer_id: str, format: str) -> CustomerRecord:
+        """Return a malformed customer record."""
+        nonlocal starts
+        starts += 1
+        return {"customer_id": customer_id}  # type: ignore[return-value]
+
+    lookup = Operation(
+        load_customer,
+        bind={
+            "customer_id": FromRequest("query"),
+            "format": AgentChoice(),
+        },
+        output=CustomerRecord,
+    )
+    summon = Summon("svc")
+
+    @summon("/research")
+    def research(
+        request: ResearchRequest,
+        customer=Required(lookup, calls=Exactly(1)),
+    ) -> ResearchResponse:
+        """Research with one validated customer lookup."""
+        ...
+
+    def model_function(messages, info: AgentInfo):
+        return ModelResponse(
+            parts=[ToolCallPart("load_customer", {"format": "summary"})]
+        )
+
+    with pytest.raises(_OperationOutputError, match="invalid declared output"):
+        asyncio.run(
+            Runtime(model=FunctionModel(model_function), retries=3).call(
+                summon.endpoints[0], {"query": "customer-7"}
+            )
+        )
+
+    assert starts == 1
+
+
+def test_post_registration_metadata_mutation_cannot_change_execution():
+    original_calls = 0
+    attacker_calls = 0
+
+    def load_customer(customer_id: str, format: str) -> CustomerRecord:
+        """Load the registered customer operation."""
+        nonlocal original_calls
+        original_calls += 1
+        return CustomerRecord(customer_id=customer_id, format=format)
+
+    def attacker(customer_id: str, format: str) -> CustomerRecord:
+        nonlocal attacker_calls
+        attacker_calls += 1
+        return CustomerRecord(customer_id="attacker", format=format)
+
+    lookup = Operation(
+        load_customer,
+        bind={
+            "customer_id": FromRequest("query"),
+            "format": AgentChoice(),
+        },
+        output=CustomerRecord,
+    )
+    summon = Summon("svc")
+
+    @summon("/research")
+    def research(
+        request: ResearchRequest,
+        customer=Required(lookup, calls=Exactly(1)),
+    ) -> ResearchResponse:
+        """Research using the registered operation."""
+        ...
+
+    endpoint = summon.endpoints[0]
+    endpoint.tools[0].fn = attacker
+    endpoint.tools[0].name = "attacker"
+    endpoint.tools[0].parameters.clear()
+    endpoint._execution_plan = None
+
+    turns = 0
+
+    def model_function(messages, info: AgentInfo):
+        nonlocal turns
+        turns += 1
+        if turns == 1:
+            assert [tool.name for tool in info.function_tools] == ["load_customer"]
+            assert sorted(
+                info.function_tools[0].parameters_json_schema["properties"]
+            ) == ["format"]
+            return ModelResponse(
+                parts=[ToolCallPart("load_customer", {"format": "summary"})]
+            )
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    info.output_tools[0].name,
+                    {"summary": "trusted", "confidence": 1.0},
+                )
+            ]
+        )
+
+    result = asyncio.run(
+        Runtime(model=FunctionModel(model_function)).call(
+            endpoint, {"query": "customer-7"}
+        )
+    )
+
+    assert result.summary == "trusted"
+    assert original_calls == 1
+    assert attacker_calls == 0
+
+
+def test_unsupported_broader_call_bound_keeps_legacy_required_once_behavior():
+    starts = 0
+
+    def load_customer(customer_id: str, format: str) -> CustomerRecord:
+        """Load one customer in the selected format."""
+        nonlocal starts
+        starts += 1
+        return CustomerRecord(customer_id=customer_id, format=format)
+
+    lookup = Operation(
+        load_customer,
+        bind={
+            "customer_id": FromRequest("query"),
+            "format": AgentChoice(),
+        },
+        output=CustomerRecord,
+    )
+    summon = Summon("svc")
+
+    @summon("/research")
+    def research(
+        request: ResearchRequest,
+        customer=Required(lookup, calls=Exactly(2)),
+    ) -> ResearchResponse:
+        """Use the legacy model-supplied path for unsupported broader bounds."""
+        ...
+
+    turns = 0
+
+    def model_function(messages, info: AgentInfo):
+        nonlocal turns
+        turns += 1
+        if turns == 1:
+            assert sorted(
+                info.function_tools[0].parameters_json_schema["properties"]
+            ) == [
+                "customer_id",
+                "format",
+            ]
+            return ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        "load_customer",
+                        {"customer_id": "customer-7", "format": "summary"},
+                    )
+                ]
+            )
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    info.output_tools[0].name,
+                    {"summary": "legacy", "confidence": 1.0},
+                )
+            ]
+        )
+
+    result = asyncio.run(
+        Runtime(model=FunctionModel(model_function)).call(
+            summon.endpoints[0], {"query": "customer-7"}
+        )
+    )
+
+    assert result.summary == "legacy"
+    assert starts == 1
 
 
 def test_runtime_normalizes_explicit_and_legacy_model_names():

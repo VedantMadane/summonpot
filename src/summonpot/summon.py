@@ -18,6 +18,7 @@ from summonpot._annotations import (
     safe_get_type_hints,
     type_name,
 )
+from summonpot._execution import _register_endpoint
 from summonpot._validation import validate_contracts
 from summonpot.dependencies import Dependency
 from summonpot.models import EndpointDef, ParamDef, ToolDef
@@ -275,6 +276,7 @@ class Summon:
                 model=model,
                 method=normalized_method,
             )
+            _register_endpoint(endpoint)
             self._routes[route] = endpoint_name
             self._endpoints.append(endpoint)
 

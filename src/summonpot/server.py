@@ -8,6 +8,7 @@ from types import UnionType
 from typing import TYPE_CHECKING, Annotated, Any, Union, get_args, get_origin
 
 from summonpot import __version__
+from summonpot._execution import _RequestValues
 from summonpot.summon import BODYLESS_METHODS, _unwrap_annotated
 
 if TYPE_CHECKING:
@@ -175,11 +176,12 @@ def _make_body_handler(endpoint: Any, summon: Any, request_model: type[Any]) -> 
     """Create a body-only route handler while retaining endpoint context in its closure."""
 
     async def handle(body: Any) -> Any:
-        params = (
-            body.model_dump(mode="json", by_alias=True)
-            if hasattr(body, "model_dump")
-            else body
-        )
+        if hasattr(body, "model_dump"):
+            prompt = body.model_dump(mode="json", by_alias=True)
+            typed = {name: getattr(body, name) for name in type(body).model_fields}
+            params = _RequestValues(prompt, typed=typed)
+        else:
+            params = _RequestValues(body)
         return await _run_endpoint(summon, endpoint, params)
 
     handle.__annotations__["body"] = request_model

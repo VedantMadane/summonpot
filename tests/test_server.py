@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
+from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
@@ -26,6 +28,11 @@ class AnalysisRequest(BaseModel):
 class AnalysisResponse(BaseModel):
     sentiment: Literal["positive", "negative", "neutral"]
     topics: list[str]
+
+
+class TypedRequest(BaseModel):
+    customer_id: UUID = Field(alias="customerId")
+    created_at: datetime = Field(alias="createdAt")
 
 
 def test_build_app_creates_route(mock_runtime):
@@ -84,6 +91,33 @@ def test_build_app_uses_pydantic_request_and_response_models(mock_runtime):
 
     invalid = client.post("/analyze", json={"text": "x"})
     assert invalid.status_code == 422
+
+
+def test_http_boundary_preserves_typed_and_prompt_request_views(mock_runtime):
+    summon = mock_runtime(mock_response="ok")
+
+    @summon("/typed-values")
+    def typed_values(request: TypedRequest) -> str:
+        """Use typed request values."""
+        ...
+
+    customer_id = UUID("12345678-1234-5678-1234-567812345678")
+    created_at = datetime(2026, 8, 24, 12, 30, tzinfo=UTC)
+    response = TestClient(build_app(summon)).post(
+        "/typed-values",
+        json={"customerId": str(customer_id), "createdAt": created_at.isoformat()},
+    )
+
+    assert response.status_code == 200
+    passed = summon._runtime.call.await_args.args[1]
+    assert passed == {
+        "customerId": str(customer_id),
+        "createdAt": "2026-08-24T12:30:00Z",
+    }
+    assert passed.typed == {
+        "customer_id": customer_id,
+        "created_at": created_at,
+    }
 
 
 def test_dependency_parameters_do_not_leak_into_http_contract(mock_runtime):
