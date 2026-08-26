@@ -1,0 +1,249 @@
+"""Private compiled execution contracts for endpoint operations."""
+
+from __future__ import annotations
+
+import asyncio
+import inspect
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from types import MappingProxyType
+from typing import Any
+from weakref import ReferenceType, ref
+
+from pydantic import TypeAdapter
+
+from summonpot.contracts import AgentChoice, FromRequest
+from summonpot.models import EndpointDef, ToolDef
+
+
+class _RequestValues(dict[str, Any]):
+    """JSON-safe prompt values plus canonical validated Python values."""
+
+    __slots__ = ("typed",)
+
+    def __init__(
+        self,
+        prompt: Mapping[str, Any],
+        *,
+        typed: Mapping[str, Any] | None = None,
+    ) -> None:
+        super().__init__(prompt)
+        self.typed = MappingProxyType(dict(prompt if typed is None else typed))
+
+
+@dataclass(frozen=True, slots=True)
+class _CompiledBinding:
+    argument: str
+    source: Any
+
+
+@dataclass(frozen=True, slots=True)
+class _CompiledTool:
+    identity: int
+    name: str
+    description: str
+    fn: Any
+    signature: inspect.Signature
+    annotations: Mapping[str, Any]
+    required: bool
+    minimum: int
+    maximum: int | None
+    bindings: tuple[_CompiledBinding, ...]
+    output_adapter: TypeAdapter[Any] | None
+    enforce_bound_exactly_once: bool
+
+    @property
+    def visible_signature(self) -> inspect.Signature:
+        """Return the parameters the model is authorized to supply."""
+        if not self.enforce_bound_exactly_once:
+            return self.signature
+        choices = {
+            binding.argument
+            for binding in self.bindings
+            if isinstance(binding.source, AgentChoice)
+        }
+        return self.signature.replace(
+            parameters=[
+                parameter
+                for name, parameter in self.signature.parameters.items()
+                if name in choices
+            ]
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class _CompiledEndpoint:
+    path: str
+    name: str
+    description: str
+    return_type: str
+    input_adapter: TypeAdapter[Any] | None
+    output_model: Any
+    model: str | None
+    tools: tuple[_CompiledTool, ...]
+
+
+_REGISTERED_PLANS: dict[int, tuple[ReferenceType[EndpointDef], _CompiledEndpoint]] = {}
+
+
+def _register_endpoint(endpoint: EndpointDef) -> _CompiledEndpoint:
+    """Compile and privately retain one endpoint's immutable execution plan."""
+    plan = _compile_endpoint(endpoint)
+    identity = id(endpoint)
+
+    def discard(reference: ReferenceType[EndpointDef]) -> None:
+        current = _REGISTERED_PLANS.get(identity)
+        if current is not None and current[0] is reference:
+            _REGISTERED_PLANS.pop(identity, None)
+
+    reference = ref(endpoint, discard)
+    _REGISTERED_PLANS[identity] = (reference, plan)
+    return plan
+
+
+def _registered_plan(endpoint: EndpointDef) -> _CompiledEndpoint | None:
+    """Return only the plan registered for this exact endpoint object."""
+    current = _REGISTERED_PLANS.get(id(endpoint))
+    if current is not None and current[0]() is endpoint:
+        return current[1]
+    return None
+
+
+@dataclass(slots=True)
+class _OperationState:
+    started: int = 0
+    running: int = 0
+    succeeded: int = 0
+
+
+@dataclass(slots=True)
+class _EndpointRun:
+    """Mutable state owned by exactly one endpoint invocation."""
+
+    request: Mapping[str, Any]
+    states: list[_OperationState]
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+
+def _compile_endpoint(endpoint: EndpointDef) -> _CompiledEndpoint:
+    """Snapshot validated endpoint metadata into an immutable runtime plan."""
+    enforce_index = _bound_exact_tool_index(endpoint.tools)
+    tools = tuple(
+        _compile_tool(tool, index, enforce=index == enforce_index)
+        for index, tool in enumerate(tuple(endpoint.tools))
+    )
+    return _CompiledEndpoint(
+        path=endpoint.path,
+        name=endpoint.name,
+        description=endpoint.description,
+        return_type=endpoint.return_type,
+        input_adapter=(
+            TypeAdapter(endpoint.input_model)
+            if endpoint.input_model is not None
+            else None
+        ),
+        output_model=endpoint.output_model,
+        model=endpoint.model,
+        tools=tools,
+    )
+
+
+def _bound_exact_tool_index(tools: list[ToolDef]) -> int | None:
+    """Return the one PR-1 operation eligible for bound enforcement."""
+    if len(tools) != 1:
+        return None
+    tool = tools[0]
+    contract = tool.contract
+    bounds = tool.bounds
+    if (
+        not tool.required
+        or contract is None
+        or contract.bind is None
+        or contract.output is None
+        or contract.after
+        or bounds is None
+        or bounds.minimum != 1
+        or bounds.maximum != 1
+    ):
+        return None
+    if not all(
+        isinstance(source, FromRequest)
+        or (isinstance(source, AgentChoice) and source.from_result is None)
+        for source in contract.bind.values()
+    ):
+        return None
+    return 0
+
+
+def _compile_tool(tool: ToolDef, identity: int, *, enforce: bool) -> _CompiledTool:
+    signature, annotations = _resolved_signature(tool.fn)
+    contract = tool.contract
+    bindings = (
+        tuple(_CompiledBinding(name, source) for name, source in contract.bind.items())
+        if enforce and contract is not None and contract.bind is not None
+        else ()
+    )
+    bounds = tool.bounds
+    return _CompiledTool(
+        identity=identity,
+        name=tool.name,
+        description=tool.description,
+        fn=tool.fn,
+        signature=signature,
+        annotations=MappingProxyType(dict(annotations)),
+        required=tool.required,
+        minimum=(
+            bounds.minimum
+            if enforce and bounds is not None
+            else (1 if tool.required else 0)
+        ),
+        maximum=bounds.maximum if enforce and bounds is not None else None,
+        bindings=bindings,
+        output_adapter=(
+            TypeAdapter(contract.output) if enforce and contract is not None else None
+        ),
+        enforce_bound_exactly_once=enforce,
+    )
+
+
+def _resolved_signature(target: Any) -> tuple[inspect.Signature, dict[str, Any]]:
+    """Return a capability signature whose annotations are real type objects."""
+    try:
+        signature = inspect.signature(target, eval_str=True)
+    except (TypeError, NameError):
+        signature = inspect.signature(target)
+    annotations: dict[str, Any] = {
+        name: parameter.annotation
+        for name, parameter in signature.parameters.items()
+        if parameter.annotation is not inspect.Parameter.empty
+    }
+    if signature.return_annotation is not inspect.Signature.empty:
+        annotations["return"] = signature.return_annotation
+    return signature, annotations
+
+
+def _prepare_request(
+    plan: _CompiledEndpoint,
+    params: Mapping[str, Any],
+) -> _RequestValues:
+    """Validate and snapshot raw input or copy an adapter-validated request view."""
+    if isinstance(params, _RequestValues):
+        return _RequestValues(params, typed=params.typed)
+
+    if plan.input_adapter is not None:
+        validated = plan.input_adapter.validate_python(dict(params))
+        prompt = validated.model_dump(mode="json", by_alias=True)
+        typed = {
+            name: getattr(validated, name) for name in type(validated).model_fields
+        }
+        return _RequestValues(prompt, typed=typed)
+
+    return _RequestValues(params)
+
+
+def _new_run(plan: _CompiledEndpoint, params: Mapping[str, Any]) -> _EndpointRun:
+    request = params.typed if isinstance(params, _RequestValues) else params
+    return _EndpointRun(
+        request=request,
+        states=[_OperationState() for _ in plan.tools],
+    )

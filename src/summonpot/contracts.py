@@ -4,9 +4,11 @@ An endpoint's declaration already says *which* operations may run. These types l
 also say *where each argument's value comes from*, which is what makes the execution
 path a computable property rather than a guess.
 
-Nothing here executes: this module is vocabulary. Registration validates these
-declarations before serving. The capability graph and runtime that fill bound arguments
-remain later work.
+This module is declaration vocabulary. Registration validates every contract before
+serving. The runtime currently enforces the first narrow execution slice: one required
+``Exactly(1)`` operation whose arguments come from ``FromRequest``, ``AgentChoice``, or
+callable defaults. Result chains, context injection, and broader graph execution remain
+later work.
 """
 
 from __future__ import annotations
@@ -57,10 +59,10 @@ class FromContext(ArgumentSource):
 class AgentChoice(ArgumentSource):
     """Let the model choose the value.
 
-    The only *argument source* a declaration does not determine. In the target bound
-    runtime, every other source is filled by the framework and never offered to the
-    model. The current runtime validates and stores this distinction but does not inject
-    bindings yet, so the model still supplies capability arguments.
+    The only *argument source* a declaration does not determine. In the shipped
+    single-operation bound runtime, ``FromRequest`` and defaulted arguments are hidden
+    from the model while ``AgentChoice`` arguments remain in its tool schema. Broader
+    result-chain and context bindings remain planned.
 
     This is a claim about one argument, not about an endpoint. An endpoint whose every
     argument is bound may still need a model — for an unresolved ordering, a choice

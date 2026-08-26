@@ -31,6 +31,7 @@ The current release line provides:
 - Installable coding-agent skills describing the endpoint contract, typed operation bindings, and the current runtime boundary for Claude Code, Cursor, Windsurf, GitHub Copilot, Cline, and OpenAI Codex.
 - Ellipsis declaration bodies that avoid abstract-method semantics, with direct Python calls rejected at the decorator boundary.
 - Immutable `Operation` declarations with `FromRequest`, `FromResult`, `FromContext`, and `AgentChoice` argument sources.
+- Runtime enforcement for one required `Exactly(1)` operation using `FromRequest`, direct `AgentChoice`, or callable defaults: trusted arguments are hidden and injected, the one start is reserved before invocation, and declared output is locally validated before success.
 - Declarative call bounds and ordering references without adding decorator configuration.
 - Registration-time validation for complete bindings, request and result references, operation ordering, selectable collections, and provable type incompatibility.
 - Python 3.11–3.13 CI, package builds, and expanded runtime/CLI coverage.
@@ -50,18 +51,31 @@ declaration body and rejects direct Python calls to registered declarations. The
 boundary is unchanged from 0.5.0: typed bindings, ordering, and call bounds are validated
 and stored, but the current runtime does not inject or enforce them yet.
 
+### Current development boundary
+
+The first bound runtime slice enforces one required `Exactly(1)` operation whose inputs
+come from `FromRequest`, direct `AgentChoice`, or callable defaults. It snapshots the
+validated declaration at registration, hides trusted/defaulted arguments from the model,
+reserves the only permitted start before application code, and validates the operation
+output before recording success. The endpoint remains agentic when `AgentChoice` or final
+response composition requires the model.
+
+Multi-operation graphs, `FromResult`, `FromContext`, `after`, broader call bounds, and
+automatic no-model execution remain planned. Those unsupported shapes retain the 0.6.0
+model-supplied argument behavior until their full semantics ship.
+
 ## Next milestones
 
 The ordering below reflects technical dependencies, not promised release dates.
 
-### 1. Bound execution and capability graph
+### 1. Broader bound execution and private capability graph
 
-Make the validated declarations control execution:
+Extend the enforced single-operation foundation without changing the public declaration:
 
-- Inject `FromRequest`, `FromResult`, and `FromContext` values instead of offering those arguments to the model.
-- Offer only `AgentChoice` values to the model, constrained to the declared selectable collection.
-- Validate operation outputs before a later operation can read them.
-- Enforce declared ordering and call bounds during each request.
+- Inject `FromResult` and `FromContext` values instead of offering those arguments to the model.
+- Constrain collection-backed `AgentChoice` values to the declared producer result.
+- Validate every operation output before a later operation can read it.
+- Enforce declared ordering and broader call bounds during each request.
 - Build the per-endpoint capability graph needed to distinguish complete paths, bounded choices, and impossible paths.
 - Keep unknown type relationships conservative without letting unknown branches erase known contradictions.
 

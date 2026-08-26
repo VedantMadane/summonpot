@@ -5,8 +5,11 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic_ai.messages import ModelResponse, ToolCallPart
+from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from summonpot import AgentChoice, Exactly, FromRequest, FromResult
+from summonpot.runtime import Runtime
 from summonpot.server import build_app
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -20,6 +23,7 @@ EXAMPLES = [
     ("04_http_methods.py", "/products", "post"),
     ("05_bounded_runtime.py", "/summaries", "post"),
     ("06_support_service/app.py", "/support", "post"),
+    ("07_bound_operation.py", "/customers/view", "post"),
 ]
 
 
@@ -52,6 +56,44 @@ def test_minimal_example_serves_a_real_keyless_request(monkeypatch):
     assert set(response.json()) == {"sentiment", "summary"}
 
 
+def test_bound_operation_example_runs_through_real_http(monkeypatch):
+    summon = _load_example("07_bound_operation.py", monkeypatch)
+    turns = 0
+
+    def model_function(messages, info: AgentInfo):
+        nonlocal turns
+        turns += 1
+        if turns == 1:
+            tool = info.function_tools[0]
+            assert tool.name == "load_customer"
+            assert sorted(tool.parameters_json_schema["properties"]) == ["format"]
+            return ModelResponse(
+                parts=[ToolCallPart("load_customer", {"format": "summary"})]
+            )
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    info.output_tools[0].name,
+                    {
+                        "customer_id": "customer-7",
+                        "display": "Ada — active",
+                    },
+                )
+            ]
+        )
+
+    summon._runtime = Runtime(model=FunctionModel(model_function))
+    response = TestClient(build_app(summon)).post(
+        "/customers/view", json={"customer_id": "customer-7"}
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "customer_id": "customer-7",
+        "display": "Ada — active",
+    }
+
+
 def test_support_example_declares_the_typed_operation_chain(monkeypatch):
     summon = _load_example("06_support_service/app.py", monkeypatch)
     tools = {tool.name: tool for tool in summon.endpoints[0].tools}
@@ -81,6 +123,8 @@ def test_support_example_guide_states_the_current_binding_boundary():
     assert "FromResult" in guide
     assert "AgentChoice" in guide
     assert "does not inject bound values" in guide
+    assert "filtered model schema" in guide
+    assert "one permitted start" in guide
 
 
 def test_readme_documents_the_pot_to_summon_migration():

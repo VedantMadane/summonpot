@@ -180,10 +180,13 @@ lookup = Depends(customer, calls=AtMost(2))
 write = Required(order, calls=Exactly(1))
 ```
 
-The current release validates and stores bindings, `after=`, outputs, and call bounds. It
-**does not inject** bound values or enforce ordering and maximum/exact call counts at
-runtime yet. The model still supplies capability arguments, and automatic no-model
-execution remains planned. `Required` continues to enforce successful use at least once.
+For one required typed operation with `calls=Exactly(1)`, the runtime enforces bindings
+when every non-default argument uses `FromRequest` or direct `AgentChoice`: trusted and
+defaulted arguments are hidden from the model, the only start is reserved before execution,
+and `output=` is locally validated before satisfying `Required`. Multi-operation chains,
+`FromResult`, `FromContext`, `after`, collection-backed choices, and broader call bounds
+remain registration-only. Unsupported shapes keep the existing model-supplied argument
+behavior. Automatic no-model execution remains planned.
 
 ## HTTP methods
 
@@ -286,6 +289,7 @@ Two things to know:
 
 - **Synchronous capabilities run in a worker thread.** Do not capture a thread-affine
   resource such as a default SQLite connection; open one per call.
-- **The agent currently chooses the arguments.** The closed set governs *which*
-  operations may run, not what they receive, so validate inputs and enforce
-  authorization inside each capability as you would for any untrusted caller.
+- **Argument authority depends on the declaration shape.** The enforced single-operation
+  form hides `FromRequest` and defaulted arguments and exposes only `AgentChoice`. Bare
+  capabilities and broader operation graphs still receive model-supplied arguments, so
+  validate inputs and enforce authorization inside every capability.

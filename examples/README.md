@@ -34,9 +34,11 @@ summonpot serve examples/basic_app.py --host 127.0.0.1 --port 8000
 Then open `http://127.0.0.1:8000/docs` or call it with `curl`.
 
 Bare `Depends(...)` and `Required(...)` capabilities still receive model-selected
-arguments in the current runtime; request fields are not automatically injected into them.
-Each operation must validate its own inputs and authorization. Level 6 shows the shipped
-typed binding declarations and states their current registration-only execution boundary.
+arguments. The bound runtime is deliberately narrower: an endpoint with exactly one
+required typed operation, `Exactly(1)`, and only `FromRequest`, direct `AgentChoice`, or
+defaulted arguments receives trusted request injection, a filtered model schema, local
+operation-output validation, and one permitted start. Level 7 runs that shipped path.
+Level 6 retains the broader multi-operation declarations that remain registration-only.
 
 ## Progression
 
@@ -146,6 +148,25 @@ curl -X POST http://127.0.0.1:8000/support \
 ```
 
 The CLI adds the application directory for normal local imports without putting it ahead of the standard library.
+
+### 7. Enforced bound operation
+
+File: `07_bound_operation.py`
+
+Shows the first runtime-enforced typed operation contract. The validated request owns
+`customer_id`; the model sees and chooses only `format`; Summonpot permits one start,
+validates `CustomerRecord`, and only then satisfies `Required`.
+
+```bash
+summonpot serve examples/07_bound_operation.py --host 127.0.0.1 --port 8000
+
+curl -X POST http://127.0.0.1:8000/customers/view \
+  -H 'Content-Type: application/json' \
+  -d '{"customer_id":"customer-7"}'
+```
+
+This endpoint still uses the model to choose `format` and compose `CustomerView`.
+Credential-free deterministic execution is the next runtime slice, not part of this one.
 
 ## What is intentionally not shown as shipped
 

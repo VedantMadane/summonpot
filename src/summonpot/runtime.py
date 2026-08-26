@@ -6,49 +6,95 @@ import asyncio
 import inspect
 import json
 import os
-from dataclasses import dataclass, field
+from collections.abc import Mapping
 from typing import Any
 
+from pydantic import ValidationError
 from pydantic_ai import Agent, ModelRetry, RunContext, Tool
 from pydantic_ai.models import Model
 from pydantic_ai.usage import UsageLimits
 
+from summonpot._execution import (
+    _CompiledEndpoint,
+    _CompiledTool,
+    _EndpointRun,
+    _new_run,
+    _prepare_request,
+    _register_endpoint,
+    _registered_plan,
+)
+from summonpot.contracts import AgentChoice, FromRequest
 from summonpot.models import EndpointDef
 
 ModelSpec = Model | str
 
 
-@dataclass
-class _EndpointRun:
-    """State for one endpoint call, passed to the agent as its dependencies."""
-
-    completed_required: set[str] = field(default_factory=set)
+class _OperationOutputError(RuntimeError):
+    """A capability returned a value outside its declared output contract."""
 
 
-def _tracked_operation(tool: Any) -> Any:
-    """Wrap a capability so a successful call is recorded on the run state."""
+def _tracked_operation(tool: _CompiledTool) -> Any:
+    """Build a model tool backed by one immutable compiled capability."""
+    visible_signature = tool.visible_signature
 
     async def execute(*args: Any, **kwargs: Any) -> Any:
-        # The run context arrives first positionally, whatever it is named in the
-        # declared signature below.
+        # Pydantic AI injects RunContext first positionally. Its parameter name is
+        # intentionally collision-free in the declared signature below.
         ctx, *capability_args = args
-        result = await tool.call(*capability_args, **kwargs)
-        if tool.required:
-            ctx.deps.completed_required.add(tool.name)
-        return result
+        if not tool.enforce_bound_exactly_once:
+            result = await _call_capability(tool.fn, *capability_args, **kwargs)
+            async with ctx.deps.lock:
+                ctx.deps.states[tool.identity].succeeded += 1
+            return result
 
-    # Describe the capability explicitly rather than with functools.wraps. wraps only
-    # produces a usable schema when the target is a plain function: for a partial or
-    # a callable instance it leaves the model reading this wrapper's own annotations
-    # against the wrong module.
-    signature, annotations = _resolved_signature(tool.fn)
+        supplied = visible_signature.bind(*capability_args, **kwargs).arguments
+        values = dict(supplied)
+        for binding in tool.bindings:
+            if isinstance(binding.source, FromRequest):
+                try:
+                    values[binding.argument] = ctx.deps.request[binding.source.field]
+                except KeyError:
+                    raise RuntimeError(
+                        f"Required request field {binding.source.field!r} is unavailable."
+                    ) from None
+            elif isinstance(binding.source, AgentChoice):
+                # Already validated against the model-visible signature above.
+                continue
 
-    # An exact application capability may legitimately have a field called `ctx`, so
-    # the injected parameter takes a name that cannot collide with a real one.
+        state = ctx.deps.states[tool.identity]
+        async with ctx.deps.lock:
+            if tool.maximum is not None and state.started >= tool.maximum:
+                raise ModelRetry(
+                    f"Capability {tool.name!r} may run exactly once and has already started."
+                )
+            state.started += 1
+            state.running += 1
+
+        try:
+            result = await _call_with_values(tool, values)
+            assert tool.output_adapter is not None
+            try:
+                validated = tool.output_adapter.validate_python(result)
+            except ValidationError as exc:
+                raise _OperationOutputError(
+                    f"Capability {tool.name!r} returned an invalid declared output."
+                ) from exc
+        finally:
+            async with ctx.deps.lock:
+                state.running -= 1
+
+        async with ctx.deps.lock:
+            state.succeeded += 1
+        return validated
+
+    annotations = {
+        name: annotation
+        for name, annotation in tool.annotations.items()
+        if name == "return" or name in visible_signature.parameters
+    }
     context_name = "ctx"
-    while context_name in signature.parameters:
+    while context_name in visible_signature.parameters:
         context_name = f"_{context_name}"
-
     context_parameter = inspect.Parameter(
         context_name,
         inspect.Parameter.POSITIONAL_ONLY,
@@ -56,14 +102,52 @@ def _tracked_operation(tool: Any) -> Any:
     )
     execute.__name__ = tool.name
     execute.__doc__ = tool.description or None
-    execute.__signature__ = signature.replace(  # type: ignore[attr-defined]
-        parameters=[context_parameter, *signature.parameters.values()]
+    execute.__signature__ = visible_signature.replace(  # type: ignore[attr-defined]
+        parameters=[context_parameter, *visible_signature.parameters.values()]
     )
     execute.__annotations__ = {
         context_name: RunContext[_EndpointRun],
         **annotations,
     }
     return execute
+
+
+async def _call_with_values(tool: _CompiledTool, values: dict[str, Any]) -> Any:
+    """Invoke a compiled callable while preserving positional-only parameters."""
+    positional: list[Any] = []
+    positional_parameters = [
+        parameter
+        for parameter in tool.signature.parameters.values()
+        if parameter.kind is inspect.Parameter.POSITIONAL_ONLY
+    ]
+    supplied_positions = [
+        index
+        for index, parameter in enumerate(positional_parameters)
+        if parameter.name in values
+    ]
+    if supplied_positions:
+        for parameter in positional_parameters[: max(supplied_positions) + 1]:
+            if parameter.name in values:
+                positional.append(values[parameter.name])
+            else:
+                positional.append(parameter.default)
+
+    keywords = {
+        name: values[name]
+        for name, parameter in tool.signature.parameters.items()
+        if name in values and parameter.kind is not inspect.Parameter.POSITIONAL_ONLY
+    }
+    return await _call_capability(tool.fn, *positional, **keywords)
+
+
+async def _call_capability(fn: Any, *args: Any, **kwargs: Any) -> Any:
+    """Run sync and async application callables without blocking the event loop."""
+    if inspect.iscoroutinefunction(fn):
+        return await fn(*args, **kwargs)
+    result = await asyncio.to_thread(fn, *args, **kwargs)
+    if inspect.isawaitable(result):
+        return await result
+    return result
 
 
 class Runtime:
@@ -82,48 +166,49 @@ class Runtime:
         self.usage_limits = usage_limits
         self.timeout = timeout
         self._agents: dict[
-            tuple[str, str, str], tuple[EndpointDef, Agent[_EndpointRun, Any]]
+            tuple[int, str], tuple[_CompiledEndpoint, Agent[_EndpointRun, Any]]
         ] = {}
+
+    def _plan_for(self, endpoint: EndpointDef) -> _CompiledEndpoint:
+        plan = _registered_plan(endpoint)
+        if plan is None:
+            # Compatibility for EndpointDef instances constructed outside Summon.
+            plan = _register_endpoint(endpoint)
+        return plan
 
     @property
     def default_model(self) -> ModelSpec:
-        """Resolve the default model at call time.
-
-        Resolved lazily so that setting ``SUMMONPOT_MODEL`` after the module
-        defining the ``Summon`` application is imported still takes effect. Reading it in
-        ``__init__`` made the variable silently useless in that very common case.
-        """
+        """Resolve the default model at call time."""
         configured = self._model or os.environ.get(
             "SUMMONPOT_MODEL", "openai:gpt-4o-mini"
         )
         return _normalize_model(configured)
 
     def model_for(self, endpoint: EndpointDef) -> ModelSpec:
-        """Resolve an endpoint override or the runtime's default model."""
-        if endpoint.model is not None:
-            return _normalize_model(endpoint.model)
+        """Resolve a compiled endpoint override or the runtime default."""
+        configured = self._plan_for(endpoint).model
+        if configured is not None:
+            return _normalize_model(configured)
         return self.default_model
 
     async def call(
         self,
         endpoint: EndpointDef,
-        params: dict[str, Any],
+        params: Mapping[str, Any],
     ) -> Any:
         """Run an endpoint with provider-neutral tools and typed output."""
+        plan = self._plan_for(endpoint)
+        request = _prepare_request(plan, params)
         agent = self._agent_for(endpoint)
-        run = _EndpointRun()
-
-        message = self._build_user_message(endpoint, params)
-        # asyncio.timeout(None) is a no-op, so one path covers both cases. The
-        # deadline releases the caller promptly even while a synchronous capability
-        # occupies a worker thread; that thread is simply left to finish.
+        run = _new_run(plan, request)
+        message = self._build_user_message(plan, request)
         async with asyncio.timeout(self.timeout):
             result = await agent.run(message, deps=run, usage_limits=self.usage_limits)
         output = result.output
 
-        if endpoint.output_model is not None:
+        if plan.output_model is not None:
             return output
-        if endpoint.return_type.lower() not in ("str", "string", "any"):
+        if plan.return_type.lower() not in ("str", "string", "any"):
             try:
                 return json.loads(output)
             except (json.JSONDecodeError, TypeError):
@@ -131,30 +216,21 @@ class Runtime:
         return output
 
     def _agent_for(self, endpoint: EndpointDef) -> Agent[_EndpointRun, Any]:
-        """Return the cached agent for an endpoint, building it on first use.
-
-        Tool and output schemas do not change between requests, so rebuilding them
-        per call was pure overhead. The resolved model is part of the cache key
-        because it is resolved lazily and may change between calls.
-        """
+        """Return the cached agent for one immutable endpoint plan and model."""
+        plan = self._plan_for(endpoint)
         model = self.model_for(endpoint)
-        key = (endpoint.path, endpoint.name, str(model))
+        key = (id(plan), str(model))
         cached = self._agents.get(key)
-        if cached is not None and cached[0] is endpoint:
+        if cached is not None and cached[0] is plan:
             return cached[1]
 
-        agent = self._build_agent(endpoint, model)
-        self._agents[key] = (endpoint, agent)
+        agent = self._build_agent(plan, model)
+        self._agents[key] = (plan, agent)
         return agent
 
     def _build_agent(
-        self, endpoint: EndpointDef, model: ModelSpec
+        self, plan: _CompiledEndpoint, model: ModelSpec
     ) -> Agent[_EndpointRun, Any]:
-        """Construct the agent for an endpoint.
-
-        Required-capability tracking lives on the per-run dependency object rather
-        than in a closure, which is what allows the agent itself to be reused.
-        """
         tools = [
             Tool(
                 _tracked_operation(tool),
@@ -162,12 +238,12 @@ class Runtime:
                 description=tool.description,
                 takes_ctx=True,
             )
-            for tool in endpoint.tools
+            for tool in plan.tools
         ]
         agent = Agent(
             model,
-            output_type=endpoint.output_model or str,
-            system_prompt=endpoint.description,
+            output_type=plan.output_model or str,
+            system_prompt=plan.description,
             tools=tools,
             retries=self.retries,
             deps_type=_EndpointRun,
@@ -177,11 +253,12 @@ class Runtime:
         def require_declared_operations(
             ctx: RunContext[_EndpointRun], output: Any
         ) -> Any:
-            missing = {
+            missing = [
                 tool.name
-                for tool in endpoint.tools
-                if tool.required and tool.name not in ctx.deps.completed_required
-            }
+                for tool in plan.tools
+                if tool.required
+                and ctx.deps.states[tool.identity].succeeded < tool.minimum
+            ]
             if missing:
                 names = ", ".join(sorted(missing))
                 raise ModelRetry(
@@ -193,11 +270,11 @@ class Runtime:
 
     def _build_user_message(
         self,
-        endpoint: EndpointDef,
-        params: dict[str, Any],
+        plan: _CompiledEndpoint,
+        params: Mapping[str, Any],
     ) -> str:
-        """Build a provider-neutral user message from endpoint parameters."""
-        parts = [f"Endpoint: {endpoint.path}"]
+        """Build a provider-neutral user message from JSON-safe values."""
+        parts = [f"Endpoint: {plan.path}"]
         if params:
             parts.append("Parameters:")
             for key, value in params.items():
@@ -205,31 +282,7 @@ class Runtime:
         return "\n".join(parts)
 
 
-def _resolved_signature(target: Any) -> tuple[inspect.Signature, dict[str, Any]]:
-    """Return a capability's signature and annotations as real type objects.
-
-    Resolving here means the wrapper carries no string annotations for the provider
-    layer to evaluate, so a capability keeps its schema regardless of which module
-    it was defined in or whether it is a function, a partial, or a callable object.
-    """
-    try:
-        signature = inspect.signature(target, eval_str=True)
-    except (TypeError, NameError):
-        signature = inspect.signature(target)
-
-    annotations: dict[str, Any] = {
-        name: parameter.annotation
-        for name, parameter in signature.parameters.items()
-        if parameter.annotation is not inspect.Parameter.empty
-    }
-    if signature.return_annotation is not inspect.Signature.empty:
-        annotations["return"] = signature.return_annotation
-    return signature, annotations
-
-
-# Built-in models that need no provider and no API key. Prefixing these would
-# send them to a provider that then demands credentials, which is what made
-# SUMMONPOT_MODEL=test unusable for trying summonpot out.
+# Built-in models that need no provider and no API key.
 PROVIDERLESS_MODELS = frozenset({"test"})
 
 
@@ -240,3 +293,6 @@ def _normalize_model(model: ModelSpec) -> ModelSpec:
     if model in PROVIDERLESS_MODELS:
         return model
     return f"openai:{model}"
+
+
+__all__ = ["Runtime"]
