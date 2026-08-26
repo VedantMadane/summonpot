@@ -982,11 +982,14 @@ def test_runtime_is_unbounded_by_default():
 
 def test_timeout_bounds_a_slow_synchronous_capability():
     """The deadline must apply to sync capabilities, which run in a worker thread."""
+    entered = threading.Event()
+    release = threading.Event()
     finished = threading.Event()
 
     def slow_write(query: str) -> str:
         """Perform a slow synchronous write."""
-        time.sleep(0.30)
+        entered.set()
+        release.wait(timeout=2.0)
         finished.set()
         return "written"
 
@@ -1002,21 +1005,28 @@ def test_timeout_bounds_a_slow_synchronous_capability():
     def model_function(messages, info: AgentInfo):
         return ModelResponse(parts=[ToolCallPart("slow_write", {"query": "a"})])
 
-    runtime = Runtime(model=FunctionModel(model_function), timeout=0.05)
+    # Give CI enough time to schedule both the synchronous model and capability
+    # workers. Once the capability enters application code, it blocks until the
+    # request deadline has definitely expired.
+    runtime = Runtime(model=FunctionModel(model_function), timeout=0.50)
 
     async def scenario() -> float:
         # Measured inside the loop: this is what one request waits. Measuring around
         # asyncio.run would instead time the loop teardown, which joins the
         # abandoned worker thread.
         started = time.perf_counter()
-        with pytest.raises(TimeoutError):
-            await runtime.call(summon.endpoints[0], {"query": "agents"})
-        return time.perf_counter() - started
+        try:
+            with pytest.raises(TimeoutError):
+                await runtime.call(summon.endpoints[0], {"query": "agents"})
+            return time.perf_counter() - started
+        finally:
+            release.set()
 
     elapsed = asyncio.run(scenario())
 
+    assert entered.is_set(), "the capability did not start before the request deadline"
     # The caller is released on the deadline, not when the capability finishes.
-    assert elapsed < 0.25, f"the request waited {elapsed:.3f}s for the capability"
+    assert elapsed < 1.25, f"the request waited {elapsed:.3f}s for the capability"
 
     # Documented boundary: the thread is not killed, so the side effect still lands
     # after the caller has already seen TimeoutError.
