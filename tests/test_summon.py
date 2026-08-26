@@ -72,9 +72,11 @@ def test_cli_loads_the_module_summon_variable(tmp_path: Path):
 
 def test_public_surfaces_use_the_summon_application_vocabulary():
     readme = (ROOT / "README.md").read_text()
-    canonical_readme = (
-        readme.split("## Migrating from the 0.5 API", 1)[0]
-        + readme.split("## Quick start", 1)[1]
+    canonical_readme = re.sub(
+        r"^## Migrating from the 0\.5 API\n.*?(?=^## )",
+        "",
+        readme,
+        flags=re.DOTALL | re.MULTILINE,
     )
     surfaces = [
         ROOT / "ROADMAP.md",
