@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="400" viewBox="0 0 1440 400" role="img" aria-labelledby="title desc">
+  <title id="title">Summonpot authority boundary</title>
+  <desc id="desc">A trusted request value and a model-supplied tool argument enter a start-bounded operation through separate paths, producing a validated response.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#080b16"/>
+      <stop offset="1" stop-color="#11142b"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#8b5cf6"/>
+      <stop offset="1" stop-color="#f59e0b"/>
+    </linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 Z" fill="#64748b"/>
+    </marker>
+  </defs>
+
+  <rect x="1" y="1" width="1438" height="398" rx="22" fill="url(#background)" stroke="#29314d" stroke-width="2"/>
+  <rect x="40" y="28" width="6" height="26" rx="3" fill="url(#accent)"/>
+  <text x="62" y="49" fill="#f8fafc" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="24" font-weight="700">Supported bound operation. Two authority domains, one validated call.</text>
+
+  <path d="M360 145 C420 145 430 185 500 185" fill="none" stroke="#22d3ee" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M360 305 C420 305 430 255 500 255" fill="none" stroke="#a78bfa" stroke-width="3" marker-end="url(#arrow)"/>
+  <path d="M940 220 H1050" stroke="#64748b" stroke-width="3" marker-end="url(#arrow)"/>
+
+  <g>
+    <rect x="40" y="85" width="320" height="120" rx="14" fill="#0b1825" stroke="#22d3ee" stroke-width="2"/>
+    <circle cx="68" cy="113" r="7" fill="#22d3ee" filter="url(#glow)"/>
+    <text x="86" y="121" fill="#67e8f9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="20" font-weight="700">Validated request</text>
+    <text x="68" y="158" fill="#f8fafc" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17">customer_id = "customer-7"</text>
+    <text x="68" y="188" fill="#94a3b8" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15">FromRequest · tool-hidden</text>
+  </g>
+
+  <g>
+    <rect x="40" y="245" width="320" height="120" rx="14" fill="#17112b" stroke="#a78bfa" stroke-width="2"/>
+    <circle cx="68" cy="273" r="7" fill="#a78bfa" filter="url(#glow)"/>
+    <text x="86" y="281" fill="#c4b5fd" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="20" font-weight="700">Model supplies</text>
+    <text x="68" y="318" fill="#f8fafc" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17">format = summary | detailed</text>
+    <text x="68" y="348" fill="#94a3b8" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15">AgentChoice · tool argument</text>
+  </g>
+
+  <g>
+    <rect x="500" y="125" width="440" height="190" rx="14" fill="#211608" stroke="#f59e0b" stroke-width="2"/>
+    <circle cx="528" cy="153" r="7" fill="#f59e0b" filter="url(#glow)"/>
+    <text x="546" y="161" fill="#fbbf24" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="20" font-weight="700">Summonpot invokes</text>
+    <text x="528" y="204" fill="#f8fafc" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18">load_customer(</text>
+    <text x="555" y="234" fill="#67e8f9" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17">customer_id</text>
+    <text x="696" y="234" fill="#cbd5e1" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17">,</text>
+    <text x="722" y="234" fill="#c4b5fd" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17">format</text>
+    <text x="788" y="234" fill="#f8fafc" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17">)</text>
+    <text x="528" y="273" fill="#fbbf24" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="16">Exactly(1) · one permitted start</text>
+    <text x="528" y="299" fill="#94a3b8" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15">str output validated locally</text>
+  </g>
+
+  <g>
+    <rect x="1050" y="125" width="350" height="190" rx="14" fill="#092019" stroke="#34d399" stroke-width="2"/>
+    <circle cx="1078" cy="153" r="7" fill="#34d399" filter="url(#glow)"/>
+    <text x="1096" y="161" fill="#6ee7b7" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="20" font-weight="700">Validated response</text>
+    <text x="1078" y="211" fill="#f8fafc" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18">CustomerView</text>
+    <text x="1078" y="250" fill="#cbd5e1" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17">display</text>
+    <text x="1078" y="289" fill="#6ee7b7" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="15">typed HTTP output</text>
+  </g>
+</svg>
