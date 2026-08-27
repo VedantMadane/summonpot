@@ -58,9 +58,7 @@ class MalformedManagedBlockError(Exception):
         if self.end_before_start:
             lines.append("  The end marker appears before the start marker.")
         if self.starts != 1 or self.ends != 1:
-            lines.append(
-                "  Expected either 0 of each, or exactly one ordered pair."
-            )
+            lines.append("  Expected either 0 of each, or exactly one ordered pair.")
         lines.append(
             "  Repair the markers in this file manually, then re-run "
             "`summonpot add skills`."
