@@ -127,8 +127,8 @@ curl -X POST http://127.0.0.1:8000/customers/view \
   -d '{"customer_id":"customer-7"}'
 ```
 
-The test model returns a schema-valid `CustomerView`; its placeholder text may vary. The
-complete version of this example is
+The test model returns a schema-valid `CustomerView`; its placeholder text may vary. A larger
+related version of this pattern is
 [`examples/07_bound_operation.py`](examples/07_bound_operation.py). Provider installation
 and model selection are covered in [Providers](#providers).
 
