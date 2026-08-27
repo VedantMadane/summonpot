@@ -6,9 +6,10 @@
 
 <p align="center">
   Summonpot is a contract-first Python framework for turning typed endpoint declarations
-  into executable APIs. Today, every <code>@summon(...)</code> request uses the configured
-  model runtime. One single-operation contract now adds explicit model authority;
-  automatic no-model endpoint execution remains planned.
+  into executable APIs. On current <code>main</code>, every <code>@summon(...)</code> request
+  uses the configured model runtime, and one single-operation contract adds explicit model
+  authority. The published 0.6.0 package predates that bound runtime; automatic no-model
+  endpoint execution also remains planned.
 </p>
 
 <p align="center">
@@ -45,8 +46,11 @@ authority boundary:
 
 ### 1. Install
 
+The bound-operation runtime shown below is on current `main` and is awaiting its next
+package release. Until then, install the merge commit that introduced it:
+
 ```bash
-pip install "summonpot[serve,cli]"
+pip install "summonpot[serve,cli] @ git+https://github.com/tugrulguner/summonpot.git@4819a8bc0503b3d4f3995fd76a6f678abd07047d"
 export SUMMONPOT_MODEL=test
 ```
 
@@ -157,6 +161,9 @@ session, unrestricted application container, shell, or filesystem merely because
 endpoint needs one exact operation.
 
 ## What ships today
+
+This inventory describes current `main`; published 0.6.0 predates the bound-operation
+runtime called out below.
 
 - Typed request and response contracts with generated HTTP routes and OpenAPI.
 - A fixed endpoint goal taken from the declaration docstring.

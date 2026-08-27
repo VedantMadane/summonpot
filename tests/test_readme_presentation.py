@@ -9,21 +9,30 @@ README = ROOT / "README.md"
 def test_readme_leads_with_the_enforced_authority_boundary():
     readme = README.read_text()
     introduction = readme.split("## Quick start", 1)[0]
+    normalized_introduction = " ".join(introduction.lower().split())
 
-    assert "explicit model authority" in introduction.lower()
+    assert "explicit model authority" in normalized_introduction
     assert "FromRequest" in introduction
     assert "AgentChoice" in introduction
     assert "Exactly(1)" in introduction
     assert "summonpot.png" not in introduction
-    assert "every <code>@summon(...)</code> request uses" in introduction
+    assert "every <code>@summon(...)</code> request" in introduction
+    assert (
+        "published 0.6.0 package predates that bound runtime" in normalized_introduction
+    )
 
 
 def test_readme_prioritizes_adoption_over_release_history():
     readme = README.read_text()
+    quick_start = readme.split("## Quick start", 1)[1].split("## Why summonpot?", 1)[0]
 
     assert readme.index("## Quick start") < readme.index(
         "## Migrating from the 0.5 API"
     )
+    assert (
+        "git+https://github.com/tugrulguner/summonpot.git@"
+        "4819a8bc0503b3d4f3995fd76a6f678abd07047d"
+    ) in quick_start
     assert "### New in 0.6.0" not in readme
     assert "### New in 0.5.0" not in readme
 
