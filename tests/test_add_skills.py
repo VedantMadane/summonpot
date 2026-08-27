@@ -138,3 +138,76 @@ def test_an_existing_copilot_instructions_file_is_detected(tmp_path: Path):
     instructions.write_text("# House rules\n")
 
     assert detect_agents(tmp_path) == [Agent.copilot]
+
+
+@pytest.mark.parametrize(
+    ("label", "pre_existing"),
+    [
+        (
+            "start-only",
+            "<!-- summonpot:managed:start -->\npartial block\n",
+        ),
+        (
+            "end-only",
+            "<!-- summonpot:managed:end -->\n",
+        ),
+        (
+            "reversed",
+            "<!-- summonpot:managed:end -->stuff<!-- summonpot:managed:start -->\n",
+        ),
+        (
+            "duplicate-start",
+            "<!-- summonpot:managed:start -->\nA\n<!-- summonpot:managed:end -->"
+            "<!-- summonpot:managed:start -->\nB\n",
+        ),
+        (
+            "duplicate-end",
+            "<!-- summonpot:managed:start -->\nA\n<!-- summonpot:managed:end -->"
+            "<!-- summonpot:managed:end -->\n",
+        ),
+    ],
+)
+def test_malformed_managed_markers_fail_closed(label, pre_existing, tmp_path: Path):
+    """Ambiguous managed markers must be left byte-identical."""
+    agents = tmp_path / "AGENTS.md"
+    agents.write_text(pre_existing)
+    snapshot = agents.read_bytes()
+
+    result = runner.invoke(
+        app, ["add", "skills", "--agent", "codex", "--path", str(tmp_path)]
+    )
+
+    assert result.exit_code == 1, result.output
+    assert agents.read_bytes() == snapshot, f"file was modified for {label}"
+    assert "Refusing to modify" in result.output
+    assert "AGENTS.md" in result.output
+
+
+def test_malformed_marker_error_explains_manual_repair(tmp_path: Path):
+    """The CLI error names the path and tells the user how to repair manually."""
+    agents = tmp_path / "AGENTS.md"
+    agents.write_text("<!-- summonpot:managed:start -->\npartial block\n")
+
+    result = runner.invoke(
+        app, ["add", "skills", "--agent", "codex", "--path", str(tmp_path)]
+    )
+
+    assert result.exit_code == 1
+    assert "Repair the markers" in result.output
+    assert "summonpot add skills" in result.output
+
+
+def test_malformed_markers_fail_closed_for_copilot_instructions(tmp_path: Path):
+    """The fail-closed contract also applies to .github/copilot-instructions.md."""
+    instructions = tmp_path / ".github" / "copilot-instructions.md"
+    instructions.parent.mkdir(parents=True)
+    instructions.write_text("<!-- summonpot:managed:start -->\npartial\n")
+    snapshot = instructions.read_bytes()
+
+    result = runner.invoke(
+        app, ["add", "skills", "--agent", "copilot", "--path", str(tmp_path)]
+    )
+
+    assert result.exit_code == 1, result.output
+    assert instructions.read_bytes() == snapshot
+    assert ".github/copilot-instructions.md" in result.output
