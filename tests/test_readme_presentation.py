@@ -1,5 +1,6 @@
 """Presentation guards for the repository's primary adoption surface."""
 
+import struct
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -77,16 +78,20 @@ def test_readme_explains_both_flows_under_one_endpoint_contract():
     )
 
 
-def test_readme_replaces_the_text_formula_with_a_visual_flow_diagram():
+def test_readme_replaces_the_text_formula_with_a_png_flow_diagram():
     readme = README.read_text(encoding="utf-8")
     introduction = readme.split("## Why summonpot?", 1)[0]
-    diagram = ROOT / "docs" / "assets" / "authority-boundary.svg"
+    diagram = ROOT / "docs" / "assets" / "one-declaration-two-flows.png"
+    source = ROOT / "docs" / "assets" / "authority-boundary.svg"
 
-    assert 'src="docs/assets/authority-boundary.svg"' in introduction
+    assert 'src="docs/assets/one-declaration-two-flows.png"' in introduction
     assert "typed request model\n+ fixed goal" not in introduction
     assert diagram.is_file()
+    data = diagram.read_bytes()
+    assert data[:8] == b"\x89PNG\r\n\x1a\n"
+    assert struct.unpack(">II", data[16:24]) == (1440, 520)
 
-    content = diagram.read_text(encoding="utf-8")
+    content = source.read_text(encoding="utf-8")
     assert (
         "One Summonpot declaration combines deterministic work and agentic choice"
         in content

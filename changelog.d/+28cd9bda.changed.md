@@ -1,1 +1,1 @@
-Replaced the text-heavy endpoint formula with a visual deterministic/agentic flow diagram and showed both kinds of work explicitly in one endpoint code example.
+Replaced the text-heavy endpoint formula with a rendered PNG diagram and showed deterministic application work and agentic choice explicitly in one endpoint code example.
