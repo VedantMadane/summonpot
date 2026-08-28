@@ -1,15 +1,15 @@
 # summonpot
 
 <p align="center">
-  <strong>One endpoint declaration for deterministic operations and agentic decisions.</strong>
+  <img src="summonpot.png" alt="Summonpot" width="600">
 </p>
 
 <p align="center">
-  Summonpot is a contract-first Python framework for turning typed endpoint declarations
-  into executable APIs. The same declaration defines the request, fixed goal, exact
-  application operations, model-owned choices, response, HTTP route, and OpenAPI contract.
-  Deterministic application code and model-driven decisions share one framework instead of
-  becoming separate handlers, agent graphs, and integration layers.
+  <strong>Declare deterministic operations and agentic decisions through one endpoint.</strong>
+</p>
+
+<p align="center">
+  A contract-first Python framework for combining application-owned execution and model-owned choices in one typed HTTP API.
 </p>
 
 <p align="center">
@@ -17,222 +17,240 @@
   <a href="https://pypi.org/project/summonpot/"><img src="https://img.shields.io/pypi/v/summonpot" alt="PyPI version"></a>
   <a href="https://pypi.org/project/summonpot/"><img src="https://img.shields.io/pypi/pyversions/summonpot" alt="Python versions"></a>
   <a href="https://github.com/tugrulguner/summonpot/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License"></a>
+  <a href="https://discord.gg/u3AANZr6RG"><img src="https://img.shields.io/badge/Discord-Join%20ModePot-5865F2?logo=discord&amp;logoColor=white" alt="Join the ModePot Discord"></a>
   <a href="https://github.com/tugrulguner/summonpot"><img src="https://img.shields.io/github/stars/tugrulguner/summonpot?style=social" alt="GitHub stars"></a>
 </p>
 
 <p align="center">
   <a href="#quick-start">Quick start</a> ·
   <a href="#why-summonpot">Why summonpot</a> ·
-  <a href="#what-ships-today">What ships</a> ·
+  <a href="#exact-capabilities-not-ambient-authority">Capabilities</a> ·
+  <a href="#how-it-works-today">How it works</a> ·
   <a href="#examples">Examples</a> ·
+  <a href="#community">Community</a> ·
   <a href="#contributing">Contributing</a>
 </p>
 
-The declaration says which parts of a flow are deterministic and where the model may
-choose:
+Summonpot turns one declaration into a live HTTP endpoint:
 
-- `FromRequest("customer_id")` removes `customer_id` from the operation tool schema and
-  injects the validated value deterministically.
-- `AgentChoice()` leaves only `format` to the model.
-- `Exactly(1)` permits one operation start and requires one locally validated success.
-- `CustomerView` validates the result before it becomes an HTTP response.
+```text
+typed request model
++ fixed goal in the docstring
++ exact application operations
++ explicit model-owned choices
++ typed response model
+= executable endpoint
 
-On current `main`, every `@summon(...)` request still uses the configured model runtime.
-The supported bound shape keeps trusted operation arguments and validation under framework
-control while the model handles the declared semantic choice. Request values still appear
-in the model's user message; tool-schema hiding is not prompt secrecy. Automatic no-model
-execution for fully resolved declarations remains planned, and published 0.6.0 predates
-the bound runtime shown here.
+declaration body
+= ...
+```
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/tugrulguner/summonpot/014814f7b304da5309afb43d22446bd6dda15c7d/docs/assets/authority-boundary.svg" alt="A validated request value and model-supplied tool argument flow through one start-bounded Summonpot operation into a validated response" width="960">
-</p>
+The ellipsis is declaration syntax, not an unfinished implementation. The signature,
+docstring, operations, argument bindings, and return type are the executable contract.
+`Depends(...)` and `Required(...)` attach deterministic application code. `AgentChoice()`
+marks the exact arguments where the model may decide. Both flow through the same HTTP route,
+request/response contract, validation, and OpenAPI instead of becoming a separate handler
+and agent graph. Summonpot owns routing, the bounded model loop, operation enforcement, and
+structured output. Calling a registered declaration directly raises a clear error; serve
+the application or invoke its generated HTTP route instead.
+
+> [!IMPORTANT]
+> Every current production `@summon` request runs through the configured model.
+> Deterministic operations still execute as exact application code inside that runtime;
+> the model controls only the choices exposed by the declaration.
+> Automatic no-model execution for contracts with one fully resolved operation path is
+> on the [roadmap](ROADMAP.md), not shipped behavior.
+
+## Why summonpot?
+
+A conventional API puts deterministic work in a handler. An agent-first stack starts from
+a model workflow and then wraps it in HTTP. Summonpot declares both through one endpoint
+contract, so applications keep one public API as the balance changes between exact
+operations and semantic decisions:
+
+The following conceptual declaration omits the application-specific request models and
+operation implementations; the [quick start](#quick-start) is the standalone example.
+
+```python
+from summonpot import AgentChoice, Exactly, FromRequest, Operation, Required, Summon
+
+
+summon = Summon("research-api")
+
+research_operation = Operation(
+    research_topic,
+    bind={
+        "topic": FromRequest("topic"),
+        "format": AgentChoice(),
+    },
+    output=ResearchReport,
+)
+
+
+@summon("/research")
+def research(
+    request: ResearchRequest,
+    report=Required(research_operation, calls=Exactly(1)),
+) -> ResearchResponse:
+    """Research the topic and return a sourced report."""
+    ...
+```
+
+That declaration answers the questions an API framework needs to answer:
+
+| Question | Declared by |
+|---|---|
+| What may the caller send? | `ResearchRequest` |
+| What must the endpoint achieve? | The docstring |
+| What application authority may execution use? | `Depends(...)` and `Required(...)` |
+| Which inputs must come from trusted application data? | `FromRequest(...)` and other bindings |
+| Where may the model make a semantic choice? | Explicit `AgentChoice(...)` bindings |
+| What may the endpoint return? | `ResearchResponse` |
+| Where is orchestration code? | Owned by summonpot |
+
+The request carries business data only. The endpoint goal is fixed in code. Exact
+operations remain application-owned, while the model can choose only within the authority
+declared for that endpoint. A response is not accepted until every `Required(...)`
+operation has completed successfully.
+
+| | Conventional APIs | Agent-first stacks | summonpot |
+|---|---|---|---|
+| Mental model | Write a handler | Configure an agent | Declare one endpoint |
+| Deterministic work | Handler code | Usually exposed as tools | Exact application-owned operations |
+| Agentic decisions | Separate model workflow | Primary abstraction | Explicit choices in the same declaration |
+| HTTP | Built around the handler | Added around the agent | Generated from the declaration |
+| Application authority | Held by handler code | Often assembled separately | Closed by the endpoint contract |
+| Final output | Handler convention | Provider or framework convention | Locally validated response model |
+
+### One endpoint, both flows
+
+A Summonpot endpoint can combine deterministic execution and agentic choice without
+changing its public shape:
+
+```text
+one @summon declaration
+    |
+    +-- deterministic: trusted request bindings + exact application operations
+    |
+    +-- agentic: explicitly declared semantic choices
+    |
+    +-- one typed response + one HTTP route + one OpenAPI contract
+```
+
+In the supported bound-operation shape, `FromRequest(...)` injects trusted values,
+callable defaults remain application-owned, and `AgentChoice()` exposes only the arguments
+the model may supply. `Exactly(1)` and `output=` enforce operation use and local output
+validation. The endpoint may therefore perform exact work and make a model-driven decision
+under one declaration. Today the configured model participates in every request; automatic
+no-model execution for a fully resolved declaration remains planned.
+
+## What ships today
+
+- **One declaration for deterministic operations and agentic decisions**, sharing the same
+  request, response, route, validation, and OpenAPI contract.
+- **Contract-first endpoints** with a required goal and typed request/response contracts.
+- **Closed capability sets** made from exact application-owned callables.
+- **Optional and mandatory operations** through `Depends(...)` and `Required(...)`.
+- **Runtime-enforced required use**, tracked per request rather than trusted to a prompt.
+- **Bound exactly-once operations** for the first complete runtime slice: trusted
+  `FromRequest` values and callable defaults are removed from the operation tool schema,
+  direct `AgentChoice` arguments remain visible, one start is permitted, and `output=` is
+  locally validated before success.
+- **Typed `Operation` contracts** that declare request, prior-result, context, or
+  model-chosen argument sources without expanding the endpoint API.
+- **Registration-time contract validation** that rejects missing sources, invalid result
+  references, unsupported choices, and provably incompatible types before serving.
+- **Provider-neutral model selection** for OpenAI, Anthropic, Google, Groq, Mistral,
+  OpenRouter, and xAI.
+- **Generated HTTP and OpenAPI contracts** for body and query endpoints.
+- **GET, POST, PUT, PATCH, DELETE, and HEAD routes**, keyed by `(path, method)`.
+- **Local response validation**, bounded retries, usage limits, timeouts, and redacted
+  public failures.
+- **A keyless test model** for exercising routes and schemas before adding provider
+  credentials.
+- **Coding-agent skills** for Claude Code, Cursor, Windsurf, GitHub Copilot, Cline, and
+  OpenAI Codex, including typed operation bindings and their current runtime boundary.
 
 ## Quick start
 
 ### 1. Install
 
-The bound-operation runtime shown below is on current `main` and is awaiting its next
-package release. Until then, install the merge commit that introduced it:
+```bash
+pip install "summonpot[serve,cli]"
+```
+
+Start without a provider account by selecting the built-in test model:
 
 ```bash
-pip install "summonpot[serve,cli] @ git+https://github.com/tugrulguner/summonpot.git@4819a8bc0503b3d4f3995fd76a6f678abd07047d"
 export SUMMONPOT_MODEL=test
 ```
 
-The built-in test model is keyless, but it is not a dry-run sandbox. It may execute attached
-operations with generated arguments. Use harmless operations while testing wiring.
+The test model is keyless, not side-effect-free. An endpoint with capabilities may call
+them using generated placeholder arguments. Use harmless capabilities when testing
+wiring; do not attach destructive operations or treat the model as a dry-run sandbox.
 
-### 2. Create `app.py`
+### 2. Declare an endpoint
+
+Create `app.py`:
 
 ```python
 from typing import Literal
 
-from pydantic import BaseModel
-from summonpot import (
-    AgentChoice,
-    Exactly,
-    FromRequest,
-    Operation,
-    Required,
-    Summon,
-)
+from pydantic import BaseModel, Field
+from summonpot import Summon
 
 
-class CustomerRequest(BaseModel):
-    customer_id: str
+class ReviewRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=2_000)
 
 
-class CustomerView(BaseModel):
-    display: str
+class ReviewResponse(BaseModel):
+    sentiment: Literal["positive", "negative", "neutral"]
+    summary: str
 
 
-_CUSTOMERS = {"customer-7": "Ada"}
+summon = Summon("review-api")
 
 
-def load_customer(
-    customer_id: str,
-    format: Literal["summary", "detailed"],
-) -> str:
-    """Load one approved customer record in the selected display format."""
-    return f"{format}: {_CUSTOMERS[customer_id]}"
-
-
-customer_lookup = Operation(
-    load_customer,
-    bind={
-        "customer_id": FromRequest("customer_id"),
-        "format": AgentChoice(),
-    },
-    output=str,
-)
-
-summon = Summon("customer-api")
-
-
-@summon("/customers/view")
-def customer_view(
-    request: CustomerRequest,
-    customer=Required(customer_lookup, calls=Exactly(1)),
-) -> CustomerView:
-    """Load the requested customer once and return a concise approved view."""
+@summon("/review")
+def review(request: ReviewRequest) -> ReviewResponse:
+    """Classify the text's sentiment and summarize it in one short sentence."""
     ...
 ```
 
-### 3. Serve and call it
+The ellipsis marks a complete endpoint declaration. Summonpot never calls that body, and
+direct Python calls are rejected at the decorator boundary.
+
+### 3. Serve it
 
 ```bash
 summonpot serve app.py --host 127.0.0.1 --port 8000
 ```
 
-Open [`http://127.0.0.1:8000/docs`](http://127.0.0.1:8000/docs), or call the route:
+Open the generated API documentation at
+[`http://127.0.0.1:8000/docs`](http://127.0.0.1:8000/docs), or call the endpoint directly:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/customers/view \
+curl -X POST http://127.0.0.1:8000/review \
   -H 'Content-Type: application/json' \
-  -d '{"customer_id":"customer-7"}'
+  -d '{"text":"The endpoint contract is surprisingly small."}'
 ```
 
-The test model returns a schema-valid `CustomerView`; its placeholder text may vary. A larger
-related version of this pattern is
-[`examples/07_bound_operation.py`](examples/07_bound_operation.py). Provider installation
-and model selection are covered in [Providers](#providers).
+The test model returns schema-valid placeholder data. To receive a real model-generated
+answer, install a provider extra and select a provider-qualified model:
 
-## Why summonpot?
-
-A conventional API framework puts deterministic orchestration in a handler. An agent-first
-stack starts from a model workflow and adds HTTP around it. Summonpot starts from one
-endpoint contract that can contain both exact application operations and explicit
-model-driven choices:
-
-```text
-request model
-+ fixed goal in the docstring
-+ exact Depends(...) / Required(...) operations
-+ argument ownership
-+ response model
-= executable HTTP endpoint
+```bash
+pip install "summonpot[serve,cli,anthropic]"
+export SUMMONPOT_MODEL=anthropic:claude-sonnet-4-5
+export ANTHROPIC_API_KEY='<your key>'
 ```
 
-| | Conventional API | Agent-first stack | Summonpot |
-|---|---|---|---|
-| Starting point | Write a handler | Configure an agent | Declare an endpoint contract |
-| Deterministic work | Handler orchestration | Exposed as tools | Exact declared operations |
-| Agentic decisions | Added as a separate model workflow | Primary abstraction | Declared model choices; `AgentChoice` in the supported bound shape |
-| HTTP contract | Defined around the handler | Added around the agent | Generated from the declaration |
-| Authority | Held by application code | Assembled from tools and runtime context | Closed operation set; bindings enforced in the supported shape |
-| Final output | Handler convention | Provider or framework convention | Locally validated response model |
+The endpoint code and HTTP contract do not change when the provider changes.
 
-Applications keep one public API as the balance changes between deterministic execution and
-model choice. The model remains useful where semantic judgment is required, while exact
-operations retain application-owned behavior and authorization. It does not receive a raw
-database session, unrestricted application container, shell, or filesystem merely because
-the endpoint needs one exact operation.
+## Exact capabilities, not ambient authority
 
-## What ships today
-
-This inventory describes current `main`; published 0.6.0 predates the bound-operation
-runtime called out below.
-
-- Typed request and response contracts with generated HTTP routes and OpenAPI.
-- A fixed endpoint goal taken from the declaration docstring.
-- One declaration model for deterministic application operations and agentic decisions.
-- Closed sets of application-owned operations through `Depends(...)` and `Required(...)`.
-- Per-request enforcement that rejects final output until every required operation succeeds.
-- One complete bound-operation slice with trusted `FromRequest` injection, direct
-  `AgentChoice`, hidden callable defaults, `Exactly(1)` start accounting, and local
-  operation-output validation.
-- Registration-time validation for typed operation bindings and known incompatibilities.
-- Provider-neutral model selection, bounded retries, usage limits, timeouts, and redacted
-  public failures.
-- GET, POST, PUT, PATCH, DELETE, and HEAD routes keyed by `(path, method)`.
-- A keyless test model and installable coding-agent guidance.
-
-Broader bound multi-operation execution, `FromResult`, runtime `FromContext`, `after` ordering,
-broader call bounds, automatic no-model execution, database adapters, streaming, and
-built-in authentication remain planned. See [ROADMAP.md](ROADMAP.md) for their order and
-security constraints.
-
-## How deterministic operations and agentic decisions share one declaration today
-
-The same endpoint binds trusted data to an exact application operation and reserves only
-the semantic choice for the model. The enforced flow below currently applies to one
-required typed operation with `Exactly(1)`, `output=`, no `after`, and bindings limited to
-`FromRequest`, direct `AgentChoice`, or callable defaults. Other operation shapes continue
-to expose their callable arguments to the model.
-
-```text
-HTTP request
-    |
-    v
-Request validation and OpenAPI contract
-    |
-    v
-Compiled endpoint authority
-    |-- inject trusted request values
-    |-- expose only model-owned arguments
-    |-- reserve permitted operation starts
-    |-- validate operation results
-    v
-Configured provider-neutral model
-    |-- may call only declared operations
-    v
-Required-operation gate
-    |
-    v
-Local response validation
-    |
-    v
-HTTP response
-```
-
-Pydantic AI is an internal runtime dependency. Applications use `Summon`, `@summon`,
-Pydantic models, and declared operations; they do not construct provider clients or
-Pydantic AI agents.
-
-## Capability contracts
-
-A bare callable remains the smallest capability:
+A capability is ordinary application code. It runs for real; summonpot never replaces
+its implementation.
 
 ```python
 def calculate_quote(
@@ -240,7 +258,7 @@ def calculate_quote(
     quantity: int,
     tax_rate_percent: str,
 ) -> dict[str, int]:
-    """Calculate a quote using the service's approved pricing rules."""
+    """Calculate an exact quote using the service's approved pricing rules."""
     return pricing_service.calculate(
         unit_price_cents=unit_price_cents,
         quantity=quantity,
@@ -248,7 +266,7 @@ def calculate_quote(
     )
 ```
 
-Attach it to exactly the endpoint that may use it:
+Attach it to one endpoint, continuing from the application and models defined above:
 
 ```python
 from summonpot import Required
@@ -265,30 +283,147 @@ def create_quote(
 
 | Declaration | Runtime contract |
 |---|---|
-| `Depends(operation)` | The operation is available and may be called. |
+| `Depends(operation)` | The operation is available to the endpoint and may be called. |
 | `Required(operation)` | Final output is rejected until the operation succeeds. |
-| `Required(operation, calls=Exactly(1))` with the supported bound shape | One start is permitted and one locally validated success is required. |
 
-For bare callables and unsupported graph shapes, `Required(...)` proves successful use at
-least once. Ordering, idempotency, and provenance-backed final claims are separate
-contracts. Every operation must still enforce its own application authorization.
+For bare callables and broader operation graphs, `Required(...)` proves only that the
+operation returned successfully at least once during that request. The narrow bound form
+shown below additionally enforces trusted request injection, local operation-output
+validation, and `Exactly(1)`. Ordering, idempotency, and provenance-backed final claims
+remain separate concerns.
 
-### Registration catches invalid contracts before serving
+Capabilities do not become request-body fields or OpenAPI parameters. Their docstrings
+and annotations define the tool schema visible to the model, while their implementations
+define the real application behavior.
 
-An `Operation` may declare sources such as `FromRequest`, `FromResult`, `FromContext`, or
-`AgentChoice`. Summonpot verifies at registration that required arguments have sources,
-references name declared values, supported choices have usable shapes, and known source
-and destination types are compatible.
+The capability set is closed. For one required typed operation with `Exactly(1)`, the
+runtime injects `FromRequest` values, removes them and callable defaults from the operation
+tool schema, offers only direct `AgentChoice` arguments, validates the declared operation
+output, and rejects a second start. Request values still appear in the model's user message;
+tool-schema hiding is not prompt secrecy. Other operation shapes remain on the legacy
+model-supplied path until their execution semantics ship. Every operation must still
+enforce authorization.
+Pass exact operations, never raw database sessions, engines, connections, cursors,
+arbitrary SQL, shell access, or ambient filesystem authority.
 
-The checker rejects only provable incompatibility. Missing annotations, `Any`, framework
-context, and relationships it cannot establish remain unknown rather than becoming false
-registration errors. Runtime injection currently covers only the bound-operation shape
-shown in the quick start.
+See the complete executable
+[`Required(...)` quote example](examples/02_required_capability.py).
+
+## Typed operation contracts fail before serving
+
+Use `Operation` when a capability's dataflow is part of the endpoint contract rather
+than something the model should invent:
+
+```python
+from my_service.models import Customer, CustomerRequest, CustomerResponse
+from my_service.operations import load_customer
+from summonpot import AgentChoice, Exactly, FromRequest, Operation, Required, Summon
+
+
+summon = Summon("customer-api")
+
+customer_from_request = Operation(
+    load_customer,
+    bind={
+        "customer_id": FromRequest("customer_id"),
+        "format": AgentChoice(),
+    },
+    output=Customer,
+)
+
+
+@summon("/customers")
+def get_customer(
+    request: CustomerRequest,
+    customer=Required(customer_from_request, calls=Exactly(1)),
+) -> CustomerResponse:
+    """Load this customer and return the approved customer view."""
+    ...
+```
+
+The contract is immutable after construction. At registration, summonpot verifies that:
+
+- every required operation argument has an explicit source;
+- `FromRequest(...)` names a real request field;
+- `FromResult(...)` names a declared producer and a readable, typed output field;
+- `AgentChoice(...)` selects from a supported collection and fits its receiving argument;
+- known source, element, and destination types are compatible; and
+- ordering references name operations declared by the same endpoint.
+
+The rule is deliberately conservative: a declaration is rejected only when its
+incompatibility is provable. Missing annotations, `Any`, framework context, and type
+relationships the checker cannot establish remain unknown rather than becoming false
+registration errors. An annotation that names a type Python cannot resolve is still an
+invalid endpoint declaration and fails at import.
+
+For example, binding an `int` request field to a `str` operation argument fails while the
+module is imported. A `Customer` value may feed a `Person` argument when `Customer` is a
+subclass, and Python's numeric widening permits `int` or `bool` to feed `float`.
+
+> [!IMPORTANT]
+> Registration validates and stores every binding source. Runtime enforcement currently
+> covers one required `Exactly(1)` operation using `FromRequest`, direct `AgentChoice`,
+> and callable defaults. `FromResult`, `FromContext`, `after`, broader call bounds, and
+> automatic no-model paths remain planned; unsupported shapes keep their existing
+> model-supplied argument behavior.
+
+## How it works today
+
+```text
+HTTP request
+    |
+    v
+Pydantic request validation + OpenAPI contract
+    |
+    v
+Runtime.call(...)
+    |
+    v
+Configured provider-neutral model
+    |
+    +---- may call only declared capabilities
+    |          |
+    |          +---- successful Required(...) calls recorded per request
+    |
+    v
+Required-operation gate
+    |
+    v
+Local Pydantic response validation
+    |
+    v
+HTTP response
+```
+
+The endpoint docstring becomes the fixed goal. Request data becomes the user message.
+Capabilities become the complete set of callable operations. The response model becomes
+both the structured-output schema and the final local validator.
+
+Pydantic AI is an internal runtime dependency. Applications use `Summon`, `@summon`,
+Pydantic models, and declarative capabilities; they do not construct provider clients or
+Pydantic AI agents.
+
+### The contract stays stable as execution evolves
+
+The roadmap adds a no-model executor without adding a second endpoint API:
+
+| Contract state | Target execution |
+|---|---|
+| One complete operation path with every binding resolved | Execute directly without a model |
+| A bounded semantic choice remains | Use the agent runtime with declared capabilities |
+| No legal path exists | Return a typed deterministic error |
+
+Broader graph compilation and ordering, automatic no-model execution, SQLAlchemy/SQLite
+operation adapters, write receipts, streaming, and built-in authentication are **planned,
+not shipped**. See
+[ROADMAP.md](ROADMAP.md) for the design boundaries and implementation order.
 
 ## HTTP methods and OpenAPI
 
 `POST` is the default. Body endpoints take one Pydantic request model. Bodyless methods
 such as `GET`, `DELETE`, and `HEAD` declare scalar or scalar-sequence query parameters:
+
+This fragment continues from an existing module-level `summon` application:
 
 ```python
 from typing import Literal
@@ -310,10 +445,11 @@ def list_tickets(
 ```
 
 `GET /tickets` and `POST /tickets` may coexist. Registering the same normalized
-`(path, method)` twice fails at import time. Capability dependencies never become request
-fields or OpenAPI parameters.
+`(path, method)` twice fails at import time, as do missing docstrings, unresolved type
+annotations, invalid capability callables, duplicate capability names, unsupported query
+types, and `stream=True`.
 
-## Providers
+## Provider and model configuration
 
 | Provider | Install extra | Model example | API-key variable |
 |---|---|---|---|
@@ -325,20 +461,28 @@ fields or OpenAPI parameters.
 | OpenRouter | `summonpot[openrouter]` | `openrouter:anthropic/claude-sonnet-4` | `OPENROUTER_API_KEY` |
 | xAI | `summonpot[xai]` | `xai:grok-4` | `XAI_API_KEY` |
 
-Set the application default through `SUMMONPOT_MODEL` or in Python:
+Set one default for the `Summon` application through `SUMMONPOT_MODEL` or in Python:
 
 ```python
 summon = Summon("research-api", model="openrouter:anthropic/claude-sonnet-4")
 ```
 
-An endpoint may override that model without changing its HTTP contract. OpenRouter keeps
-the upstream provider and model after the first colon. Legacy unprefixed names resolve
-through OpenAI for backward compatibility.
+Override it for one endpoint without changing that endpoint's HTTP contract:
+
+```python
+@summon("/research", model="anthropic:claude-sonnet-4-5")
+def research(request: ResearchRequest) -> ResearchResponse:
+    """Research the topic and return a sourced report."""
+    ...
+```
+
+OpenRouter keeps the upstream provider and model after the first colon. Legacy
+unprefixed model names resolve through OpenAI for backward compatibility.
 
 ## Bounding a call
 
 **Binding and exposure:** A reachable endpoint can spend the operator's provider credit,
-so configure explicit limits and a timeout:
+so set explicit usage limits and a timeout:
 
 ```python
 from summonpot import Summon, UsageLimits
@@ -360,61 +504,97 @@ summon = Summon(
 | HTTP status | Public meaning |
 |---|---|
 | `422` | Request validation failed. |
-| `429` | A usage limit or provider rate limit was exceeded. |
+| `429` | The configured usage limit or provider rate limit was exceeded. |
 | `502` | The provider failed or the model did not satisfy the endpoint contract. |
 | `504` | The endpoint exceeded its timeout. |
 | `500` | Provider configuration or application capability failed. |
 
 Provider text, model output, and capability details stay in operator logs rather than
-public error bodies. A timeout cannot terminate a synchronous capability already running
-in a worker thread, so irreversible operations need their own deadline and idempotency
-policy.
+public error bodies.
+
+The timeout bounds how long summonpot waits. It cannot terminate a synchronous capability
+already running in a worker thread, so give irreversible or long-running operations an
+internal deadline and idempotency policy of their own. Open thread-affine resources such
+as default SQLite connections inside the capability call rather than capturing them
+outside it.
 
 Summonpot currently has no authentication layer. Bind local development to `127.0.0.1`.
-Put authentication in front of a service before exposing it.
+Before exposing a service, put authentication in front of it and configure runtime limits.
 
 ## Examples
 
-The [`examples/`](examples/) directory progresses from one typed endpoint to a multi-file
-service:
+The [`examples/`](examples/) directory grows from one endpoint to a multi-file service:
 
-| Level | Example | Demonstrates |
+| Level | Example | What it demonstrates |
 |---|---|---|
 | 1 | [`basic_app.py`](examples/basic_app.py) | Minimal typed request and response |
 | 2 | [`02_required_capability.py`](examples/02_required_capability.py) | Required exact calculation |
 | 3 | [`03_agentic_order.py`](examples/03_agentic_order.py) | Bounded choice plus a required write |
 | 4 | [`04_http_methods.py`](examples/04_http_methods.py) | GET/POST routing and query parameters |
 | 5 | [`05_bounded_runtime.py`](examples/05_bounded_runtime.py) | Limits, timeout, and model override |
-| 6 | [`06_support_service/`](examples/06_support_service/) | Multi-file typed operation declarations |
-| 7 | [`07_bound_operation.py`](examples/07_bound_operation.py) | Enforced trusted/model argument ownership |
+| 6 | [`06_support_service/`](examples/06_support_service/) | Multi-file typed operation chain and persisted ticket |
+| 7 | [`07_bound_operation.py`](examples/07_bound_operation.py) | Enforced `FromRequest` + `AgentChoice` with `Exactly(1)` |
 
-The [examples guide](examples/README.md) includes an HTTP call for every level and states
-which contracts execute today.
+The [examples guide](examples/README.md) includes a real HTTP call for every level and
+explains what runs today and what remains planned.
 
 ## Give your coding agent the contract
 
-The declaration body is `...`, which a coding agent may mistake for an unfinished handler.
-Install Summonpot's bundled guidance for Claude Code, Cursor, Windsurf, GitHub Copilot,
-Cline, or OpenAI Codex:
+Summonpot uses an ellipsis as a declaration body, which is easy for a coding agent to
+mistake for an unfinished handler. Install the bundled skill so the agent knows the
+endpoint shape, typed operation sources, registration rules, capability boundary, HTTP
+behavior, and runtime caveats:
 
 ```bash
 summonpot add skills
 ```
 
-Summonpot detects agent configuration already present in the project. Use `--agent` or
-`--path` to select an agent or another project directory explicitly. Shared instruction
-files are updated inside managed blocks.
+With no arguments, summonpot detects agent configuration already present in the project.
+Choose one explicitly when needed:
+
+```bash
+summonpot add skills --agent claude
+summonpot add skills --agent cursor
+summonpot add skills --agent windsurf
+summonpot add skills --agent copilot
+summonpot add skills --agent cline
+summonpot add skills --agent codex
+```
+
+Use `--path ./myproject` to target another project directory. Shared files such as
+`AGENTS.md` and `.github/copilot-instructions.md` are updated inside a managed block so
+surrounding project instructions remain intact.
+
+## Community
+
+The [ModePot Discord](https://discord.gg/u3AANZr6RG) is the shared community for
+summonpot, intpot, dexpot, and the rest of the project family. Join to discuss use cases,
+ask implementation questions, and help shape declaration-first Python frameworks.
+
+Use GitHub issues for reproducible bugs and scoped feature proposals. Use Discord for
+open-ended design discussion, early ideas, and help applying the frameworks to real
+projects.
 
 ## Contributing
 
-Summonpot is early enough that a focused contribution can still shape the framework.
-Useful work includes executable application examples, provider and HTTP acceptance
-coverage, clearer errors, deterministic execution, typed dataflow, database operations,
-and reproducible security or ergonomics reports.
+Summonpot is early enough that a focused contribution can still shape the framework, not
+just polish its edges.
 
-For substantial contract changes, open an
-[issue](https://github.com/tugrulguner/summonpot/issues/new/choose) first. Development uses
-[uv](https://docs.astral.sh/uv/):
+Useful places to contribute include:
+
+- executable examples for real application workflows;
+- provider and HTTP acceptance coverage;
+- clearer errors, safer defaults, and API ergonomics;
+- `FromResult`/`FromContext` binding, broader capability-graph execution, and ordering;
+- exact database-operation adapters;
+- the deterministic execution compiler described in the roadmap;
+- documentation, diagrams, and reproducible bug reports.
+
+For substantial behavior or architecture changes, open an
+[issue](https://github.com/tugrulguner/summonpot/issues/new/choose) first so the public
+contract and security boundary stay coherent.
+
+Development uses [uv](https://docs.astral.sh/uv/):
 
 ```bash
 git clone https://github.com/tugrulguner/summonpot.git
@@ -426,48 +606,10 @@ make check
 Every user-facing change needs an issue-backed or generated orphan Towncrier fragment. Read
 [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 
-## Migrating from the 0.5 API
-
-The application object is now `Summon`, the module-level variable is named `summon`, and
-the application instance itself is the decorator:
-
-```python
-# 0.5
-from summonpot import Pot
-
-pot = Pot("service")
-
-
-@pot.summon("/review")
-def review(request: ReviewRequest) -> ReviewResponse:
-    """Review this request."""
-    raise NotImplementedError  # 0.5 declaration body
-```
-
-```python
-# current
-from summonpot import Summon
-
-summon = Summon("service")
-
-
-@summon("/review")
-def review(request: ReviewRequest) -> ReviewResponse:
-    """Review this request."""
-    ...
-```
-
-In short: `Pot` → `Summon`, `pot` → `summon`, `@pot.summon(...)` → `@summon(...)`, and
-`raise NotImplementedError` → `...`.
-The CLI loads a module-level variable named `summon`. The package-root `Pot` export and the
-`summonpot.pot` module have been removed, so update imports instead of relying on the old
-paths. `summon.summon(...)` remains a temporary compatibility alias after constructing a
-`Summon`.
-
 ## Roadmap
 
-The public endpoint declaration is intended to stay stable as Summonpot gains selection of
-the least-powerful sufficient executor:
+The long-term goal is one stable endpoint declaration with the least-powerful sufficient
+executor behind it:
 
 ```text
 one fully resolved operation path  -> no-model deterministic executor
@@ -475,16 +617,21 @@ bounded semantic choice remains    -> model-backed agentic executor
 no legal path                      -> typed deterministic error
 ```
 
-The current runtime implements the model-backed path and the first enforced bound-operation
-slice. Broader ordering, dataflow, deterministic execution, adapters, and operational
-constraints are tracked in [ROADMAP.md](ROADMAP.md).
+The ordering, security constraints, non-goals, and shipped foundation live in
+[ROADMAP.md](ROADMAP.md).
 
 ## Help summonpot grow
 
-If this endpoint model is useful, [star the repository](https://github.com/tugrulguner/summonpot),
-build one small endpoint, and
-[report the friction](https://github.com/tugrulguner/summonpot/issues/new/choose). Real use
-cases and executable examples are more valuable than speculative feature lists.
+If the endpoint-first model is useful to you:
+
+- [Star the repository](https://github.com/tugrulguner/summonpot) so more Python
+  developers can find it.
+- Build one small endpoint and
+  [report the friction](https://github.com/tugrulguner/summonpot/issues/new/choose).
+- Share a real use case, add an executable example, or contribute to a roadmap milestone.
+
+Early feedback is especially valuable because the public contract is small and the next
+execution layers are being designed around it now.
 
 ## License
 
