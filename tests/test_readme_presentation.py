@@ -71,14 +71,13 @@ def test_readme_explains_both_flows_under_one_endpoint_contract():
     )
 
 
-def test_readme_restores_the_established_structure_and_release_history():
+def test_readme_keeps_the_established_structure_without_version_history():
     readme = README.read_text(encoding="utf-8")
 
-    assert "### New in 0.6.0" in readme
-    assert "### New in 0.5.0" in readme
-    assert readme.index("## Migrating from the 0.5 API") < readme.index(
-        "## Quick start"
-    )
+    assert "### New in " not in readme
+    assert "## Migrating from the " not in readme
+    assert "Summonpot 0.6.0" not in readme
+    assert "Summonpot 0.5.0" not in readme
     assert 'pip install "summonpot[serve,cli]"' in readme
     assert "git+https://github.com/tugrulguner/summonpot.git@" not in readme
     assert "docs/assets/authority-boundary.svg" not in readme

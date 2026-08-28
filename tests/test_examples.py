@@ -117,7 +117,7 @@ def test_support_example_declares_the_typed_operation_chain(monkeypatch):
 
 
 def test_support_example_guide_states_the_current_binding_boundary():
-    guide = (ROOT / "examples/README.md").read_text()
+    guide = (ROOT / "examples/README.md").read_text(encoding="utf-8")
 
     assert "FromRequest" in guide
     assert "FromResult" in guide
@@ -127,20 +127,19 @@ def test_support_example_guide_states_the_current_binding_boundary():
     assert "one permitted start" in guide
 
 
-def test_readme_documents_the_pot_to_summon_migration():
-    readme = (ROOT / "README.md").read_text()
+def test_readme_teaches_the_current_api_without_version_specific_migration():
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
-    assert "Migrating from the 0.5 API" in readme
-    assert "from summonpot import Pot" in readme
+    assert "Migrating from the 0.5 API" not in readme
+    assert "from summonpot import Pot" not in readme
     assert "from summonpot import Summon" in readme
-    assert "`pot` → `summon`" in readme
-    assert "`summonpot.pot` module have been removed" in readme
-    assert "module-level variable named `summon`" in readme
+    assert 'summon = Summon("review-api")' in readme
+    assert '@summon("/review")' in readme
 
 
 def test_examples_use_one_documented_provider_installation():
-    guide = (ROOT / "examples/README.md").read_text()
-    bounded = (ROOT / "examples/05_bounded_runtime.py").read_text()
+    guide = (ROOT / "examples/README.md").read_text(encoding="utf-8")
+    bounded = (ROOT / "examples/05_bounded_runtime.py").read_text(encoding="utf-8")
 
     assert "summonpot[serve,cli,openrouter]" in guide
     assert 'model="openrouter:openai/gpt-4o-mini"' in bounded
