@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <strong>Declare deterministic operations and agentic decisions through one endpoint.</strong>
+  <strong>Declare deterministic operations and agentic decisions through one framework.</strong>
 </p>
 
 <p align="center">
@@ -32,17 +32,17 @@
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tugrulguner/summonpot/b9aae269a5a94d7c7b53049b66d7846f9d546520/docs/assets/one-declaration-two-flows.png" alt="One Summonpot endpoint declaration combines trusted request bindings and exact application operations with explicit model-owned choices, producing one validated HTTP and OpenAPI response" width="960">
+  <img src="https://raw.githubusercontent.com/tugrulguner/summonpot/bc7c2f4b321caaad9754b8ad7ef3c8defd5be886/docs/assets/one-declaration-two-flows.png" alt="One Summonpot application declares a deterministic endpoint with application-owned operation arguments and an agentic endpoint with an explicit model-owned choice through the same typed HTTP and OpenAPI framework" width="960">
 </p>
 
 The ellipsis is declaration syntax, not an unfinished implementation. The signature,
 docstring, operations, argument bindings, and return type are the executable contract.
 `Depends(...)` and `Required(...)` attach deterministic application code. `AgentChoice()`
-marks the exact arguments where the model may decide. Both flow through the same HTTP route,
-request/response contract, validation, and OpenAPI instead of becoming a separate handler
-and agent graph. Summonpot owns routing, the bounded model loop, operation enforcement, and
-structured output. Calling a registered declaration directly raises a clear error; serve
-the application or invoke its generated HTTP route instead.
+marks the exact arguments where the model may decide. Deterministic and agentic endpoints
+use the same declaration model, request/response validation, routing, and OpenAPI instead of
+separate API and agent frameworks. Summonpot owns the bounded model loop, operation
+enforcement, and structured output. Calling a registered declaration directly raises a
+clear error; serve the application or invoke its generated HTTP route instead.
 
 > [!IMPORTANT]
 > Every current production `@summon` request runs through the configured model.
@@ -54,9 +54,9 @@ the application or invoke its generated HTTP route instead.
 ## Why summonpot?
 
 A conventional API puts deterministic work in a handler. An agent-first stack starts from
-a model workflow and then wraps it in HTTP. Summonpot declares both through one endpoint
-contract, so applications keep one public API as the balance changes between exact
-operations and semantic decisions:
+a model workflow and then wraps it in HTTP. Summonpot declares both through the same
+contract-first framework, so applications keep one public API as the balance changes
+between exact operations and semantic decisions:
 
 The following conceptual declaration omits the application-specific models and service
 implementation; the [quick start](#quick-start) is the standalone example.
@@ -70,36 +70,55 @@ from summonpot import AgentChoice, Exactly, FromRequest, Operation, Required, Su
 summon = Summon("research-api")
 
 
-def build_report(
+def build_deterministic_report(topic: str) -> ResearchReport:
+    """Run the application's fully resolved research operation."""
+    return research_service.build(topic=topic, format="detailed")
+
+
+deterministic_report_operation = Operation(
+    build_deterministic_report,
+    bind={"topic": FromRequest("topic")},
+    output=ResearchReport,
+)
+
+
+def build_agentic_report(
     topic: str,
     format: Literal["summary", "detailed"],
 ) -> ResearchReport:
-    """Run the application's exact research operation."""
+    """Run the exact operation with one declared semantic choice."""
     return research_service.build(topic=topic, format=format)
 
 
-research_operation = Operation(
-    build_report,
+agentic_report_operation = Operation(
+    build_agentic_report,
     bind={
-        # Deterministic: validated request data owns this argument.
         "topic": FromRequest("topic"),
-        # Agentic: the model owns only this declared semantic choice.
         "format": AgentChoice(),
     },
     output=ResearchReport,
 )
 
 
-@summon("/research")
-def research(
+@summon("/reports/deterministic")
+def deterministic_report(
     request: ResearchRequest,
-    report=Required(research_operation, calls=Exactly(1)),
+    report=Required(deterministic_report_operation, calls=Exactly(1)),
 ) -> ResearchResponse:
-    """Research the topic and return a sourced report."""
+    """Return the detailed report through a fully resolved operation path."""
+    ...
+
+
+@summon("/reports/agentic")
+def agentic_report(
+    request: ResearchRequest,
+    report=Required(agentic_report_operation, calls=Exactly(1)),
+) -> ResearchResponse:
+    """Choose the report format and return the sourced report."""
     ...
 ```
 
-That declaration answers the questions an API framework needs to answer:
+Those declarations answer the questions an API framework needs to answer:
 
 | Question | Declared by |
 |---|---|
@@ -125,18 +144,18 @@ operation has completed successfully.
 | Application authority | Held by handler code | Often assembled separately | Closed by the endpoint contract |
 | Final output | Handler convention | Provider or framework convention | Locally validated response model |
 
-### One endpoint, both flows
+### One declaration model, both endpoint flows
 
-The example above combines both kinds of work. `FromRequest(...)` injects trusted values
-into exact application code, while `AgentChoice()` marks the only argument the model may
-supply. `Exactly(1)` and `output=` enforce operation use and local output validation. The
-request, response, route, and OpenAPI contract remain one declaration. Today the configured
-model participates in every request; automatic no-model execution for a fully resolved
-declaration remains planned.
+`/reports/deterministic` binds every operation argument to validated application data; it
+contains no model-owned operation choice. `/reports/agentic` uses the same declaration
+model but adds one explicit `AgentChoice()`. Both keep typed request/response contracts, operation
+enforcement, routing, and OpenAPI under Summonpot. Today the configured model participates
+in every request, including the fully resolved endpoint; automatic no-model execution for
+that declaration remains planned.
 
 ## What ships today
 
-- **One declaration for deterministic operations and agentic decisions**, sharing the same
+- **One declaration model for deterministic operations and agentic decisions**, sharing the same
   request, response, route, validation, and OpenAPI contract.
 - **Contract-first endpoints** with a required goal and typed request/response contracts.
 - **Closed capability sets** made from exact application-owned callables.

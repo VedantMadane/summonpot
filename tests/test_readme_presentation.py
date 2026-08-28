@@ -18,15 +18,18 @@ def test_readme_preserves_signature_hero_and_unified_framework_value():
 
     assert '<img src="summonpot.png" alt="Summonpot" width="600">' in introduction
     assert (
-        "declare deterministic operations and agentic decisions through one endpoint"
+        "declare deterministic operations and agentic decisions through one framework"
         in normalized_introduction
     )
     assert (
-        "combining application-owned execution and model-owned choices in one typed http api"
+        "combining application-owned execution and agent-owned choices in one typed http api"
         in normalized_introduction
     )
-    assert "both flow through the same http route" in normalized_introduction
-    assert "request/response contract" in normalized_introduction
+    assert (
+        "deterministic and agentic endpoints use the same declaration model"
+        in normalized_introduction
+    )
+    assert "request/response validation" in normalized_introduction
     assert "openapi" in normalized_introduction
 
 
@@ -48,32 +51,42 @@ def test_readme_states_the_current_runtime_boundary_before_positioning():
     )
 
 
-def test_readme_explains_both_flows_under_one_endpoint_contract():
+def test_readme_shows_deterministic_and_agentic_endpoints_in_one_code_block():
     readme = README.read_text(encoding="utf-8")
-    why = readme.split("## Why summonpot?", 1)[1].split("That declaration answers", 1)[
+    why = readme.split("## Why summonpot?", 1)[1].split("Those declarations answer", 1)[
         0
     ]
     declaration = why.split("```python", 1)[1].split("```", 1)[0]
-    section = readme.split("### One endpoint, both flows", 1)[1].split(
-        "## What ships today", 1
-    )[0]
+    deterministic_path = declaration.split("def build_deterministic_report", 1)[
+        1
+    ].split("def build_agentic_report", 1)[0]
+    agentic_path = declaration.split("def build_agentic_report", 1)[1]
+    section = readme.split("### One declaration model, both endpoint flows", 1)[
+        1
+    ].split("## What ships today", 1)[0]
     normalized_section = _normalize(section)
 
-    assert "def build_report(" in declaration
-    assert "# Deterministic:" in declaration
-    assert '"topic": FromRequest("topic")' in declaration
-    assert "# Agentic:" in declaration
-    assert '"format": AgentChoice()' in declaration
-    assert '@summon("/research")' in declaration
-    assert "calls=Exactly(1)" in declaration
-    assert "the example above combines both kinds of work" in normalized_section
+    assert "deterministic_report_operation = Operation(" in deterministic_path
+    assert 'bind={"topic": FromRequest("topic")}' in deterministic_path
+    assert "AgentChoice()" not in deterministic_path
+    assert '"format": AgentChoice()' in agentic_path
+    assert '@summon("/reports/deterministic")' in declaration
+    assert '@summon("/reports/agentic")' in declaration
+    assert declaration.count("calls=Exactly(1)") == 2
     assert (
-        "request, response, route, and openapi contract remain one declaration"
+        "`/reports/deterministic` binds every operation argument to validated application data"
         in normalized_section
     )
-    assert "the configured model participates in every request" in normalized_section
     assert (
-        "automatic no-model execution for a fully resolved declaration remains planned"
+        "`/reports/agentic` uses the same declaration model but adds one explicit "
+        "`agentchoice()`" in normalized_section
+    )
+    assert (
+        "the configured model participates in every request, including the fully "
+        "resolved endpoint" in normalized_section
+    )
+    assert (
+        "automatic no-model execution for that declaration remains planned"
         in normalized_section
     )
 
@@ -85,7 +98,7 @@ def test_readme_replaces_the_text_formula_with_a_png_flow_diagram():
     source = ROOT / "docs" / "assets" / "authority-boundary.svg"
     packaged_image = (
         "https://raw.githubusercontent.com/tugrulguner/summonpot/"
-        "b9aae269a5a94d7c7b53049b66d7846f9d546520/"
+        "bc7c2f4b321caaad9754b8ad7ef3c8defd5be886/"
         "docs/assets/one-declaration-two-flows.png"
     )
 
@@ -95,21 +108,26 @@ def test_readme_replaces_the_text_formula_with_a_png_flow_diagram():
     assert diagram.is_file()
     data = diagram.read_bytes()
     assert data[:8] == b"\x89PNG\r\n\x1a\n"
-    assert struct.unpack(">II", data[16:24]) == (1440, 520)
+    assert struct.unpack(">II", data[16:24]) == (1440, 560)
 
     content = source.read_text(encoding="utf-8")
     assert (
-        "One Summonpot declaration combines deterministic work and agentic choice"
+        "One Summonpot framework supports deterministic and agentic endpoints"
         in content
     )
-    assert "TYPED REQUEST" in content
-    assert "DETERMINISTIC" in content
-    assert "FromRequest(&quot;topic&quot;)" not in content
-    assert 'FromRequest("topic")' in content
-    assert "AGENTIC" in content
+    assert "SUMMON APP" in content
+    assert "DETERMINISTIC ENDPOINT" in content
+    assert '@summon("/reports/deterministic")' in content
+    assert "every operation argument is application-owned" in content
+    assert "AGENTIC ENDPOINT" in content
+    assert '@summon("/reports/agentic")' in content
     assert "AgentChoice()" in content
-    assert "Required(..., calls=Exactly(1))" in content
-    assert "TYPED RESPONSE" in content
+    assert "the model owns only the declared semantic choice" in content
+    assert "Current runtime: both model-backed" in content
+    assert (
+        "automatic no-model execution for the fully bound endpoint remains planned"
+        in content
+    )
 
 
 def test_readme_keeps_the_established_structure_without_version_history():
