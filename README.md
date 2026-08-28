@@ -1,15 +1,15 @@
 # summonpot
 
 <p align="center">
-  <strong>Bound model-backed APIs from typed endpoint contracts.</strong>
+  <strong>One endpoint declaration for deterministic operations and agentic decisions.</strong>
 </p>
 
 <p align="center">
   Summonpot is a contract-first Python framework for turning typed endpoint declarations
-  into executable APIs. On current <code>main</code>, every <code>@summon(...)</code> request
-  uses the configured model runtime, and one single-operation contract adds explicit model
-  authority. The published 0.6.0 package predates that bound runtime; automatic no-model
-  endpoint execution also remains planned.
+  into executable APIs. The same declaration defines the request, fixed goal, exact
+  application operations, model-owned choices, response, HTTP route, and OpenAPI contract.
+  Deterministic application code and model-driven decisions share one framework instead of
+  becoming separate handlers, agent graphs, and integration layers.
 </p>
 
 <p align="center">
@@ -28,15 +28,21 @@
   <a href="#contributing">Contributing</a>
 </p>
 
-In the supported bound-operation shape, one endpoint declaration establishes the complete
-authority boundary:
+The declaration says which parts of a flow are deterministic and where the model may
+choose:
 
 - `FromRequest("customer_id")` removes `customer_id` from the operation tool schema and
-  injects its value from the validated request. Request values still appear in the model's
-  user message; tool-schema hiding is not prompt secrecy.
-- `AgentChoice()` lets the model supply only `format` for the operation call.
+  injects the validated value deterministically.
+- `AgentChoice()` leaves only `format` to the model.
 - `Exactly(1)` permits one operation start and requires one locally validated success.
-- The endpoint response is validated as `CustomerView` before it becomes an HTTP response.
+- `CustomerView` validates the result before it becomes an HTTP response.
+
+On current `main`, every `@summon(...)` request still uses the configured model runtime.
+The supported bound shape keeps trusted operation arguments and validation under framework
+control while the model handles the declared semantic choice. Request values still appear
+in the model's user message; tool-schema hiding is not prompt secrecy. Automatic no-model
+execution for fully resolved declarations remains planned, and published 0.6.0 predates
+the bound runtime shown here.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/tugrulguner/summonpot/014814f7b304da5309afb43d22446bd6dda15c7d/docs/assets/authority-boundary.svg" alt="A validated request value and model-supplied tool argument flow through one start-bounded Summonpot operation into a validated response" width="960">
@@ -134,9 +140,10 @@ and model selection are covered in [Providers](#providers).
 
 ## Why summonpot?
 
-A conventional API framework asks you to write orchestration inside a handler. An
-agent-first stack asks you to configure an agent and then expose it through HTTP.
-Summonpot makes the endpoint contract the source of truth:
+A conventional API framework puts deterministic orchestration in a handler. An agent-first
+stack starts from a model workflow and adds HTTP around it. Summonpot starts from one
+endpoint contract that can contain both exact application operations and explicit
+model-driven choices:
 
 ```text
 request model
@@ -147,18 +154,20 @@ request model
 = executable HTTP endpoint
 ```
 
-| | Agent-first stack | Summonpot |
-|---|---|---|
-| Starting point | Configure an agent | Define an endpoint contract |
-| Model authority | Assembled around tools and runtime context | Closed by the endpoint declaration |
-| HTTP contract | Added separately | Generated from the same declaration |
-| Required operations | Usually prompted or application-managed | Enforced before final output is accepted |
-| Trusted arguments in the supported bound shape | Often part of the model tool call | Removed from the operation tool schema and injected locally |
-| Final output | Provider or framework convention | Locally validated response model |
+| | Conventional API | Agent-first stack | Summonpot |
+|---|---|---|---|
+| Starting point | Write a handler | Configure an agent | Declare an endpoint contract |
+| Deterministic work | Handler orchestration | Exposed as tools | Exact declared operations |
+| Agentic decisions | Added as a separate model workflow | Primary abstraction | Declared model choices; `AgentChoice` in the supported bound shape |
+| HTTP contract | Defined around the handler | Added around the agent | Generated from the declaration |
+| Authority | Held by application code | Assembled from tools and runtime context | Closed operation set; bindings enforced in the supported shape |
+| Final output | Handler convention | Provider or framework convention | Locally validated response model |
 
-The model remains useful where semantic choice remains. It does not receive a raw database
-session, unrestricted application container, shell, or filesystem merely because the
-endpoint needs one exact operation.
+Applications keep one public API as the balance changes between deterministic execution and
+model choice. The model remains useful where semantic judgment is required, while exact
+operations retain application-owned behavior and authorization. It does not receive a raw
+database session, unrestricted application container, shell, or filesystem merely because
+the endpoint needs one exact operation.
 
 ## What ships today
 
@@ -167,6 +176,7 @@ runtime called out below.
 
 - Typed request and response contracts with generated HTTP routes and OpenAPI.
 - A fixed endpoint goal taken from the declaration docstring.
+- One declaration model for deterministic application operations and agentic decisions.
 - Closed sets of application-owned operations through `Depends(...)` and `Required(...)`.
 - Per-request enforcement that rejects final output until every required operation succeeds.
 - One complete bound-operation slice with trusted `FromRequest` injection, direct
@@ -183,11 +193,13 @@ broader call bounds, automatic no-model execution, database adapters, streaming,
 built-in authentication remain planned. See [ROADMAP.md](ROADMAP.md) for their order and
 security constraints.
 
-## How the supported bound-operation slice executes today
+## How deterministic operations and agentic decisions share one declaration today
 
-This flow applies only to one required typed operation with `Exactly(1)`, `output=`, no
-`after`, and bindings limited to `FromRequest`, direct `AgentChoice`, or callable defaults.
-Other operation shapes continue to expose their callable arguments to the model.
+The same endpoint binds trusted data to an exact application operation and reserves only
+the semantic choice for the model. The enforced flow below currently applies to one
+required typed operation with `Exactly(1)`, `output=`, no `after`, and bindings limited to
+`FromRequest`, direct `AgentChoice`, or callable defaults. Other operation shapes continue
+to expose their callable arguments to the model.
 
 ```text
 HTTP request
