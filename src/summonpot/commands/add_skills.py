@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import suppress
 from enum import StrEnum
 from pathlib import Path
 
@@ -22,6 +23,78 @@ from summonpot.skills.content import (
 
 _MANAGED_START = "<!-- summonpot:managed:start -->"
 _MANAGED_END = "<!-- summonpot:managed:end -->"
+
+
+class MalformedManagedBlockError(Exception):
+    """Raised when a shared file contains ambiguous managed-block markers.
+
+    The fail-closed contract: the affected file is left byte-identical and the
+    CLI exits non-zero with a message that names the affected relative path
+    and explains how to repair the markers manually.
+    """
+
+    def __init__(
+        self,
+        path: Path,
+        *,
+        starts: int,
+        ends: int,
+        end_before_start: bool = False,
+    ) -> None:
+        self.path = path
+        self.starts = starts
+        self.ends = ends
+        self.end_before_start = end_before_start
+
+    def render(self, root: Path | None = None) -> str:
+        target = self.path
+        if root is not None:
+            with suppress(ValueError):
+                target = self.path.relative_to(root)
+        lines = [
+            f"Refusing to modify {target}: managed-block markers are malformed.",
+            f"  Found {self.starts} start marker(s) and {self.ends} end marker(s).",
+        ]
+        if self.end_before_start:
+            lines.append("  The end marker appears before the start marker.")
+        if self.starts != 1 or self.ends != 1:
+            lines.append("  Expected either 0 of each, or exactly one ordered pair.")
+        lines.append(
+            "  Repair the markers in this file manually, then re-run "
+            "`summonpot add skills`."
+        )
+        return "\n".join(lines)
+
+
+def _validate_managed_markers(text: str, path: Path) -> None:
+    """Raise MalformedManagedBlockError if ``text`` has ambiguous managed markers.
+
+    A file is well-formed when it contains either zero managed markers or
+    exactly one start marker followed by exactly one end marker. Anything else
+    (start-only, end-only, reversed, or duplicated markers) means the file's
+    intent cannot be inferred safely and rewriting it would risk corrupting
+    user-authored content.
+    """
+    starts = text.count(_MANAGED_START)
+    ends = text.count(_MANAGED_END)
+
+    if starts == 0 and ends == 0:
+        return
+
+    if (
+        starts == 1
+        and ends == 1
+        and text.find(_MANAGED_START) < text.find(_MANAGED_END)
+    ):
+        return
+
+    end_before_start = starts == 1 and ends == 1
+    raise MalformedManagedBlockError(
+        path,
+        starts=starts,
+        ends=ends,
+        end_before_start=end_before_start,
+    )
 
 
 class Agent(StrEnum):
@@ -92,6 +165,8 @@ def _upsert_managed_block(path: Path, content: str) -> None:
     """
     block = f"{_MANAGED_START}\n{content.rstrip()}\n{_MANAGED_END}\n"
     existing = path.read_text() if path.exists() else ""
+
+    _validate_managed_markers(existing, path)
 
     start = existing.find(_MANAGED_START)
     end = existing.find(_MANAGED_END)
@@ -174,5 +249,10 @@ def add_skills(
             raise typer.Exit(1)
 
     for target in targets:
-        for written in _WRITERS[target](root):
+        try:
+            written_paths = _WRITERS[target](root)
+        except MalformedManagedBlockError as exc:
+            typer.echo(exc.render(root), err=True)
+            raise typer.Exit(1) from exc
+        for written in written_paths:
             typer.echo(f"{target.value}: {written.relative_to(root)}")
