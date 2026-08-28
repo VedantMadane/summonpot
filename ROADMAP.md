@@ -93,7 +93,7 @@ prepared SQLAlchemy statement or fixed SQLite specification
 Target declarations will pass the bounded operation object into the endpoint—not a session, connection, or arbitrary query function:
 
 ```python
-customer=Required(
+customer = Required(
     SQLAlchemyOperation(
         statement=customer_select,
         bind={"customer_id": FromRequest("customer_id")},
@@ -101,7 +101,7 @@ customer=Required(
     )
 )
 
-receipt=Required(
+receipt = Required(
     SQLiteOperation(
         sql=cancel_order_sql,
         bind={"order_id": FromRequest("order_id")},
