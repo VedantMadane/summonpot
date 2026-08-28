@@ -32,7 +32,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/one-declaration-two-flows.png" alt="One Summonpot endpoint declaration combines trusted request bindings and exact application operations with explicit model-owned choices, producing one validated HTTP and OpenAPI response" width="960">
+  <img src="https://raw.githubusercontent.com/tugrulguner/summonpot/b9aae269a5a94d7c7b53049b66d7846f9d546520/docs/assets/one-declaration-two-flows.png" alt="One Summonpot endpoint declaration combines trusted request bindings and exact application operations with explicit model-owned choices, producing one validated HTTP and OpenAPI response" width="960">
 </p>
 
 The ellipsis is declaration syntax, not an unfinished implementation. The signature,

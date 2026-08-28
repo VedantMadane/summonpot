@@ -83,8 +83,14 @@ def test_readme_replaces_the_text_formula_with_a_png_flow_diagram():
     introduction = readme.split("## Why summonpot?", 1)[0]
     diagram = ROOT / "docs" / "assets" / "one-declaration-two-flows.png"
     source = ROOT / "docs" / "assets" / "authority-boundary.svg"
+    packaged_image = (
+        "https://raw.githubusercontent.com/tugrulguner/summonpot/"
+        "b9aae269a5a94d7c7b53049b66d7846f9d546520/"
+        "docs/assets/one-declaration-two-flows.png"
+    )
 
-    assert 'src="docs/assets/one-declaration-two-flows.png"' in introduction
+    assert f'src="{packaged_image}"' in introduction
+    assert 'src="docs/assets/one-declaration-two-flows.png"' not in introduction
     assert "typed request model\n+ fixed goal" not in introduction
     assert diagram.is_file()
     data = diagram.read_bytes()
