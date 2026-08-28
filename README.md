@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  A contract-first Python framework for combining application-owned execution and model-owned choices in one typed HTTP API.
+  A contract-first Python framework for combining application-owned execution and agent-owned choices in one typed HTTP API.
 </p>
 
 <p align="center">
