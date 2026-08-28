@@ -13,7 +13,14 @@ def test_readme_leads_with_unified_deterministic_and_agentic_flows():
 
     assert "deterministic operations and agentic decisions" in normalized_introduction
     assert "share one framework" in normalized_introduction
-    assert "every `@summon(...)` request" in introduction
+    assert (
+        "every `@summon(...)` request still uses the configured model runtime"
+        in normalized_introduction
+    )
+    assert (
+        "automatic no-model execution for fully resolved declarations remains planned"
+        in normalized_introduction
+    )
     assert "FromRequest" in introduction
     assert "AgentChoice" in introduction
     assert "Exactly(1)" in introduction
