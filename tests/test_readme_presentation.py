@@ -26,9 +26,15 @@ def test_readme_preserves_signature_hero_and_unified_framework_value():
         in normalized_introduction
     )
     assert (
-        "deterministic and agentic endpoints use the same declaration model"
+        "deterministic and agentic endpoints use the same declaration style"
         in normalized_introduction
     )
+    assert (
+        "marks the exact arguments where the agent may decide"
+        in normalized_introduction
+    )
+    assert "bounded agent loop" in normalized_introduction
+    assert "model-owned" not in normalized_introduction
     assert "request/response validation" in normalized_introduction
     assert "openapi" in normalized_introduction
 
@@ -38,12 +44,15 @@ def test_readme_states_the_current_runtime_boundary_before_positioning():
     introduction = _normalize(readme.split("## Why summonpot?", 1)[0])
 
     assert (
-        "every current production `@summon` request runs through the configured model"
-        in introduction
+        "every current production `@summon` request runs through summonpot's agent runtime, "
+        "backed by the configured provider model" in introduction
     )
     assert (
         "deterministic operations still execute as exact application code inside that runtime"
         in introduction
+    )
+    assert (
+        "the agent controls only the choices exposed by the declaration" in introduction
     )
     assert (
         "automatic no-model execution for contracts with one fully resolved operation path "
@@ -61,7 +70,7 @@ def test_readme_shows_deterministic_and_agentic_endpoints_in_one_code_block():
         1
     ].split("def build_agentic_report", 1)[0]
     agentic_path = declaration.split("def build_agentic_report", 1)[1]
-    section = readme.split("### One declaration model, both endpoint flows", 1)[
+    section = readme.split("### One declaration style, both endpoint flows", 1)[
         1
     ].split("## What ships today", 1)[0]
     normalized_section = _normalize(section)
@@ -78,17 +87,18 @@ def test_readme_shows_deterministic_and_agentic_endpoints_in_one_code_block():
         in normalized_section
     )
     assert (
-        "`/reports/agentic` uses the same declaration model but adds one explicit "
+        "`/reports/agentic` uses the same declaration style but adds one explicit "
         "`agentchoice()`" in normalized_section
     )
     assert (
-        "the configured model participates in every request, including the fully "
-        "resolved endpoint" in normalized_section
-    )
-    assert (
-        "automatic no-model execution for that declaration remains planned"
+        "the agent runtime handles every request, including the fully resolved endpoint"
         in normalized_section
     )
+    assert (
+        "direct execution without the agent runtime remains planned for that declaration"
+        in normalized_section
+    )
+    assert "model-owned operation choice" not in normalized_section
 
 
 def test_readme_replaces_the_text_formula_with_a_png_flow_diagram():
@@ -98,7 +108,7 @@ def test_readme_replaces_the_text_formula_with_a_png_flow_diagram():
     source = ROOT / "docs" / "assets" / "authority-boundary.svg"
     packaged_image = (
         "https://raw.githubusercontent.com/tugrulguner/summonpot/"
-        "bc7c2f4b321caaad9754b8ad7ef3c8defd5be886/"
+        "9d1bfd0dd0203a07f856521d5ec5d22ff510b294/"
         "docs/assets/one-declaration-two-flows.png"
     )
 
@@ -116,18 +126,17 @@ def test_readme_replaces_the_text_formula_with_a_png_flow_diagram():
         in content
     )
     assert "SUMMON APP" in content
+    assert "same declaration style" in content
     assert "DETERMINISTIC ENDPOINT" in content
     assert '@summon("/reports/deterministic")' in content
     assert "every operation argument is application-owned" in content
     assert "AGENTIC ENDPOINT" in content
     assert '@summon("/reports/agentic")' in content
     assert "AgentChoice()" in content
-    assert "the model owns only the declared semantic choice" in content
-    assert "Current runtime: both model-backed" in content
-    assert (
-        "automatic no-model execution for the fully bound endpoint remains planned"
-        in content
-    )
+    assert "the agent owns only the declared semantic choice" in content
+    assert "model-owned" not in content
+    assert "Current runtime: both use the agent runtime" in content
+    assert "direct execution for the fully bound endpoint remains planned" in content
 
 
 def test_readme_keeps_the_established_structure_without_version_history():
@@ -145,7 +154,7 @@ def test_readme_distinguishes_tool_schema_hiding_from_prompt_secrecy():
     readme = _normalize(README.read_text(encoding="utf-8"))
 
     assert "tool-schema hiding is not prompt secrecy" in readme
-    assert "other operation shapes remain on the legacy model-supplied path" in readme
+    assert "other operation shapes remain on the legacy agent-supplied path" in readme
 
 
 def test_readme_links_the_permanent_modepot_discord_from_hero_and_community():

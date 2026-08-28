@@ -32,29 +32,30 @@
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tugrulguner/summonpot/bc7c2f4b321caaad9754b8ad7ef3c8defd5be886/docs/assets/one-declaration-two-flows.png" alt="One Summonpot application declares a deterministic endpoint with application-owned operation arguments and an agentic endpoint with an explicit model-owned choice through the same typed HTTP and OpenAPI framework" width="960">
+  <img src="https://raw.githubusercontent.com/tugrulguner/summonpot/9d1bfd0dd0203a07f856521d5ec5d22ff510b294/docs/assets/one-declaration-two-flows.png" alt="One Summonpot application declares a deterministic endpoint with application-owned operation arguments and an agentic endpoint with an explicit agent-owned choice through the same typed HTTP and OpenAPI framework" width="960">
 </p>
 
 The ellipsis is declaration syntax, not an unfinished implementation. The signature,
 docstring, operations, argument bindings, and return type are the executable contract.
 `Depends(...)` and `Required(...)` attach deterministic application code. `AgentChoice()`
-marks the exact arguments where the model may decide. Deterministic and agentic endpoints
-use the same declaration model, request/response validation, routing, and OpenAPI instead of
-separate API and agent frameworks. Summonpot owns the bounded model loop, operation
+marks the exact arguments where the agent may decide. Deterministic and agentic endpoints
+use the same declaration style, request/response validation, routing, and OpenAPI instead of
+separate API and agent frameworks. Summonpot owns the bounded agent loop, operation
 enforcement, and structured output. Calling a registered declaration directly raises a
 clear error; serve the application or invoke its generated HTTP route instead.
 
 > [!IMPORTANT]
-> Every current production `@summon` request runs through the configured model.
+> Every current production `@summon` request runs through Summonpot's agent runtime,
+> backed by the configured provider model.
 > Deterministic operations still execute as exact application code inside that runtime;
-> the model controls only the choices exposed by the declaration.
+> the agent controls only the choices exposed by the declaration.
 > Automatic no-model execution for contracts with one fully resolved operation path is
 > on the [roadmap](ROADMAP.md), not shipped behavior.
 
 ## Why summonpot?
 
 A conventional API puts deterministic work in a handler. An agent-first stack starts from
-a model workflow and then wraps it in HTTP. Summonpot declares both through the same
+an agent workflow and then wraps it in HTTP. Summonpot declares both through the same
 contract-first framework, so applications keep one public API as the balance changes
 between exact operations and semantic decisions:
 
@@ -126,12 +127,12 @@ Those declarations answer the questions an API framework needs to answer:
 | What must the endpoint achieve? | The docstring |
 | What application authority may execution use? | `Depends(...)` and `Required(...)` |
 | Which inputs must come from trusted application data? | `FromRequest(...)` and other bindings |
-| Where may the model make a semantic choice? | Explicit `AgentChoice(...)` bindings |
+| Where may the agent make a semantic choice? | Explicit `AgentChoice(...)` bindings |
 | What may the endpoint return? | `ResearchResponse` |
 | Where is orchestration code? | Owned by summonpot |
 
 The request carries business data only. The endpoint goal is fixed in code. Exact
-operations remain application-owned, while the model can choose only within the authority
+operations remain application-owned, while the agent can choose only within the authority
 declared for that endpoint. A response is not accepted until every `Required(...)`
 operation has completed successfully.
 
@@ -139,23 +140,23 @@ operation has completed successfully.
 |---|---|---|---|
 | Mental model | Write a handler | Configure an agent | Declare one endpoint |
 | Deterministic work | Handler code | Usually exposed as tools | Exact application-owned operations |
-| Agentic decisions | Separate model workflow | Primary abstraction | Explicit choices in the same declaration |
+| Agentic decisions | Separate agent workflow | Primary abstraction | Explicit choices in the same declaration |
 | HTTP | Built around the handler | Added around the agent | Generated from the declaration |
 | Application authority | Held by handler code | Often assembled separately | Closed by the endpoint contract |
 | Final output | Handler convention | Provider or framework convention | Locally validated response model |
 
-### One declaration model, both endpoint flows
+### One declaration style, both endpoint flows
 
 `/reports/deterministic` binds every operation argument to validated application data; it
-contains no model-owned operation choice. `/reports/agentic` uses the same declaration
-model but adds one explicit `AgentChoice()`. Both keep typed request/response contracts, operation
-enforcement, routing, and OpenAPI under Summonpot. Today the configured model participates
-in every request, including the fully resolved endpoint; automatic no-model execution for
-that declaration remains planned.
+contains no agent-owned operation choice. `/reports/agentic` uses the same declaration
+style but adds one explicit `AgentChoice()`. Both keep typed request/response contracts,
+operation enforcement, routing, and OpenAPI under Summonpot. Today the agent runtime handles
+every request, including the fully resolved endpoint; direct execution without the agent
+runtime remains planned for that declaration.
 
 ## What ships today
 
-- **One declaration model for deterministic operations and agentic decisions**, sharing the same
+- **One declaration style for deterministic operations and agentic decisions**, sharing the same
   request, response, route, validation, and OpenAPI contract.
 - **Contract-first endpoints** with a required goal and typed request/response contracts.
 - **Closed capability sets** made from exact application-owned callables.
@@ -166,7 +167,7 @@ that declaration remains planned.
   direct `AgentChoice` arguments remain visible, one start is permitted, and `output=` is
   locally validated before success.
 - **Typed `Operation` contracts** that declare request, prior-result, context, or
-  model-chosen argument sources without expanding the endpoint API.
+  agent-chosen argument sources without expanding the endpoint API.
 - **Registration-time contract validation** that rejects missing sources, invalid result
   references, unsupported choices, and provably incompatible types before serving.
 - **Provider-neutral model selection** for OpenAI, Anthropic, Google, Groq, Mistral,
@@ -245,7 +246,7 @@ curl -X POST http://127.0.0.1:8000/review \
   -d '{"text":"The endpoint contract is surprisingly small."}'
 ```
 
-The test model returns schema-valid placeholder data. To receive a real model-generated
+The test model returns schema-valid placeholder data. To receive a real agent-generated
 answer, install a provider extra and select a provider-qualified model:
 
 ```bash
@@ -302,15 +303,15 @@ validation, and `Exactly(1)`. Ordering, idempotency, and provenance-backed final
 remain separate concerns.
 
 Capabilities do not become request-body fields or OpenAPI parameters. Their docstrings
-and annotations define the tool schema visible to the model, while their implementations
+and annotations define the tool schema visible to the agent, while their implementations
 define the real application behavior.
 
 The capability set is closed. For one required typed operation with `Exactly(1)`, the
 runtime injects `FromRequest` values, removes them and callable defaults from the operation
 tool schema, offers only direct `AgentChoice` arguments, validates the declared operation
-output, and rejects a second start. Request values still appear in the model's user message;
+output, and rejects a second start. Request values still appear in the agent's user message;
 tool-schema hiding is not prompt secrecy. Other operation shapes remain on the legacy
-model-supplied path until their execution semantics ship. Every operation must still
+agent-supplied path until their execution semantics ship. Every operation must still
 enforce authorization.
 Pass exact operations, never raw database sessions, engines, connections, cursors,
 arbitrary SQL, shell access, or ambient filesystem authority.
@@ -321,7 +322,7 @@ See the complete executable
 ## Typed operation contracts fail before serving
 
 Use `Operation` when a capability's dataflow is part of the endpoint contract rather
-than something the model should invent:
+than something the agent should invent:
 
 ```python
 from my_service.models import Customer, CustomerRequest, CustomerResponse
@@ -374,7 +375,7 @@ subclass, and Python's numeric widening permits `int` or `bool` to feed `float`.
 > covers one required `Exactly(1)` operation using `FromRequest`, direct `AgentChoice`,
 > and callable defaults. `FromResult`, `FromContext`, `after`, broader call bounds, and
 > automatic no-model paths remain planned; unsupported shapes keep their existing
-> model-supplied argument behavior.
+> agent-supplied argument behavior.
 
 ## How it works today
 
@@ -514,11 +515,11 @@ summon = Summon(
 |---|---|
 | `422` | Request validation failed. |
 | `429` | The configured usage limit or provider rate limit was exceeded. |
-| `502` | The provider failed or the model did not satisfy the endpoint contract. |
+| `502` | The provider failed or the agent did not satisfy the endpoint contract. |
 | `504` | The endpoint exceeded its timeout. |
 | `500` | Provider configuration or application capability failed. |
 
-Provider text, model output, and capability details stay in operator logs rather than
+Provider text, agent output, and capability details stay in operator logs rather than
 public error bodies.
 
 The timeout bounds how long summonpot waits. It cannot terminate a synchronous capability
@@ -622,7 +623,7 @@ executor behind it:
 
 ```text
 one fully resolved operation path  -> no-model deterministic executor
-bounded semantic choice remains    -> model-backed agentic executor
+bounded semantic choice remains    -> agentic executor
 no legal path                      -> typed deterministic error
 ```
 
@@ -631,7 +632,7 @@ The ordering, security constraints, non-goals, and shipped foundation live in
 
 ## Help summonpot grow
 
-If the endpoint-first model is useful to you:
+If the endpoint-first approach is useful to you:
 
 - [Star the repository](https://github.com/tugrulguner/summonpot) so more Python
   developers can find it.
