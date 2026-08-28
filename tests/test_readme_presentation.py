@@ -88,3 +88,18 @@ def test_readme_distinguishes_tool_schema_hiding_from_prompt_secrecy():
 
     assert "tool-schema hiding is not prompt secrecy" in readme
     assert "other operation shapes remain on the legacy model-supplied path" in readme
+
+
+def test_readme_links_the_permanent_modepot_discord_from_hero_and_community():
+    readme = README.read_text(encoding="utf-8")
+    introduction = readme.split("## Why summonpot?", 1)[0]
+    community = readme.split("## Community", 1)[1].split("## Contributing", 1)[0]
+    invite = "https://discord.gg/u3AANZr6RG"
+
+    assert readme.count(invite) == 2
+    assert invite in introduction
+    assert "Join the ModePot Discord" in introduction
+    assert '<a href="#community">Community</a>' in introduction
+    assert invite in community
+    assert "shared community for" in community
+    assert "Use GitHub issues for reproducible bugs" in community

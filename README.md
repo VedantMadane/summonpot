@@ -17,6 +17,7 @@
   <a href="https://pypi.org/project/summonpot/"><img src="https://img.shields.io/pypi/v/summonpot" alt="PyPI version"></a>
   <a href="https://pypi.org/project/summonpot/"><img src="https://img.shields.io/pypi/pyversions/summonpot" alt="Python versions"></a>
   <a href="https://github.com/tugrulguner/summonpot/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License"></a>
+  <a href="https://discord.gg/u3AANZr6RG"><img src="https://img.shields.io/badge/Discord-Join%20ModePot-5865F2?logo=discord&amp;logoColor=white" alt="Join the ModePot Discord"></a>
   <a href="https://github.com/tugrulguner/summonpot"><img src="https://img.shields.io/github/stars/tugrulguner/summonpot?style=social" alt="GitHub stars"></a>
 </p>
 
@@ -26,6 +27,7 @@
   <a href="#exact-capabilities-not-ambient-authority">Capabilities</a> ·
   <a href="#how-it-works-today">How it works</a> ·
   <a href="#examples">Examples</a> ·
+  <a href="#community">Community</a> ·
   <a href="#contributing">Contributing</a>
 </p>
 
@@ -562,6 +564,16 @@ summonpot add skills --agent codex
 Use `--path ./myproject` to target another project directory. Shared files such as
 `AGENTS.md` and `.github/copilot-instructions.md` are updated inside a managed block so
 surrounding project instructions remain intact.
+
+## Community
+
+The [ModePot Discord](https://discord.gg/u3AANZr6RG) is the shared community for
+summonpot, intpot, dexpot, and the rest of the project family. Join to discuss use cases,
+ask implementation questions, and help shape declaration-first Python frameworks.
+
+Use GitHub issues for reproducible bugs and scoped feature proposals. Use Discord for
+open-ended design discussion, early ideas, and help applying the frameworks to real
+projects.
 
 ## Contributing
 
