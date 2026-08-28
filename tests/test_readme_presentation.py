@@ -7,7 +7,7 @@ README = ROOT / "README.md"
 
 
 def test_readme_leads_with_the_enforced_authority_boundary():
-    readme = README.read_text()
+    readme = README.read_text(encoding="utf-8")
     introduction = readme.split("## Quick start", 1)[0]
     normalized_introduction = " ".join(introduction.lower().split())
 
@@ -23,7 +23,7 @@ def test_readme_leads_with_the_enforced_authority_boundary():
 
 
 def test_readme_prioritizes_adoption_over_release_history():
-    readme = README.read_text()
+    readme = README.read_text(encoding="utf-8")
     quick_start = readme.split("## Quick start", 1)[1].split("## Why summonpot?", 1)[0]
 
     assert readme.index("## Quick start") < readme.index(
@@ -38,7 +38,7 @@ def test_readme_prioritizes_adoption_over_release_history():
 
 
 def test_readme_shows_the_authority_transformation():
-    readme = README.read_text()
+    readme = README.read_text(encoding="utf-8")
     diagram = ROOT / "docs" / "assets" / "authority-boundary.svg"
 
     assert (
@@ -47,7 +47,7 @@ def test_readme_shows_the_authority_transformation():
         "docs/assets/authority-boundary.svg"
     ) in readme
     assert diagram.is_file()
-    content = diagram.read_text()
+    content = diagram.read_text(encoding="utf-8")
     assert "Validated request" in content
     assert "Model supplies" in content
     assert "Summonpot invokes" in content
@@ -56,7 +56,7 @@ def test_readme_shows_the_authority_transformation():
 
 
 def test_readme_distinguishes_tool_schema_hiding_from_prompt_secrecy():
-    readme = README.read_text()
+    readme = README.read_text(encoding="utf-8")
 
     assert "tool-schema hiding is not prompt secrecy" in readme
     assert "Other operation shapes continue to expose" in readme
