@@ -84,8 +84,11 @@ these is a hard error:
   reachable, is rejected rather than silently degraded to an untyped body. A live class
   object passed directly as the annotation resolves fine. Declaring models at module
   scope and importing them normally avoids the question entirely.
-- **Exactly one Pydantic request parameter.** Put every incoming field inside it.
-  Capability parameters are declaration-only and never become HTTP fields.
+- **Request declarations match the HTTP method.** Body-carrying methods may use
+  individual body parameters or exactly one Pydantic request model. A Pydantic model
+  must be the only request parameter; capability parameters are declaration-only and
+  never become HTTP fields. Bodyless methods use individual scalar or
+  sequences-of-scalars query parameters and reject Pydantic request models.
 - **Capabilities must be callable and bound.** A plain function, a `functools.partial`,
   a bound method, or an object with `__call__`. An unbound method is rejected, because
   nothing can supply its receiver.
@@ -211,14 +214,32 @@ Query parameters must be scalars or sequences of scalars. A mapping such as
 
 ## Running it
 
+Install the server, command-line, and chosen provider integrations explicitly. For
+Anthropic:
+
+```bash
+pip install "summonpot[serve,cli,anthropic]"
+```
+
+`serve` installs FastAPI and uvicorn, `cli` installs the `summonpot` command, and the
+provider extra installs that provider's client. Replace `anthropic` with the provider
+named by your model.
+
+For local development, bind explicitly to loopback:
+
 ```python
-summon.serve()  # 0.0.0.0:8000
-summon.serve(host="127.0.0.1", port=9000)
+summon.serve(host="127.0.0.1", port=8000)
 ```
 
 ```bash
-summonpot serve app.py                   # application variable: `summon`
+summonpot serve app.py --host 127.0.0.1 --port 8000  # variable: `summon`
 ```
+
+`Summon.serve()` defaults to `0.0.0.0`, exposing the service on every network interface.
+Endpoints do not include built-in authentication, and every reachable request can spend
+provider credit. Use `host="127.0.0.1"` for local development. Before deliberately
+exposing a service, put authentication in front of it and configure usage limits and a
+timeout.
 
 To run with no provider account at all — useful for checking routing, validation and
 capability wiring before any key exists:

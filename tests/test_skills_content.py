@@ -77,6 +77,29 @@ def test_skill_states_the_current_binding_execution_boundary():
     assert "automatic no-model execution" in body.lower()
 
 
+def test_skill_documents_supported_request_declaration_shapes():
+    body = " ".join(skill_body().split())
+    body_lower = body.lower()
+
+    assert "body-carrying methods" in body_lower
+    assert "individual body parameters" in body_lower
+    assert "exactly one Pydantic request model" in body
+    assert "bodyless methods" in body_lower
+    assert "scalar or sequences-of-scalars query parameters" in body_lower
+
+
+def test_skill_documents_runtime_extras_and_safe_network_exposure():
+    body = " ".join(skill_body().split())
+
+    assert 'pip install "summonpot[serve,cli,anthropic]"' in body
+    assert "`serve` installs FastAPI and uvicorn" in body
+    assert "`cli` installs the `summonpot` command" in body
+    assert "provider extra installs that provider's client" in body
+    assert '`host="127.0.0.1"` for local development' in body
+    assert "authentication in front" in body
+    assert "provider credit" in body
+
+
 def test_skill_python_examples_compile():
     blocks = re.findall(r"```python\n(.*?)```", skill_body(), re.DOTALL)
 

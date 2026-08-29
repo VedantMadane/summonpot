@@ -1,0 +1,1 @@
+Corrected the installed coding-agent skill to teach every supported request declaration shape, required runtime extras, and safe network exposure, and updated contributor review guidance to use isolated verification without touching user stashes.
