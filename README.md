@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  A contract-first Python framework for combining application-owned execution and agent-owned choices in one typed HTTP API.
+  A contract-first Python framework for combining application-owned execution and agent-owned choices in one typed HTTP API, with simple, fully contract-based endpoints.
 </p>
 
 <p align="center">
@@ -34,6 +34,10 @@
 <p align="center">
   <img src="https://raw.githubusercontent.com/tugrulguner/summonpot/9d1bfd0dd0203a07f856521d5ec5d22ff510b294/docs/assets/one-declaration-two-flows.png" alt="One Summonpot application declares a deterministic endpoint with application-owned operation arguments and an agentic endpoint with an explicit agent-owned choice through the same typed HTTP and OpenAPI framework" width="960">
 </p>
+
+Summonpot modernizes APIs for AI without replacing the endpoint with a separate agent
+layer. The endpoint remains the stable public abstraction while its contract combines exact
+application behavior with explicitly bounded agentic decisions.
 
 The ellipsis is declaration syntax, not an unfinished implementation. The signature,
 docstring, operations, argument bindings, and return type are the executable contract.
