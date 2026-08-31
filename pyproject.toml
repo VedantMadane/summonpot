@@ -81,6 +81,12 @@ packages = ["src/summonpot"]
 # Contributor guidance, not runtime data: it must not ship to users.
 exclude = ["**/AGENTS.md"]
 
+[tool.hatch.build.targets.sdist]
+# The wheel exclusion above does not reach the sdist: hatchling configures the
+# two targets separately, so without this the sdist carried both the root
+# AGENTS.md and src/summonpot/AGENTS.md while the wheel carried neither.
+exclude = ["**/AGENTS.md"]
+
 [tool.towncrier]
 directory = "changelog.d"
 filename = "CHANGELOG.md"
