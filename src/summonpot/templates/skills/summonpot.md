@@ -1,10 +1,16 @@
 # summonpot
 
-summonpot is an API framework where an endpoint declaration is its execution contract.
-You declare the request model, the goal, the exact capabilities, and the response model.
-The framework owns the agent loop. **The ellipsis is a complete declaration body**, not
-an implementation waiting to be written. Calling the decorated declaration directly is
-rejected; execution goes through the served endpoint.
+summonpot modernizes APIs for AI without replacing the endpoint with a separate agent
+layer. The endpoint remains the stable public abstraction while its contract combines
+exact application behavior with explicitly bounded agentic decisions. You declare the
+request model, the goal, the exact capabilities, and the response model.
+
+Every current `@summon` request runs through the provider-neutral agent runtime.
+Deterministic capabilities still execute as exact application code inside that runtime.
+Automatic no-model execution remains planned. The framework owns execution, including
+the agent loop. **The ellipsis is a complete declaration body**, not an implementation
+waiting to be written. Calling the decorated declaration directly is rejected; execution
+goes through the served endpoint.
 
 ## The endpoint shape
 

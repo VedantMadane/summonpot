@@ -77,6 +77,17 @@ def test_skill_states_the_current_binding_execution_boundary():
     assert "automatic no-model execution" in body.lower()
 
 
+def test_skill_uses_the_current_ai_api_positioning_without_claiming_planned_work():
+    body = " ".join(skill_body().split())
+
+    assert "modernizes APIs for AI" in body
+    assert "stable public abstraction" in body
+    assert "exact application behavior" in body
+    assert "explicitly bounded agentic decisions" in body
+    assert "Every current `@summon` request runs through" in body
+    assert "Automatic no-model execution remains planned" in body
+
+
 def test_skill_documents_supported_request_declaration_shapes():
     body = " ".join(skill_body().split())
     body_lower = body.lower()
