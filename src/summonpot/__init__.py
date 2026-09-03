@@ -1,4 +1,4 @@
-"""A contract-first Python framework for turning typed endpoint declarations into executable APIs."""
+"""Modernize APIs for AI with exact behavior and bounded agent-owned decisions."""
 
 from importlib.metadata import PackageNotFoundError, version
 

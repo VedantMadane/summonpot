@@ -54,8 +54,8 @@ def test_openapi_describes_the_endpoint_framework_not_an_agent_framework(mock_ru
     schema = TestClient(build_app(mock_runtime())).get("/openapi.json").json()
 
     assert schema["info"]["description"] == (
-        "A contract-first Python framework for turning typed endpoint declarations "
-        "into executable APIs."
+        "A contract-first Python framework for modernizing APIs for AI through exact "
+        "application behavior and explicitly bounded agent-owned decisions."
     )
     assert "signature-first" not in schema["info"]["description"].lower()
     assert "every endpoint is an agent" not in schema["info"]["description"].lower()
