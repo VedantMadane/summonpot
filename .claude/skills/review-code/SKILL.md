@@ -34,15 +34,29 @@ For any new rule, write the case that should still be **accepted** and run it.
 ## 3. Is the failure raised at the right time?
 
 Registration beats request time; request time beats silence. A wrong declaration should
-never reach traffic. New rules belong in `summon()` in `pot.py`.
+never reach traffic. `Summon.__call__()` in `src/summonpot/summon.py` is the registration
+entry point. Place each rule in the responsible validation layer — including capability
+normalization in `src/summonpot/tools.py` and contract checks in
+`src/summonpot/_validation.py` — and ensure the entry point invokes it before serving or
+execution.
 
 ## 4. Does the test fail without the fix?
 
-Assert it directly:
+Assert it in an **isolated worktree** so verification cannot modify the reviewer's working
+tree or any user-owned recovery state. Apply only the test diff to the base revision, then
+run the focused regression there:
 
 ```bash
-git stash push -q src/ && uv run pytest tests/ -q; git stash pop -q
+base=${BASE_REF:-origin/main}
+red_tree=$(mktemp -d)
+git worktree add --detach "$red_tree" "$base"
+git diff "$base" -- tests/ | git -C "$red_tree" apply -
+(cd "$red_tree" && uv sync --all-extras --locked && uv run pytest tests/ -q)
+git worktree remove --force "$red_tree"
 ```
+
+Use a cleanup trap when adapting this sequence for automation. Never run destructive
+verification commands in the user's active checkout.
 
 Tests here have passed for the wrong reason — one asserted `"FTER" not in text`, which
 is also true of `"AFTER"`. Another used `exec` without `dont_inherit=True`, inheriting
