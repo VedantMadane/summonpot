@@ -13,10 +13,11 @@ Pydantic request model
 
 The endpoint body is declarative and is never the handler. Request JSON carries business
 data, not an action selector. The same simple contract is designed to support deterministic
-execution when one complete path exists. Today, the agent runtime handles every request
-and limits agent-owned decisions to the choices declared by the endpoint. The typed HTTP
-endpoint stays stable as that balance changes, and execution may use only its declared
-operations.
+execution when one complete path exists. Today, the agent runtime handles every request.
+For the enforced single required `Exactly(1)` slice, it hides and injects application-owned
+arguments and leaves only declared `AgentChoice` values to the agent. Unsupported shapes
+retain legacy model-supplied argument behavior until their full semantics ship. The typed
+HTTP endpoint stays stable as that balance changes.
 
 ## Shipped foundation
 
