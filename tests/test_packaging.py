@@ -19,6 +19,10 @@ import summonpot
 
 ROOT = Path(__file__).resolve().parent.parent
 PACKAGE = ROOT / "src" / "summonpot"
+PRODUCT_DESCRIPTION = (
+    "A contract-first Python framework for modernizing APIs for AI through exact "
+    "application behavior and explicitly bounded agent-owned decisions."
+)
 
 
 def test_py_typed_marker_sits_beside_the_package_init():
@@ -57,6 +61,13 @@ def test_typed_classifier_is_declared():
         "py.typed ships but the classifier is gone; installers no longer advertise "
         "the package as typed"
     )
+
+
+def test_package_metadata_and_module_lead_with_the_ai_api_positioning():
+    metadata = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+
+    assert metadata["project"]["description"] == PRODUCT_DESCRIPTION
+    assert "Modernize APIs for AI" in (summonpot.__doc__ or "")
 
 
 def _build_config() -> dict:

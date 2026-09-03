@@ -13,6 +13,7 @@ import pytest
 
 README = Path(__file__).resolve().parent.parent / "README.md"
 ROOT = README.parent
+ROADMAP = ROOT / "ROADMAP.md"
 
 
 def _snippet_after(heading: str) -> str:
@@ -71,3 +72,14 @@ def test_declaration_surfaces_use_ellipsis_instead_of_not_implemented():
     ]
 
     assert stale == []
+
+
+def test_roadmap_scopes_the_enforced_authority_boundary():
+    roadmap = " ".join(ROADMAP.read_text(encoding="utf-8").split())
+
+    assert "Today, the agent runtime handles every request" in roadmap
+    assert "For the enforced single required `Exactly(1)` slice" in roadmap
+    assert "leaves only declared `AgentChoice` values to the agent" in roadmap
+    assert (
+        "Unsupported shapes retain legacy model-supplied argument behavior" in roadmap
+    )

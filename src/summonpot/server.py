@@ -24,8 +24,8 @@ def build_app(summon: Summon) -> Any:
     app = FastAPI(
         title=summon.name,
         description=(
-            "A contract-first Python framework for turning typed endpoint declarations "
-            "into executable APIs."
+            "A contract-first Python framework for modernizing APIs for AI through exact "
+            "application behavior and explicitly bounded agent-owned decisions."
         ),
         version=__version__,
     )

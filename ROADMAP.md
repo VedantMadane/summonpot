@@ -1,16 +1,23 @@
 # summonpot roadmap
 
-summonpot is building toward one endpoint contract:
+summonpot is modernizing APIs for AI around one endpoint contract:
 
 ```text
 Pydantic request model
 + fixed endpoint goal
-+ exact deterministic capabilities
++ exact application-owned operations
++ explicit agent-owned choices when needed
 + Pydantic response model
 = executable endpoint
 ```
 
-The endpoint body is declarative and is never the handler. Request JSON carries business data, not an action selector. The same contract can support deterministic execution when one complete path exists or agentic execution when a bounded choice remains. In either mode, execution may use only the capabilities declared by the endpoint.
+The endpoint body is declarative and is never the handler. Request JSON carries business
+data, not an action selector. The same simple contract is designed to support deterministic
+execution when one complete path exists. Today, the agent runtime handles every request.
+For the enforced single required `Exactly(1)` slice, it hides and injects application-owned
+arguments and leaves only declared `AgentChoice` values to the agent. Unsupported shapes
+retain legacy model-supplied argument behavior until their full semantics ship. The typed
+HTTP endpoint stays stable as that balance changes.
 
 ## Shipped foundation
 

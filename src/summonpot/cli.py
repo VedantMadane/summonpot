@@ -24,8 +24,8 @@ def _version_callback(value: bool) -> None:
 app = typer.Typer(
     name="summonpot",
     help=(
-        "A contract-first Python framework for turning typed endpoint declarations "
-        "into executable APIs."
+        "A contract-first Python framework for modernizing APIs for AI through exact "
+        "application behavior and explicitly bounded agent-owned decisions."
     ),
     no_args_is_help=True,
 )

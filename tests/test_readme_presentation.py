@@ -25,6 +25,7 @@ def test_readme_preserves_signature_hero_and_unified_framework_value():
         "combining application-owned execution and agent-owned choices in one typed http api"
         in normalized_introduction
     )
+    assert "summonpot modernizes apis for ai" in normalized_introduction
     assert (
         "deterministic and agentic endpoints use the same declaration style"
         in normalized_introduction

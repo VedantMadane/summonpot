@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "summonpot"
 version = "0.6.0"
-description = "A contract-first Python framework for turning typed endpoint declarations into executable APIs."
+description = "A contract-first Python framework for modernizing APIs for AI through exact application behavior and explicitly bounded agent-owned decisions."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"

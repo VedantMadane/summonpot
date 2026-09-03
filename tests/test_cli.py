@@ -29,8 +29,8 @@ def test_help_describes_the_endpoint_framework_not_an_agent_framework():
 
     assert result.exit_code == 0
     assert (
-        "A contract-first Python framework for turning typed endpoint declarations "
-        "into executable APIs."
+        "A contract-first Python framework for modernizing APIs for AI through exact "
+        "application behavior and explicitly bounded agent-owned decisions."
     ) in normalized_help
     assert "signature-first" not in normalized_help.lower()
     assert "every endpoint is an agent" not in normalized_help.lower()
