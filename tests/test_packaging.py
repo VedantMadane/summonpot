@@ -19,6 +19,8 @@ import summonpot
 
 ROOT = Path(__file__).resolve().parent.parent
 PACKAGE = ROOT / "src" / "summonpot"
+CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
+RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
 PRODUCT_DESCRIPTION = (
     "A contract-first Python framework for modernizing APIs for AI through exact "
     "application behavior and explicitly bounded agent-owned decisions."
@@ -95,6 +97,14 @@ def test_agents_guidance_is_what_is_being_excluded():
     assert (PACKAGE / "AGENTS.md").is_file()
     assert (ROOT / "CLAUDE.md").is_file()
     assert (ROOT / ".claude").is_dir()
+
+
+@pytest.mark.parametrize("workflow", [CI_WORKFLOW, RELEASE_WORKFLOW])
+def test_artifact_workflows_reject_all_contributor_guidance(workflow):
+    text = workflow.read_text(encoding="utf-8")
+
+    assert "CLAUDE.md" in text
+    assert '"/.claude/"' in text
 
 
 def test_the_consumer_type_check_pins_its_pyright():

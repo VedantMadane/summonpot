@@ -90,12 +90,28 @@ jobs:
           assert len(wheels) == 1, f"expected one wheel, found {wheels}"
           assert len(sdists) == 1, f"expected one sdist, found {sdists}"
           with zipfile.ZipFile(wheels[0]) as archive:
-              assert "summonpot/__init__.py" in archive.namelist()
+              names = archive.namelist()
+              assert "summonpot/__init__.py" in names
+              contributor_guidance = [
+                  name
+                  for name in names
+                  if name.endswith(("/AGENTS.md", "/CLAUDE.md"))
+                  or "/.claude/" in name
+              ]
+              assert not contributor_guidance, contributor_guidance
           with tarfile.open(sdists[0]) as archive:
+              names = archive.getnames()
               assert any(
                   name.endswith("/src/summonpot/__init__.py")
-                  for name in archive.getnames()
+                  for name in names
               )
+              contributor_guidance = [
+                  name
+                  for name in names
+                  if name.endswith(("/AGENTS.md", "/CLAUDE.md"))
+                  or "/.claude/" in name
+              ]
+              assert not contributor_guidance, contributor_guidance
           print(f"verified {wheels[0]} and {sdists[0]}")
           PY
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
