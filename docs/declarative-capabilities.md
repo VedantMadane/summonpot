@@ -120,9 +120,10 @@ HTTP validation hands the framework-owned validated value graph to the runtime e
 once. The transport carrier exposes separate compatibility views for custom runtimes;
 mutating those views cannot change operation inputs, and replaying a consumed transport
 carrier is rejected. The framework does not call application-defined copy hooks while
-handing values off. As with any Pydantic application validator, code that retains and
-later mutates an object it returned remains application-owned behavior rather than a
-second request input.
+handing values off. A validated value that has no JSON form appears in those views as its
+`str()` rendering, which keeps the request working without exposing the private object.
+As with any Pydantic application validator, code that retains and later mutates an object
+it returned remains application-owned behavior rather than a second request input.
 
 Output from runtime-enforced operations is validated against its declared schema without
 invoking serializers. Custom model `__init__` methods in these output schemas (including

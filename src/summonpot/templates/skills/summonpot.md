@@ -209,7 +209,9 @@ allowing it to bypass nested output validation. Use Pydantic model validators in
 HTTP request validation runs once. The adapter transfers a private, plan-bound validated
 value graph to the runtime rather than revalidating its JSON prompt representation or
 calling application-defined copy hooks. Mutable compatibility views cannot change bound
-operation inputs, and consumed transports cannot be replayed through request defaults.
+operation inputs, and consumed transports cannot be replayed through request defaults. A
+validated value with no JSON form appears in those views as its `str()` rendering rather
+than failing the request.
 Raw runtime inputs still undergo validation; ordinary request wrappers are not trusted.
 
 

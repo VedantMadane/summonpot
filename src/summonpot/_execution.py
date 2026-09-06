@@ -12,7 +12,7 @@ from typing import Any
 from weakref import ReferenceType, ref
 
 from pydantic import TypeAdapter
-from pydantic_core import SchemaValidator
+from pydantic_core import PydanticSerializationError, SchemaValidator
 
 from summonpot._output_validation import _compile_output_validator
 from summonpot.contracts import AgentChoice, FromRequest
@@ -134,6 +134,20 @@ class _ConsumedTransport:
 
 _TRANSPORT_SNAPSHOTS: dict[int, _TransportSnapshot | _ConsumedTransport] = {}
 _PUBLIC_TRANSPORT_ADAPTER = TypeAdapter(dict[str, Any])
+_NO_JSON_FORM = object()
+
+
+def _rendered_json(name: str, value: Any) -> Any:
+    """Render one value JSON-safely, or report that it has no JSON form."""
+    try:
+        # These views are best-effort renderings that fall back on their own, so
+        # a type the declared schema cannot serialize is handled here rather than
+        # reported to the application on every request.
+        return _PUBLIC_TRANSPORT_ADAPTER.dump_python(
+            {name: value}, mode="json", warnings=False
+        )[name]
+    except PydanticSerializationError:
+        return _NO_JSON_FORM
 
 
 def _public_transport_views(
@@ -142,15 +156,33 @@ def _public_transport_views(
     typed: Mapping[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Render non-authoritative carrier views without application copy hooks."""
-    public_prompt = _PUBLIC_TRANSPORT_ADAPTER.dump_python(dict(prompt), mode="json")
     adapters = {parameter.name: parameter.adapter for parameter in plan.parameters}
+
+    def render_prompt(name: str, value: Any) -> Any:
+        rendered = _rendered_json(name, value)
+        # A validated application type need not have a JSON form, and the query
+        # transport hands its Python values straight to this view. Render those
+        # the way the HTTP handler already renders non-primitive path parameters
+        # rather than failing a request the schema accepted.
+        return str(value) if rendered is _NO_JSON_FORM else rendered
 
     def render_typed(name: str, value: Any) -> Any:
         adapter = adapters.get(name)
-        if adapter is not None:
-            return adapter.dump_python(value, mode="python")
-        return _PUBLIC_TRANSPORT_ADAPTER.dump_python({name: value}, mode="python")[name]
+        rendered = (
+            adapter.dump_python(value, mode="python", warnings=False)
+            if adapter is not None
+            else _PUBLIC_TRANSPORT_ADAPTER.dump_python(
+                {name: value}, mode="python", warnings=False
+            )[name]
+        )
+        if rendered is not value or _rendered_json(name, value) is not _NO_JSON_FORM:
+            return rendered
+        # The serializer had no representation at all and handed the application
+        # object straight back. Sharing it would let this public view reach into
+        # the private graph, so render it instead of aliasing it.
+        return str(value)
 
+    public_prompt = {name: render_prompt(name, value) for name, value in prompt.items()}
     public_typed = {name: render_typed(name, value) for name, value in typed.items()}
     return public_prompt, public_typed
 
