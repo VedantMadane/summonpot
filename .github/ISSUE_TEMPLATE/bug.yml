@@ -39,11 +39,11 @@ body:
       required: true
 
   - type: input
-    id: model-provider
+    id: execution-path
     attributes:
-      label: "Model and provider"
-      description: "Name the model string and provider, or state that `SUMMONPOT_MODEL=test` reproduces the failure. Do not include credentials."
-      placeholder: "test, openai:gpt-4o-mini, or similar"
+      label: "Execution path or model and provider"
+      description: "State `Direct execution / no model resolved`, or name the model string and provider, or state that `SUMMONPOT_MODEL=test` reproduces the failure. Do not include credentials."
+      placeholder: "Direct execution / no model resolved; test; openai:gpt-4o-mini; or similar"
     validations:
       required: true
 
@@ -84,7 +84,7 @@ body:
     id: additional-context
     attributes:
       label: "Additional context"
-      description: "State whether this reproduces with the keyless test model and whether it affects registration, OpenAPI, runtime execution, or the packaged CLI."
+      description: "State whether this uses direct execution with no model resolved, reproduces with the keyless test model, and affects registration, OpenAPI, runtime execution, or the packaged CLI."
 
   - type: dropdown
     id: contribution-intent

@@ -85,12 +85,16 @@ def test_contributor_guidance_is_excluded_from_both_targets(target):
     this test names the setting so dropping it fails here first.
     """
     assert "**/AGENTS.md" in _build_config()[target].get("exclude", [])
+    assert "/CLAUDE.md" in _build_config()[target].get("exclude", [])
+    assert "/.claude" in _build_config()[target].get("exclude", [])
 
 
 def test_agents_guidance_is_what_is_being_excluded():
     """A guard on the guard: if the file is renamed, the pattern is now dead."""
     assert (ROOT / "AGENTS.md").is_file()
     assert (PACKAGE / "AGENTS.md").is_file()
+    assert (ROOT / "CLAUDE.md").is_file()
+    assert (ROOT / ".claude").is_dir()
 
 
 def test_the_consumer_type_check_pins_its_pyright():

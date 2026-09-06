@@ -49,6 +49,13 @@ carry request data. Failures return a fixed public message; the detail goes to t
 thread-affine resource — a default SQLite connection is the usual trap. This is also
 the one breaking change in 0.3.0 that surfaces under traffic rather than at import.
 
+**Keep the direct-execution predicate exact.** The shipped direct path requires a Pydantic
+request model, one required `Exactly(1)` operation, at least one `FromRequest` binding, only
+`FromRequest` or supported immutable callable defaults, and exact operation-output identity
+with the endpoint response model. Preserve one permitted start per request before application
+code. Never describe that local reservation as exactly-once completion, distributed
+deduplication, rollback, or cancellation.
+
 **`functools.wraps` is not enough to describe a capability.** It produces a usable
 schema only for a plain function; for a partial or a callable instance it leaves the
 provider reading the wrapper's own annotations against the wrong module. Describe the
@@ -61,6 +68,9 @@ In rough order of what has actually gone wrong here:
 - **Does a doc claim something the code does not do?** This project has shipped several
   of these — `stream=True`, "deterministic capabilities", a `method=` that was
   discarded. A claim is a defect.
+- **Did the direct-execution predicate widen?** Require registration, runtime, server, and
+  packaged-skill tests for every eligibility change. Agent-backed declarations must not enter
+  the direct path accidentally, and direct execution must not fall back after it starts.
 - **Does a new guard reject valid code?** Every guard added in 0.3.0 needed a
   false-positive test as well as a true-positive one. Two shipped rejecting valid input
   and were caught in review, not by tests.

@@ -26,15 +26,17 @@ def research(
 The signature defines four things:
 
 - The Pydantic request model is the JSON contract.
-- The docstring is the fixed endpoint goal.
-- Dependencies are the complete set of deterministic operations exposed to the agent.
+- The docstring is the fixed execution goal.
+- Dependencies are the complete set of deterministic operations available to execution.
 - The Pydantic return model is the required output contract.
 
 ## Dependency semantics
 
-`Depends(operation)` exposes an exact operation that the agent may call.
+`Depends(operation)` makes an exact operation available to execution. On the agent-backed
+path, the agent may call it.
 
-`Required(operation)` exposes an exact operation and prevents successful final output until that operation has completed.
+`Required(operation)` makes an exact operation available and prevents successful final
+output until that operation has completed.
 
 Required use is checked by runtime state. It is not only written into the prompt.
 
@@ -141,9 +143,10 @@ The agent receives the operation's typed callable schema—not the statement, SQ
 
 ### Arguments are constrained for the first bound runtime slice
 
-The closed set always covers *which* operations the agent may call. For one required
-`Exactly(1)` operation using `FromRequest`, direct `AgentChoice`, or callable defaults, the
-runtime now also constrains *what the model may pass*:
+The closed set always covers *which* operations execution may use. On the agent-backed path,
+the agent may call only that set. For one required `Exactly(1)` operation using
+`FromRequest`, direct `AgentChoice`, or callable defaults, the runtime now also constrains
+*what the model may pass*:
 
 - `FromRequest` receives the canonical validated request value and is absent from the model schema;
 - callable defaults are absent from the model schema and remain application-owned;

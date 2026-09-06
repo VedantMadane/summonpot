@@ -14,6 +14,9 @@ import pytest
 README = Path(__file__).resolve().parent.parent / "README.md"
 ROOT = README.parent
 ROADMAP = ROOT / "ROADMAP.md"
+CHANGELOG = ROOT / "CHANGELOG.md"
+CAPABILITY_GUIDE = ROOT / "docs" / "declarative-capabilities.md"
+REVIEWING = ROOT / "docs" / "reviewing.md"
 
 
 def _snippet_after(heading: str) -> str:
@@ -106,3 +109,38 @@ def test_roadmap_advances_after_the_narrow_no_model_slice():
     assert (
         "The broader multi-operation deterministic compiler remains planned" in roadmap
     )
+
+
+def test_public_docs_describe_one_permitted_start_not_exactly_once_execution():
+    for path in (README, CHANGELOG):
+        text = path.read_text(encoding="utf-8")
+        assert "exactly-once execution" not in text.lower()
+        assert "bound exactly-once operations" not in text.lower()
+
+    assert "one permitted start per request" in README.read_text(encoding="utf-8")
+
+
+def test_execution_overview_is_executor_neutral():
+    readme = " ".join(README.read_text(encoding="utf-8").split())
+    capability_guide = " ".join(CAPABILITY_GUIDE.read_text(encoding="utf-8").split())
+
+    assert "Request data becomes validated execution input" in readme
+    assert "available to execution" in capability_guide
+    assert "On the agent-backed path" in capability_guide
+
+
+def test_reviewing_distinguishes_shipped_direct_execution_from_planned_work():
+    reviewing = " ".join(REVIEWING.read_text(encoding="utf-8").split())
+
+    assert "single-operation direct execution has shipped" in reviewing
+    assert "Broader model-free execution" in reviewing
+    assert "remains planned" in reviewing
+
+
+def test_readme_states_current_python_support_without_release_candidate_language():
+    readme = README.read_text(encoding="utf-8")
+
+    assert "Python 3.11 through 3.13" in readme
+    assert "This source revision" not in readme
+    assert "newly built artifacts" not in readme
+    assert "already-published packages" not in readme
