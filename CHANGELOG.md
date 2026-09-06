@@ -10,6 +10,37 @@ release assembles them here — run `make changelog-draft` to preview them.
 
 <!-- towncrier release notes start -->
 
+## [0.7.0] - 2026-09-05
+
+### Added
+
+- Ship the PEP 561 `py.typed` marker in the wheel and source distribution, so type checkers honour summonpot's inline annotations for an installed package rather than only for a source checkout. CI now verifies the marker in both artifacts and type-checks a small consumer against the installed wheel. ([#77](https://github.com/tugrulguner/summonpot/issues/77))
+- Path placeholders in a route now bind from the URL on body-carrying methods (`POST`, `PUT`, `PATCH`), not just on bodyless ones. A `{name}` placeholder must match exactly one required scalar parameter; that parameter is exposed as an OpenAPI path parameter and excluded from the generated request body model, so the URL is the single authority for it and a conflicting body field can no longer win. A placeholder with no matching parameter, a repeated placeholder, an optional path parameter, or a non-scalar one now fails at import time. When the URL owns every declared parameter the route now carries no request body at all, so it is callable with nothing but its path segments. A path parameter may itself be called `body`: the synthetic request-body parameter steps aside rather than colliding with it, so a route such as `/items/{body}` builds instead of failing application startup. Placeholders are matched exactly as written and are no longer stripped, so a non-canonical spelling like `/items/{ item_id }` is rejected as the malformed declaration it is rather than silently registering under a name the served route does not use. ([#78](https://github.com/tugrulguner/summonpot/issues/78))
+- Execute one fully resolved required `Exactly(1)` operation directly when the endpoint uses a Pydantic request model, it has at least one validated-request binding, uses only validated request values or immutable identity-stable callable defaults, and its output exactly matches the endpoint response model, without resolving or constructing a provider model.
+- Runtime-enforced bound operations with trusted request injection, model-visible choices, exactly-once execution, and locally validated output.
+
+### Changed
+
+- `Runtime(retries=...)` now validates its argument during construction instead of storing it unchecked. A float or string previously survived construction and endpoint registration, then failed on the first HTTP request as `AttributeError: 'float' object has no attribute 'copy'` from inside agent construction, which the server returned as an unexplained 500; negative and boolean values reached successful requests while meaning nothing. Non-integers now raise `TypeError` and negative integers `ValueError`, both naming `retries` and the accepted range. The `TypeError` names only the offending type, never the value it was given, so a configuration value holding a credential is not copied into startup logs and a value whose `__repr__` raises still gets the documented error; a negative integer still reports its count. `bool` is rejected despite being an `int` subclass. `retries=0`, `retries=1` and the default are unchanged. ([#93](https://github.com/tugrulguner/summonpot/issues/93))
+- Add structured contributor onboarding with issue-backed or generated orphan changelog fragments.
+- Clarified the README with separate deterministic and agentic endpoint declarations in one code example, aligned the visual diagram with those two paths, and used agent-oriented language for agentic ownership and decisions.
+- Clarify that summonpot modernizes APIs through simple contract-based endpoints that combine deterministic operations with bounded agentic decisions.
+- Declare the tested Python support range as 3.11–3.13 so installers do not select Summonpot on Python 3.14 before its annotation compatibility work lands.
+- README presentation now leads with one declaration for deterministic operations and agentic decisions, with a runnable bound-authority quick start and execution diagram.
+- Replaced the text-heavy endpoint formula with a rendered PNG diagram and showed deterministic application work and agentic choice explicitly in one endpoint code example.
+- Resequence the roadmap around the researched single-operation deterministic walking skeleton before multi-operation result chains, broader authority sources, and database adapters.
+- Restored the established README, removed version-specific release and migration prose, strengthened the introduction around deterministic application operations and agentic decisions sharing one endpoint declaration, and added the permanent ModePot Discord community links.
+
+### Fixed
+
+- Reject malformed managed-block markers in `summonpot add skills` instead of silently appending a second block to shared instruction files (`AGENTS.md`, `.github/copilot-instructions.md`). ([#80](https://github.com/tugrulguner/summonpot/issues/80))
+- Close direct-execution serializer and mutable-default trust gaps; preserve scalar endpoint defaults and document the Pydantic request-model requirement. Revalidate output from its declared schema without invoking serializers, preserving canonical aliases and `Any` payloads. Validate colliding extra fields separately so they cannot overwrite declared fields, while retaining valid extras. Require Pydantic >=2.13.5,<2.14 and pydantic-core >=2.46.5,<2.47 for the tested version-sensitive validator integration; older Pydantic installations must upgrade. Correct the root contributor guidance to describe the shipped direct path. Reject custom model initializers in runtime-enforced output schemas at registration instead of allowing a nested-validation bypass. Preserve a plan-bound validated HTTP request snapshot so validation aliases remain valid and request validators do not run twice.
+- Corrected the installed coding-agent skill and contributor guidance to describe Summonpot's AI API modernization position, supported request declarations, runtime extras, safe network exposure, and the narrow shipped direct-execution boundary while keeping unsupported declarations agent-backed. The contributor-file changes do not alter the installed API or require a user migration.
+- Read and write files as UTF-8 instead of the locale encoding. On Windows, where `locale.getpreferredencoding()` is cp1252, `summonpot add skills` decoded the packaged skill as cp1252 and held mojibake in memory, and a locale that cannot represent the skill's characters at all — ASCII, as a POSIX `LC_ALL=C` child reports — failed the write outright. Every `Path.read_text()` and `Path.write_text()` call now passes `encoding="utf-8"` explicitly, which also makes the tests portable across locales.
+
+  Updating the managed block in a shared file no longer rewrites the line endings of the content around it. Both sides of that read-modify-write used universal-newline translation, which folded every `\r\n` to `\n` on read and expanded every `\n` to `os.linesep` on write, so a command scoped to one fenced region produced a whole-file diff: CRLF to LF on macOS and Linux, LF to CRLF on Windows. The file is now read and written with translation off, and the managed block itself is written with whatever line ending the file already uses.
+
+
 ## [0.6.0] - 2026-08-24
 
 ### Upgrading from 0.5.0

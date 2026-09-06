@@ -63,9 +63,10 @@ declaration body and rejects direct Python calls to registered declarations. The
 boundary is unchanged from 0.5.0: typed bindings, ordering, and call bounds are validated
 and stored, but the current runtime does not inject or enforce them yet.
 
-### Current development boundary
+### 0.7.0 boundary
 
-The bound runtime enforces one required `Exactly(1)` operation whose inputs come from
+Version 0.7.0 activates the first typed operation bindings at runtime. The bound runtime
+enforces one required `Exactly(1)` operation whose inputs come from
 `FromRequest`, direct `AgentChoice`, or callable defaults. It snapshots the validated
 declaration at registration, hides trusted/defaulted arguments from the model, reserves the
 only permitted start before application code, and validates the operation output before
@@ -84,8 +85,8 @@ matching the endpoint response model. It runs without resolving, constructing, o
 multi-operation deterministic compiler remains planned.
 
 Multi-operation graphs, `FromResult`, `FromContext`, `after`, broader call bounds, and
-broader no-model execution remain planned. Those unsupported shapes retain the 0.6.0
-model-supplied argument behavior until their full semantics ship.
+broader no-model execution remain planned. Those unsupported shapes remain on the agent
+runtime until their full semantics ship.
 
 ## Next milestones
 

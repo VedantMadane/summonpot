@@ -14,7 +14,7 @@ body:
     attributes:
       label: "Summonpot version or source revision"
       description: "Run `summonpot --version`, or provide the exact Git commit when testing current source."
-      placeholder: "0.6.0 or 4819a8bc..."
+      placeholder: "Output of summonpot --version, or an exact commit SHA"
     validations:
       required: true
 
