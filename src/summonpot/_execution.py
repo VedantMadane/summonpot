@@ -127,7 +127,32 @@ class _TransportSnapshot:
     typed: dict[str, Any]
 
 
-_TRANSPORT_SNAPSHOTS: dict[int, _TransportSnapshot] = {}
+@dataclass(frozen=True, slots=True)
+class _ConsumedTransport:
+    reference: ReferenceType[_TransportRequest]
+
+
+_TRANSPORT_SNAPSHOTS: dict[int, _TransportSnapshot | _ConsumedTransport] = {}
+_PUBLIC_TRANSPORT_ADAPTER = TypeAdapter(dict[str, Any])
+
+
+def _public_transport_views(
+    plan: _CompiledEndpoint,
+    prompt: Mapping[str, Any],
+    typed: Mapping[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Render non-authoritative carrier views without application copy hooks."""
+    public_prompt = _PUBLIC_TRANSPORT_ADAPTER.dump_python(dict(prompt), mode="json")
+    adapters = {parameter.name: parameter.adapter for parameter in plan.parameters}
+
+    def render_typed(name: str, value: Any) -> Any:
+        adapter = adapters.get(name)
+        if adapter is not None:
+            return adapter.dump_python(value, mode="python")
+        return _PUBLIC_TRANSPORT_ADAPTER.dump_python({name: value}, mode="python")[name]
+
+    public_typed = {name: render_typed(name, value) for name, value in typed.items()}
+    return public_prompt, public_typed
 
 
 def _validated_transport_request(
@@ -136,13 +161,17 @@ def _validated_transport_request(
     *,
     typed: Mapping[str, Any],
 ) -> _RequestValues:
-    """Seal FastAPI-validated values for this exact compiled route plan.
+    """Transfer FastAPI-validated values to this exact compiled route plan.
 
     Only the HTTP adapter calls this factory after validation. Neither an ordinary
     _RequestValues nor the envelope's mutable views is proof of validation. Keep
-    detached data privately, and release it when the envelope leaves scope.
+    the framework-owned source graphs private, and release them after one use.
     """
-    request = _TransportRequest(prompt, typed=typed)
+    # The envelope carries compatibility views for custom runtimes, but never the
+    # authoritative graph. Its values are serializer-produced representations;
+    # only the private one-shot snapshot proves prior validation.
+    public_prompt, public_typed = _public_transport_views(plan, prompt, typed)
+    request = _TransportRequest(public_prompt, typed=public_typed)
     identity = id(request)
 
     def discard(reference: ReferenceType[_TransportRequest]) -> None:
@@ -151,7 +180,7 @@ def _validated_transport_request(
             _TRANSPORT_SNAPSHOTS.pop(identity, None)
 
     _TRANSPORT_SNAPSHOTS[identity] = _TransportSnapshot(
-        ref(request, discard), plan, deepcopy(dict(prompt)), deepcopy(dict(typed))
+        ref(request, discard), plan, dict(prompt), dict(typed)
     )
     return request
 
@@ -399,9 +428,15 @@ def _prepare_request(
     """Validate raw external input once, or consume a plan-bound transport snapshot."""
     snapshot = _TRANSPORT_SNAPSHOTS.get(id(params))
     if snapshot is not None and snapshot.reference() is params:
+        if isinstance(snapshot, _ConsumedTransport):
+            raise ValueError("Validated request transport was already consumed")
         if snapshot.plan is not plan:
             raise ValueError("Validated request belongs to a different endpoint plan")
-        return _RequestValues(deepcopy(snapshot.prompt), typed=deepcopy(snapshot.typed))
+        # Transfer the already validated graph exactly once. Copying arbitrary
+        # application values here is both unnecessary and unsafe: __deepcopy__
+        # is application code and can replace or mutate validated values.
+        _TRANSPORT_SNAPSHOTS[id(params)] = _ConsumedTransport(snapshot.reference)
+        return _RequestValues(snapshot.prompt, typed=snapshot.typed)
 
     if plan.input_adapter is not None:
         validated = plan.input_adapter.validate_python(deepcopy(dict(params)))

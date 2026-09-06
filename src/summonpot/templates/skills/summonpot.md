@@ -206,9 +206,11 @@ Runtime-enforced output schemas must not define a custom model `__init__`, inclu
 nested models. Registration rejects that unsupported constructor path rather than
 allowing it to bypass nested output validation. Use Pydantic model validators instead.
 
-HTTP request validation runs once. The server transfers a detached, plan-bound validated
-snapshot to the runtime rather than revalidating its JSON prompt representation. Raw
-runtime inputs still undergo validation; ordinary request wrappers are not trusted.
+HTTP request validation runs once. The adapter transfers a private, plan-bound validated
+value graph to the runtime rather than revalidating its JSON prompt representation or
+calling application-defined copy hooks. Mutable compatibility views cannot change bound
+operation inputs, and consumed transports cannot be replayed through request defaults.
+Raw runtime inputs still undergo validation; ordinary request wrappers are not trusted.
 
 
 Supported immutable callable defaults are exact built-in `None`, `bool`, `int`,

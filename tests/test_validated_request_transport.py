@@ -235,6 +235,55 @@ def test_scalar_http_validator_runs_once(method: str, path: str):
     assert validations == [3]
 
 
+def test_query_transport_does_not_invoke_copy_hooks():
+    copy_calls: list[list[int]] = []
+
+    class CopyInvalidates(list[int]):
+        def __deepcopy__(self, memo):
+            copy_calls.append(list(self))
+            return ["not-an-int"]
+
+    def convert(value: list[int]) -> list[int]:
+        return CopyInvalidates(value)
+
+    received: list[Any] = []
+
+    def apply(value: list[int]) -> Result:
+        received.append(value)
+        return Result(value=len(value))
+
+    turns = 0
+
+    def model(messages, info):
+        nonlocal turns
+        turns += 1
+        if turns == 1:
+            return ModelResponse(parts=[ToolCallPart("apply", {})])
+        return ModelResponse(
+            parts=[ToolCallPart(info.output_tools[0].name, {"value": 1})]
+        )
+
+    operation = Operation(apply, bind={"value": FromRequest("value")}, output=Result)
+    summon = Summon("query-copy-hook")
+    summon._runtime = Runtime(model=FunctionModel(model))
+
+    @summon("/query-copy-hook", method="GET")
+    def endpoint(
+        value: Annotated[list[int], AfterValidator(convert)],
+        result=Required(operation, calls=Exactly(1)),
+    ) -> Result:
+        """Use the validated query value without application copy hooks."""
+        ...
+
+    response = TestClient(build_app(summon)).get(
+        "/query-copy-hook", params={"value": "3"}
+    )
+    assert response.status_code == 200, response.text
+    assert received == [[3]]
+    assert isinstance(received[0], CopyInvalidates)
+    assert copy_calls == []
+
+
 @pytest.mark.parametrize("wrapper", [_RequestValues, _TransportRequest])
 def test_manually_constructed_carrier_is_not_trusted(wrapper):
     class Request(BaseModel):
@@ -261,6 +310,8 @@ def test_transport_carrier_cannot_cross_plans():
     with pytest.raises(ValueError, match="different endpoint plan"):
         asyncio.run(Runtime().call(second.endpoints[0], carrier))
     assert calls == []
+    result = asyncio.run(Runtime().call(first.endpoints[0], carrier))
+    assert result == Result(value=3)
 
 
 def test_transport_snapshot_detaches_all_mutable_public_views():
@@ -272,15 +323,32 @@ def test_transport_snapshot_detaches_all_mutable_public_views():
     assert plan is not None
     source = {"value": [3]}
     carrier = _validated_transport_request(plan, source, typed=source)
-    source["value"].append(4)
     carrier["value"].append(5)
     carrier.typed["value"].append(6)
     carrier.typed = {"value": [999]}
     prepared = _prepare_request(plan, carrier)
     assert prepared.typed["value"] == [3]
     assert prepared["value"] == [3]
-    prepared.typed["value"].append(7)
-    assert _prepare_request(plan, carrier).typed["value"] == [3]
+
+
+def test_transport_snapshot_is_consumed_once():
+    from summonpot._execution import _TRANSPORT_SNAPSHOTS
+
+    class Request(BaseModel):
+        value: int = 7
+
+    summon = service(Request, [])
+    plan = _registered_plan(summon.endpoints[0])
+    assert plan is not None
+    carrier = _validated_transport_request(plan, {"value": 3}, typed={"value": 3})
+    identity = id(carrier)
+    assert _prepare_request(plan, carrier).typed["value"] == 3
+    carrier.clear()
+    with pytest.raises(ValueError, match="already consumed"):
+        _prepare_request(plan, carrier)
+    assert identity in _TRANSPORT_SNAPSHOTS
+    del carrier
+    assert identity not in _TRANSPORT_SNAPSHOTS
 
 
 def test_untrusted_scalar_carrier_uses_external_mapping():
@@ -321,6 +389,79 @@ def test_http_carrier_mutation_cannot_change_validated_operation_input(monkeypat
     assert response.status_code == 200
     assert response.json() == {"value": 3}
     assert calls == [3]
+
+
+def test_http_transport_does_not_replace_values_through_copy_hooks():
+    copy_calls: list[list[int]] = []
+
+    class CopyInvalidates(list[int]):
+        def __deepcopy__(self, memo):
+            copy_calls.append(list(self))
+            return ["not-an-int"]
+
+    class Request(BaseModel):
+        value: Annotated[
+            list[int], AfterValidator(lambda value: CopyInvalidates(value))
+        ]
+
+    received: list[Any] = []
+
+    def apply(value: list[int]) -> Result:
+        received.append(value)
+        return Result(value=len(value))
+
+    operation = Operation(apply, bind={"value": FromRequest("value")}, output=Result)
+    summon = Summon("copy-hook", model="invalid-provider:no-model")
+
+    @summon("/copy-hook")
+    def endpoint(
+        request: Request, result=Required(operation, calls=Exactly(1))
+    ) -> Result:
+        """Use the validated value without application copy hooks."""
+        ...
+
+    response = TestClient(build_app(summon)).post("/copy-hook", json={"value": [3]})
+    assert response.status_code == 200, response.text
+    assert response.json() == {"value": 1}
+    assert received == [[3]]
+    assert isinstance(received[0], CopyInvalidates)
+    assert copy_calls == []
+
+
+def test_http_transport_does_not_mutate_values_through_copy_hooks():
+    copy_calls: list[list[int]] = []
+
+    class CopyMutates(list[int]):
+        def __deepcopy__(self, memo):
+            copy_calls.append(list(self))
+            self.append(999)
+            return self
+
+    class Request(BaseModel):
+        value: Annotated[list[int], AfterValidator(lambda value: CopyMutates(value))]
+
+    received: list[Any] = []
+
+    def apply(value: list[int]) -> Result:
+        received.append(value)
+        return Result(value=len(value))
+
+    operation = Operation(apply, bind={"value": FromRequest("value")}, output=Result)
+    summon = Summon("copy-hook", model="invalid-provider:no-model")
+
+    @summon("/copy-hook")
+    def endpoint(
+        request: Request, result=Required(operation, calls=Exactly(1))
+    ) -> Result:
+        """Use the validated value without application copy hooks."""
+        ...
+
+    response = TestClient(build_app(summon)).post("/copy-hook", json={"value": [3]})
+    assert response.status_code == 200, response.text
+    assert response.json() == {"value": 1}
+    assert received == [[3]]
+    assert isinstance(received[0], CopyMutates)
+    assert copy_calls == []
 
 
 def test_http_cannot_claim_validated_provenance():
