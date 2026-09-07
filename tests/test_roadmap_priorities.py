@@ -40,3 +40,28 @@ def test_chain_failure_semantics_are_not_deferred_to_adapters():
         "Execution remains sequential initially",
     ):
         assert requirement in chain
+
+
+def test_agent_context_track_preserves_declarative_authority():
+    text = ROADMAP.read_text(encoding="utf-8")
+    track = " ".join(
+        text.split("## Agent execution and context track", 1)[1]
+        .split("## Non-goals", 1)[0]
+        .split()
+    )
+    for requirement in (
+        "endpoint body remains `...`",
+        "not yet shipped Summonpot features",
+        "After milestone 1's boundary hardening",
+        "Only after authenticated application context (milestone 4)",
+        "Keep stateless requests the default",
+        "compaction summaries non-authoritative",
+        "Search does not add capabilities",
+        "Charge child and summarizer work to the same parent budget",
+        "model judges may supplement semantic-quality evaluation",
+        "No claimed performance gain ships without measured evidence",
+    ):
+        assert requirement in track
+    research = ROADMAP.parent / "docs" / "agent-context-research.md"
+    assert research.is_file()
+    assert "2026-09-07" in research.read_text(encoding="utf-8")

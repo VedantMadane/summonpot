@@ -291,6 +291,118 @@ workflow persistence:
 
 Summonpot—not the caller or model—will choose the smallest eligible harness. Changing the harness must never grant additional capabilities.
 
+## Agent execution and context track
+
+This planned track complements the milestones above; it does not turn Summonpot into an
+agent-configuration framework. The endpoint body remains `...`: request model, fixed goal,
+declared operations and bindings, and response model are still the whole executable contract.
+No public `Agent`, graph, planner, memory-manager object, or provider-specific context flags
+are required. Reusable application resources are referenced through typed declarations;
+Summonpot owns the internal loop, context policy, and execution selection.
+
+Research checked on **2026-09-07**, including current provider documentation and tagged
+upstream releases, is recorded in [Agent and context research](docs/agent-context-research.md).
+The techniques below are not yet shipped Summonpot features. Upstream availability does not
+establish compatibility with our pinned dependencies or authority guarantees.
+
+### A. Budgeted working context and bounded agent execution
+
+After milestone 1's boundary hardening, improve the existing agent path without waiting for
+a general graph or durable executor:
+
+- Keep authenticated application context, canonical request/result state, model-visible
+  working context, and persistent memory separate. `FromContext` is not a prompt-history
+  or memory-injection feature. Secrets and the invocation ledger never enter model summaries.
+- Assemble only the relevant, permitted evidence for the next legal decision. Start with
+  bounded projections, pagination, and scoped retrieval of declared operation results;
+  preserve exact canonical values for `FromResult` and producer-constrained choices.
+- Put oversized evidence behind request-scoped opaque handles with bounded reads, provenance,
+  expiry, and access checks. No arbitrary filesystem or network authority is added. Do not
+  re-execute an effectful operation to recover an evicted tool result.
+- Budget the complete model request, including instructions, schemas, retrieved evidence,
+  and output/reasoning headroom. Use provider usage and verified deployment limits; unknown
+  limits require a conservative operator-approved budget, not a guessed model capacity.
+- Escalate from cheap context selection and deduplication to tool-result clearing and then
+  summarization only when needed. Preserve tool-call/result pairing, recent unresolved work,
+  exact evidence identifiers, and a protected copy of the fixed contract. If the protected
+  context cannot fit, return a bounded failure rather than silently dropping constraints.
+- Keep compaction summaries non-authoritative. They cannot reset call reservations, invent
+  successful operations, overwrite results, or supply authorization. Preserve exact results
+  separately and test repeated compaction and recovery of omitted evidence.
+- Detect repeated non-progressing model/tool calls and stop within shared turn, token, cost,
+  and deadline limits. Extra reasoning or model escalation is internal, operator-bounded,
+  evidence-gated, and never restarts effects or changes the endpoint contract.
+- Keep a stable contract/schema prefix where provider caching supports it. Treat prompt-cache
+  reuse as a cost optimization, never as cross-request memory or authorization.
+
+### B. Readiness-aware tool discovery and evidence selection
+
+Build on validated result chains and producer-constrained choices (milestones 2–3):
+
+- Expose or progressively discover only operations already declared and currently legal to
+  invoke. Search does not add capabilities, select providers, or authorize an invocation.
+  Use eager schemas for small capability sets; defer discovery only when evaluations justify it.
+- Recheck readiness, bindings, choice membership, and call limits locally on every invocation,
+  including after compaction or provider changes. Re-advertise permitted tools when compaction
+  removes their disclosure; never infer availability from stale cached model history.
+- Prefer just-in-time retrieval through declared capabilities over loading entire corpora.
+  Retrieved text and model-written plans remain untrusted evidence, not executable instructions.
+  Retrieval/reranking is replaceable application capability behavior, not a mandatory vector store.
+- Use provider-native compaction/search only behind a tested internal adapter. Keep a portable
+  path; opaque provider state cannot replace server-owned history or be assumed portable across
+  providers. Client-supplied summaries cannot erase authoritative server state.
+
+### C. Optional scoped continuity and persistent memory
+
+Only after authenticated application context (milestone 4), and only for endpoints whose
+contract declares continuity or memory access:
+
+- Keep stateless requests the default. Resolve session and memory scope from authenticated
+  application state; a client identifier is never sufficient authorization. Isolate tenants,
+  users, endpoints, and contract versions, including storage, caches, and retrieval indexes.
+- Declare exact memory read/write capabilities with typed records, provenance, freshness,
+  retention/deletion rules, and bounded retrieval. Require concurrency-safe updates and
+  idempotent writes. Separate read authority from permission to save a model-authored note.
+- Label model-authored memories and summaries as untrusted. Corrections and contradictory
+  evidence must supersede stale notes; do not promote remembered text into instructions,
+  credentials, policy, or proof that an operation completed.
+- Keep conversation persistence, memory storage, and durable effect replay distinct. Restoring
+  a conversation never authorizes replaying a write. No automatic global notebook, hidden
+  cross-user personalization, or model-driven changes to the endpoint's fixed goal.
+
+### D. Isolated delegation and advanced execution experiments
+
+After shared budgets, readiness, and context isolation are proven, evaluate delegation for
+workloads where it outperforms a single bounded loop:
+
+- Derive child tasks from the parent's fixed goal and declared capabilities. Give each child
+  a minimal context projection, a subset of authority, and typed evidence-backed output;
+  children cannot discover undeclared tools or inherit ambient parent credentials.
+- Charge child and summarizer work to the same parent budget while enforcing per-child caps,
+  depth, total spawned tasks, concurrency, and an absolute deadline. Reserve budget before
+  dispatch and account for in-flight overshoot. A child timeout or summary is not proof that
+  an external effect was cancelled or completed. Async tool execution requires a final-output
+  barrier over pending effects, late-result handling, and explicit cancellation semantics;
+  steering cannot change the fixed goal, undo effects, or bypass these checks.
+- Verify returned evidence before accepting success. Default to read-only isolated exploration;
+  effects still pass through the shared invocation kernel and reservations.
+- Keep recursive context processing, model-generated code orchestration, learned memory, and
+  multi-agent swarms as benchmark-gated experiments, not default architecture. No generated
+  code may bypass declared bindings, output validation, or call limits; no shell or general
+  workspace is introduced merely to reduce tokens.
+
+### Evaluation gates for every slice
+
+Compare against the existing single-agent path on representative endpoint tasks. Require
+contract and side-effect correctness first; then measure task success, exact identifier and
+constraint retention, evidence retrieval, repeated calls, context occupancy, model/summarizer/
+child tokens, cache reuse, latency, and cost. Include long runs, repeated compaction, changing
+facts, oversized results, budget exhaustion, cross-tenant isolation, prompt injection in
+retrieval and memory, and supported-provider parity. Use deterministic assertions for authority
+and effects; model judges may supplement semantic-quality evaluation, never replace those checks.
+Keep telemetry payload-redacted and version the contract, model, and internal context policy
+for reproducible comparisons. No claimed performance gain ships without measured evidence.
+
 ## Non-goals
 
 - Requiring users to configure agent graphs, chains, planners, or framework-specific agents.

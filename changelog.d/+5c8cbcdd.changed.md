@@ -1,1 +1,1 @@
-Prioritize enforce-or-reject contracts and input/output hardening in the roadmap; require failure semantics with result chains before broader execution and database adapters.
+Prioritize enforce-or-reject contracts and input/output hardening in the roadmap; require failure semantics with result chains before broader execution and database adapters. Add a source-backed agent/context track for budgeted working context, scoped tool discovery and memory, bounded delegation, and evaluation gates while preserving body-free endpoint contracts.
