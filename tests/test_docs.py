@@ -91,10 +91,12 @@ def test_roadmap_advances_after_the_narrow_no_model_slice():
     roadmap = " ".join(ROADMAP.read_text(encoding="utf-8").split())
 
     shipped_direct = roadmap.index("single-operation deterministic execution")
-    result_chain = roadmap.index("### 1. Validated result chains")
-    database = roadmap.index("### 5. Exact database operations")
+    hardening = roadmap.index("### 1. Contract enforcement and input/output hardening")
+    result_chain = roadmap.index("### 2. Validated result chains and failure semantics")
+    compiler = roadmap.index("### 6. Broader deterministic execution compiler")
+    database = roadmap.index("### 7. Exact database operations")
 
-    assert shipped_direct < result_chain < database
+    assert shipped_direct < hardening < result_chain < compiler < database
     assert "exactly one required `Exactly(1)` operation" in roadmap
     assert "at least one `FromRequest` binding" in roadmap
     assert (
