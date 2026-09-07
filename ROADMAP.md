@@ -300,8 +300,6 @@ No public `Agent`, graph, planner, memory-manager object, or provider-specific c
 are required. Reusable application resources are referenced through typed declarations;
 Summonpot owns the internal loop, context policy, and execution selection.
 
-Research checked on **2026-09-07**, including current provider documentation and tagged
-upstream releases, is recorded in [Agent and context research](docs/agent-context-research.md).
 The techniques below are not yet shipped Summonpot features. Upstream availability does not
 establish compatibility with our pinned dependencies or authority guarantees.
 

@@ -62,6 +62,3 @@ def test_agent_context_track_preserves_declarative_authority():
         "No claimed performance gain ships without measured evidence",
     ):
         assert requirement in track
-    research = ROADMAP.parent / "docs" / "agent-context-research.md"
-    assert research.is_file()
-    assert "2026-09-07" in research.read_text(encoding="utf-8")
