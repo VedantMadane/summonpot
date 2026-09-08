@@ -18,6 +18,8 @@ def test_hardening_is_planned_and_precedes_execution_expansion():
     for requirement in (
         "reject the unsupported declaration before serving",
         "Adding a second capability must not remove enforcement",
+        "invalid source rejection",
+        "unsupported runtime call-bound rejection",
         "receiving operation constraints",
         "render model input only when agent execution needs it",
         "duplicate JSON keys",
@@ -25,6 +27,47 @@ def test_hardening_is_planned_and_precedes_execution_expansion():
         "a copy-hook fix alone is not completion of the transport boundary",
     ):
         assert requirement in hardening
+
+
+def test_count_type_validation_is_shipped_not_future_runtime_enforcement():
+    text = " ".join(ROADMAP.read_text(encoding="utf-8").split())
+    shipped, planned = text.split("## Next milestones", 1)
+    hardening = planned.split("### 2.", 1)[0]
+    for requirement in (
+        "Construction-time validation in `CallBounds`, `Exactly`, `AtLeast`, `AtMost`, and `Between`",
+        "non-negative built-in integer counts",
+        "excluding booleans, fractions, and non-finite values",
+        "does not imply broader runtime call-bound enforcement",
+    ):
+        assert requirement in shipped
+        assert requirement not in hardening
+    assert "Construction-time count-type validation is already shipped" in hardening
+    assert "broader runtime enforcement follows in milestone 5" in hardening
+    assert "invalid source/count rejection" not in planned
+
+
+def test_context_slices_require_their_actual_execution_prerequisites():
+    text = " ".join(ROADMAP.read_text(encoding="utf-8").split())
+    basic = text.split("#### A1.", 1)[1].split("#### A2.", 1)[0]
+    results = text.split("#### A2.", 1)[1].split("### B.", 1)[0]
+    assert "After milestone 1's boundary hardening" in basic
+    assert "without waiting for milestones 2\N{EN DASH}3" in basic
+    assert "Budget the complete model request" in basic
+    assert "Keep canonical request state and the invocation ledger separate" in basic
+    assert "Defer result eviction and result-backed summarization to A2" in basic
+    assert (
+        "Only after validated result chains and producer-constrained choices (milestones 2\N{EN DASH}3)"
+        in results
+    )
+    for requirement in (
+        "scoped retrieval of declared operation results",
+        "preserve exact canonical values for `FromResult` and producer-constrained choices",
+        "recover an evicted tool result",
+        "compaction summaries non-authoritative",
+        "recovery of omitted evidence",
+    ):
+        assert requirement in results
+        assert requirement not in basic
 
 
 def test_chain_failure_semantics_are_not_deferred_to_adapters():

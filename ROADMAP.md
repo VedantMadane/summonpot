@@ -45,6 +45,10 @@ The current release line provides:
   callable defaults, and the operation output is exactly the endpoint response model:
   Summonpot executes directly without resolving or constructing a model.
 - Declarative call bounds and ordering references without adding decorator configuration.
+- Construction-time validation in `CallBounds`, `Exactly`, `AtLeast`, `AtMost`, and
+  `Between` requires non-negative built-in integer counts, excluding booleans, fractions,
+  and non-finite values. An absent maximum (`None`) remains valid for unbounded calls;
+  this count-type validation does not imply broader runtime call-bound enforcement.
 - Registration-time validation for complete bindings, request and result references, operation ordering, selectable collections, and provable type incompatibility.
 - Python 3.11–3.13 CI, package builds, and expanded runtime/CLI coverage.
 
@@ -102,8 +106,8 @@ Close the gaps in existing declarations before adding result chains:
 
 - Reject binding sources outside the closed `FromRequest`, `FromResult`, `FromContext`,
   and `AgentChoice` vocabulary at registration.
-- Require call bounds to be non-negative built-in integer counts, excluding booleans,
-  fractions, and non-finite values.
+- Reject unsupported runtime call-bound shapes before serving; broader runtime enforcement
+  follows in milestone 5. Construction-time count-type validation is already shipped.
 - Enforce every explicitly declared binding, ordering constraint, call bound, and operation
   output contract, or reject the unsupported declaration before serving. Adding a second
   capability must not remove enforcement from an existing operation. Preserve legacy
@@ -130,7 +134,8 @@ Close the gaps in existing declarations before adding result chains:
   an asyncio timeout and that a timeout does not prove an effect did not occur.
 
 Acceptance requires registration checks and real HTTP probes for the relevant boundaries,
-including a second-capability regression, invalid source/count rejection, narrower receiving
+including a second-capability regression, invalid source rejection, unsupported runtime
+call-bound rejection, narrower receiving
 constraints, mutating serializers, output alias collisions, and sensitive failure logging.
 Keep fixes independently reviewable; a copy-hook fix alone is not completion of the transport
 boundary.
@@ -305,33 +310,48 @@ establish compatibility with our pinned dependencies or authority guarantees.
 
 ### A. Budgeted working context and bounded agent execution
 
-After milestone 1's boundary hardening, improve the existing agent path without waiting for
-a general graph or durable executor:
+#### A1. Basic budgeting and context isolation
 
-- Keep authenticated application context, canonical request/result state, model-visible
-  working context, and persistent memory separate. `FromContext` is not a prompt-history
-  or memory-injection feature. Secrets and the invocation ledger never enter model summaries.
+After milestone 1's boundary hardening, improve the existing agent path without waiting for
+milestones 2–3, a general graph, or a durable executor. This early slice does not require
+result-chain retrieval or producer-constrained choices:
+
+- Keep canonical request state and the invocation ledger separate from model-visible working
+  context. Secrets and the invocation ledger never enter model summaries. This isolation does
+  not activate `FromContext` or persistent memory; those retain their later prerequisites.
+- Budget the complete model request, including instructions, schemas, retrieved evidence,
+  and output/reasoning headroom. Use provider usage and verified deployment limits; unknown
+  limits require a conservative operator-approved budget, not a guessed model capacity.
+- Start with cheap context selection and deduplication, preserving tool-call/result pairing,
+  recent unresolved work, and a protected copy of the fixed contract. If the protected
+  context cannot fit, return a bounded failure rather than silently dropping constraints.
+  Defer result eviction and result-backed summarization to A2.
+- Detect repeated non-progressing model/tool calls and stop within shared turn, token, cost,
+  and deadline limits. Extra reasoning or model escalation is internal, operator-bounded,
+  evidence-gated, and never restarts effects or changes the endpoint contract.
+- Keep a stable contract/schema prefix where provider caching supports it. Treat prompt-cache
+  reuse as a cost optimization, never as cross-request memory or authorization.
+
+#### A2. Result-backed context and compaction
+
+Only after validated result chains and producer-constrained choices (milestones 2–3),
+extend A1 with result-backed context:
+
+- Keep canonical request/result state separate from model-visible working context and
+  persistent memory. `FromContext` is not a prompt-history or memory-injection feature;
+  authenticated application context still requires milestone 4.
 - Assemble only the relevant, permitted evidence for the next legal decision. Start with
   bounded projections, pagination, and scoped retrieval of declared operation results;
   preserve exact canonical values for `FromResult` and producer-constrained choices.
 - Put oversized evidence behind request-scoped opaque handles with bounded reads, provenance,
   expiry, and access checks. No arbitrary filesystem or network authority is added. Do not
   re-execute an effectful operation to recover an evicted tool result.
-- Budget the complete model request, including instructions, schemas, retrieved evidence,
-  and output/reasoning headroom. Use provider usage and verified deployment limits; unknown
-  limits require a conservative operator-approved budget, not a guessed model capacity.
-- Escalate from cheap context selection and deduplication to tool-result clearing and then
-  summarization only when needed. Preserve tool-call/result pairing, recent unresolved work,
-  exact evidence identifiers, and a protected copy of the fixed contract. If the protected
-  context cannot fit, return a bounded failure rather than silently dropping constraints.
+- Escalate from A1's selection and deduplication to tool-result clearing and then summarization
+  only when needed. Preserve tool-call/result pairing, recent unresolved work, exact evidence
+  identifiers, and the protected contract; fail boundedly if protected context cannot fit.
 - Keep compaction summaries non-authoritative. They cannot reset call reservations, invent
   successful operations, overwrite results, or supply authorization. Preserve exact results
   separately and test repeated compaction and recovery of omitted evidence.
-- Detect repeated non-progressing model/tool calls and stop within shared turn, token, cost,
-  and deadline limits. Extra reasoning or model escalation is internal, operator-bounded,
-  evidence-gated, and never restarts effects or changes the endpoint contract.
-- Keep a stable contract/schema prefix where provider caching supports it. Treat prompt-cache
-  reuse as a cost optimization, never as cross-request memory or authorization.
 
 ### B. Readiness-aware tool discovery and evidence selection
 
