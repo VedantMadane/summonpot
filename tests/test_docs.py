@@ -112,10 +112,14 @@ def test_roadmap_advances_after_the_narrow_no_model_slice():
 
 
 def test_public_docs_describe_one_permitted_start_not_exactly_once_execution():
-    for path in (README, CHANGELOG):
+    for path in (README, CHANGELOG, ROADMAP):
         text = path.read_text(encoding="utf-8")
         assert "exactly-once execution" not in text.lower()
         assert "bound exactly-once operations" not in text.lower()
+        assert "exact-once slices" not in text.lower()
+
+    roadmap = " ".join(ROADMAP.read_text(encoding="utf-8").split())
+    assert "operation-start reservation slices" in roadmap
 
     assert "one permitted start per request" in README.read_text(encoding="utf-8")
 

@@ -76,6 +76,7 @@ jobs:
         run: |
           python3 - <<'PY'
           import glob
+          from pathlib import PurePosixPath
           import tarfile
           import zipfile
 
@@ -94,8 +95,8 @@ jobs:
               contributor_guidance = [
                   name
                   for name in names
-                  if name.endswith(("/AGENTS.md", "/CLAUDE.md"))
-                  or "/.claude/" in name
+                  if PurePosixPath(name).name in {"AGENTS.md", "CLAUDE.md"}
+                  or ".claude" in PurePosixPath(name).parts
               ]
               assert not contributor_guidance, contributor_guidance
 
@@ -108,8 +109,8 @@ jobs:
               contributor_guidance = [
                   name
                   for name in names
-                  if name.endswith(("/AGENTS.md", "/CLAUDE.md"))
-                  or "/.claude/" in name
+                  if PurePosixPath(name).name in {"AGENTS.md", "CLAUDE.md"}
+                  or ".claude" in PurePosixPath(name).parts
               ]
               assert not contributor_guidance, contributor_guidance
 

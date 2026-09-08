@@ -9,7 +9,10 @@ are asserted together.
 from __future__ import annotations
 
 import re
+import tarfile
+import textwrap
 import tomllib
+import zipfile
 from importlib.resources import files
 from pathlib import Path
 
@@ -100,11 +103,59 @@ def test_agents_guidance_is_what_is_being_excluded():
 
 
 @pytest.mark.parametrize("workflow", [CI_WORKFLOW, RELEASE_WORKFLOW])
-def test_artifact_workflows_reject_all_contributor_guidance(workflow):
+@pytest.mark.parametrize("target", ["wheel", "sdist"])
+@pytest.mark.parametrize(
+    "member",
+    [
+        "AGENTS.md",
+        "CLAUDE.md",
+        ".claude/skills/review.md",
+        ".claude/",
+        "project/AGENTS.md",
+        "project/src/summonpot/CLAUDE.md",
+        "project/.claude/skills/review.md",
+        None,
+    ],
+)
+def test_artifact_workflows_reject_all_contributor_guidance(
+    workflow, target, member, tmp_path, monkeypatch
+):
+    """Execute each real workflow verifier against root and nested archive members."""
     text = workflow.read_text(encoding="utf-8")
+    step = re.split(r"      - name: Verify (?:distribution|release) artifacts\n", text)[
+        1
+    ]
+    script = textwrap.dedent(
+        step.split("python3 - <<'PY'\n", 1)[1].split("          PY", 1)[0]
+    )
+    monkeypatch.chdir(tmp_path)
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    # Similar names and the installed consumer skill must remain allowed.
+    allowed = [
+        "summonpot/__init__.py",
+        "summonpot/py.typed",
+        "summonpot/templates/skills/summonpot.md",
+        "docs/NOT_AGENTS.md",
+        "docs/CLAUDE.md.example",
+        ".claude-backup/notes.md",
+    ]
+    with zipfile.ZipFile(dist / "summonpot.whl", "w") as archive:
+        for name in allowed + ([member] if target == "wheel" and member else []):
+            archive.writestr(name, b"")
+    with tarfile.open(dist / "summonpot.tar.gz", "w:gz") as archive:
+        names = [f"project/src/{name}" for name in allowed]
+        if target == "sdist" and member:
+            names.append(member)
+        for name in names:
+            archive.addfile(tarfile.TarInfo(name))
 
-    assert "CLAUDE.md" in text
-    assert '"/.claude/"' in text
+    if member is None:
+        exec(compile(script, str(workflow), "exec"), {})
+    else:
+        with pytest.raises(AssertionError) as exc:
+            exec(compile(script, str(workflow), "exec"), {})
+        assert exc.value.args == ([member],)
 
 
 def test_the_consumer_type_check_pins_its_pyright():
