@@ -251,11 +251,12 @@ def test_projection_is_a_detached_inert_tree():
         "tuple": [True, None, 3, "text"],
     }
     assert carrier["value"] == expected
-    assert carrier.typed["value"] == expected
+    native_expected = {**expected, "tuple": (True, None, 3, "text")}
+    assert carrier.typed["value"] == native_expected
     json.dumps(dict(carrier), allow_nan=False)
     carrier["value"]["shared"][0].append(7)
     assert carrier["value"]["shared"][1] == [3]
-    assert carrier.typed["value"] == expected
+    assert carrier.typed["value"] == native_expected
     prepared = _prepare_request(plan, carrier)
     assert prepared["value"] == expected
     assert prepared.typed["value"] is value

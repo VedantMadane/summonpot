@@ -23,6 +23,9 @@ class Result(BaseModel):
 @pytest.mark.parametrize(
     "annotation,raw,expected",
     [
+        (set[int], ["1", "2"], {1, 2}),
+        (frozenset[int], ["1", "2"], frozenset({1, 2})),
+        (tuple[int, int], ["1", "2"], (1, 2)),
         (date, "2026-09-08", date(2026, 9, 8)),
         (time, "12:30:00", time(12, 30)),
         (time, "12:30:00+03:00", time.fromisoformat("12:30:00+03:00")),
@@ -77,8 +80,16 @@ def test_native_query_values_reach_agent_and_custom_runtime(
     response = TestClient(build_app(summon)).get("/value", params={"value": raw})
     assert response.status_code == 200, response.text
     assert typed_values == [expected]
-    assert type(typed_values[0]) is annotation
-    assert any(str(expected) in prompt for prompt in prompts)
+    assert type(typed_values[0]) is type(expected)
+    if type(expected) in (set, frozenset, tuple):
+        import json
+
+        assert any(
+            sorted(json.loads(prompt.split("value: ", 1)[1])) == sorted(expected)
+            for prompt in prompts
+        )
+    else:
+        assert any(str(expected) in prompt for prompt in prompts)
 
 
 def test_native_uuid_projection_cannot_mutate_canonical_or_prompt_values():

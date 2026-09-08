@@ -210,8 +210,10 @@ HTTP request validation runs once. The adapter transfers a private, plan-bound v
 value graph to the runtime rather than revalidating its JSON prompt representation or
 calling application-defined copy hooks. Mutable compatibility views cannot change bound
 operation inputs, and consumed transports cannot be replayed through request defaults.
-Compatibility projection preserves exact built-in JSON scalars, lists, tuples (as lists),
-and dictionaries with exact string keys. Exact UUID, date, datetime, time, timedelta,
+Compatibility projection preserves exact built-in JSON scalars and dictionaries with exact
+string keys. Exact list, tuple, set, and frozenset containers are recursively detached;
+typed views preserve their native kind, while prompts receive JSON arrays.
+Exact UUID, date, datetime, time, timedelta,
 Decimal, and bytes values remain usable: prompts receive framework-safe strings and
 custom-runtime typed views retain native values, with UUIDs independently reconstructed.
 Datetime/time zones must be absent or exact fixed-offset `datetime.timezone` or Pydantic

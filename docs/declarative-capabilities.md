@@ -121,8 +121,10 @@ once. The transport carrier exposes separate compatibility views for custom runt
 mutating those views cannot change operation inputs, and replaying a consumed transport
 carrier is rejected. The framework does not call application-defined copy hooks while
 handing values off.
-Compatibility projection preserves exact built-in JSON scalars, lists, tuples (as lists),
-and dictionaries with exact string keys. Exact UUID, date, datetime, time, timedelta,
+Compatibility projection preserves exact built-in JSON scalars and dictionaries with exact
+string keys. Exact list, tuple, set, and frozenset containers are recursively detached;
+typed views preserve their native kind, while prompts receive JSON arrays.
+Exact UUID, date, datetime, time, timedelta,
 Decimal, and bytes values remain usable: prompts receive framework-safe strings and
 custom-runtime typed views retain native values, with UUIDs independently reconstructed.
 Datetime/time zones must be absent or exact fixed-offset `datetime.timezone` or Pydantic

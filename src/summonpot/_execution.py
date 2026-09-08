@@ -165,7 +165,13 @@ def _inert_transport_value(
     if kind is float:
         return value if math.isfinite(value) else _UNAVAILABLE
     if (
-        (kind is not dict and kind is not list and kind is not tuple)
+        (
+            kind is not dict
+            and kind is not list
+            and kind is not tuple
+            and kind is not set
+            and kind is not frozenset
+        )
         or id(value) in ancestors
         or len(ancestors) >= 64
     ):
@@ -178,7 +184,8 @@ def _inert_transport_value(
             for key, item in value.items()
             if type(key) is str
         }
-    return [_inert_transport_value(item, ancestors, native=native) for item in value]
+    items = [_inert_transport_value(item, ancestors, native=native) for item in value]
+    return kind(items) if native else items
 
 
 def _public_transport_views(
