@@ -35,3 +35,7 @@ def test_request_copy_hook_boundary_is_documented_in_both_guides():
         assert "application-defined copy hooks" in text
         assert "compatibility views" in text
         assert "consumed transport" in text
+        assert '"<unavailable>"' in text
+        assert "non-string keys are omitted" in text
+        assert "application serializers" in text
+        assert "earlier body serialization" in text

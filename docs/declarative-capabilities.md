@@ -120,8 +120,15 @@ HTTP validation hands the framework-owned validated value graph to the runtime e
 once. The transport carrier exposes separate compatibility views for custom runtimes;
 mutating those views cannot change operation inputs, and replaying a consumed transport
 carrier is rejected. The framework does not call application-defined copy hooks while
-handing values off. A validated value that has no JSON form appears in those views as its
-`str()` rendering, which keeps the request working without exposing the private object.
+handing values off.
+Compatibility projection uses only exact built-in JSON scalars, lists, tuples (as lists),
+and dictionaries with exact string keys. Other values (including subclasses, native
+UUID/datetime values, and non-finite floats), cycles, and nesting beyond 64 containers
+become `"<unavailable>"`; non-string keys are omitted without conversion. It calls no
+application serializers, copy, string, representation, or container hooks. The runtime
+prompt receives its own detached projection, while bound operations retain the exact
+validated Python values. This does not change the HTTP adapter's earlier body serialization
+or path-parameter rendering.
 As with any Pydantic application validator, code that retains and later mutates an object
 it returned remains application-owned behavior rather than a second request input.
 

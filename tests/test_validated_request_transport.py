@@ -346,8 +346,8 @@ def test_public_views_render_values_without_a_json_form():
 
     # Neither public view may hand back the application object itself, or the
     # carrier would be a route into the private validated graph.
-    assert carrier["value"] == "3 cents"
-    assert carrier.typed["value"] == "3 cents"
+    assert carrier["value"] == "<unavailable>"
+    assert carrier.typed["value"] == "<unavailable>"
     assert carrier.typed["value"] is not money
 
     prepared = _prepare_request(plan, carrier)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import math
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -12,7 +13,7 @@ from typing import Any
 from weakref import ReferenceType, ref
 
 from pydantic import TypeAdapter
-from pydantic_core import PydanticSerializationError, SchemaValidator
+from pydantic_core import SchemaValidator
 
 from summonpot._output_validation import _compile_output_validator
 from summonpot.contracts import AgentChoice, FromRequest
@@ -133,21 +134,31 @@ class _ConsumedTransport:
 
 
 _TRANSPORT_SNAPSHOTS: dict[int, _TransportSnapshot | _ConsumedTransport] = {}
-_PUBLIC_TRANSPORT_ADAPTER = TypeAdapter(dict[str, Any])
-_NO_JSON_FORM = object()
+_UNAVAILABLE = "<unavailable>"
 
 
-def _rendered_json(name: str, value: Any) -> Any:
-    """Render one value JSON-safely, or report that it has no JSON form."""
-    try:
-        # These views are best-effort renderings that fall back on their own, so
-        # a type the declared schema cannot serialize is handled here rather than
-        # reported to the application on every request.
-        return _PUBLIC_TRANSPORT_ADAPTER.dump_python(
-            {name: value}, mode="json", warnings=False
-        )[name]
-    except PydanticSerializationError:
-        return _NO_JSON_FORM
+def _inert_transport_value(value: Any, ancestors: frozenset[int] = frozenset()) -> Any:
+    """Project exact built-ins only; never inspect or serialize application objects."""
+    kind = type(value)
+    if kind is type(None) or kind is bool or kind is int or kind is str:
+        return value
+    if kind is float:
+        return value if math.isfinite(value) else _UNAVAILABLE
+    if (
+        (kind is not dict and kind is not list and kind is not tuple)
+        or id(value) in ancestors
+        or len(ancestors) >= 64
+    ):
+        return _UNAVAILABLE
+    ancestors = ancestors | {id(value)}
+    if kind is dict:
+        # Do not stringify keys: even hashing an application key can execute code.
+        return {
+            key: _inert_transport_value(item, ancestors)
+            for key, item in value.items()
+            if type(key) is str
+        }
+    return [_inert_transport_value(item, ancestors) for item in value]
 
 
 def _public_transport_views(
@@ -155,36 +166,8 @@ def _public_transport_views(
     prompt: Mapping[str, Any],
     typed: Mapping[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Render non-authoritative carrier views without application copy hooks."""
-    adapters = {parameter.name: parameter.adapter for parameter in plan.parameters}
-
-    def render_prompt(name: str, value: Any) -> Any:
-        rendered = _rendered_json(name, value)
-        # A validated application type need not have a JSON form, and the query
-        # transport hands its Python values straight to this view. Render those
-        # the way the HTTP handler already renders non-primitive path parameters
-        # rather than failing a request the schema accepted.
-        return str(value) if rendered is _NO_JSON_FORM else rendered
-
-    def render_typed(name: str, value: Any) -> Any:
-        adapter = adapters.get(name)
-        rendered = (
-            adapter.dump_python(value, mode="python", warnings=False)
-            if adapter is not None
-            else _PUBLIC_TRANSPORT_ADAPTER.dump_python(
-                {name: value}, mode="python", warnings=False
-            )[name]
-        )
-        if rendered is not value or _rendered_json(name, value) is not _NO_JSON_FORM:
-            return rendered
-        # The serializer had no representation at all and handed the application
-        # object straight back. Sharing it would let this public view reach into
-        # the private graph, so render it instead of aliasing it.
-        return str(value)
-
-    public_prompt = {name: render_prompt(name, value) for name, value in prompt.items()}
-    public_typed = {name: render_typed(name, value) for name, value in typed.items()}
-    return public_prompt, public_typed
+    """Return independent inert trees, not declared serializer representations."""
+    return _inert_transport_value(prompt), _inert_transport_value(typed)
 
 
 def _validated_transport_request(
@@ -200,7 +183,7 @@ def _validated_transport_request(
     the framework-owned source graphs private, and release them after one use.
     """
     # The envelope carries compatibility views for custom runtimes, but never the
-    # authoritative graph. Its values are serializer-produced representations;
+    # authoritative graph. Its values are inert built-in projections;
     # only the private one-shot snapshot proves prior validation.
     public_prompt, public_typed = _public_transport_views(plan, prompt, typed)
     request = _TransportRequest(public_prompt, typed=public_typed)
@@ -212,7 +195,7 @@ def _validated_transport_request(
             _TRANSPORT_SNAPSHOTS.pop(identity, None)
 
     _TRANSPORT_SNAPSHOTS[identity] = _TransportSnapshot(
-        ref(request, discard), plan, dict(prompt), dict(typed)
+        ref(request, discard), plan, _inert_transport_value(prompt), dict(typed)
     )
     return request
 
