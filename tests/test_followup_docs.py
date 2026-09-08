@@ -39,3 +39,6 @@ def test_request_copy_hook_boundary_is_documented_in_both_guides():
         assert "non-string keys are omitted" in text
         assert "application serializers" in text
         assert "earlier body serialization" in text
+        assert "custom-runtime typed views retain native values" in text
+        assert "UUIDs independently reconstructed" in text
+        assert "application-defined timezone callbacks are not invoked" in text

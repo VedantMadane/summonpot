@@ -255,8 +255,8 @@ def test_http_boundary_preserves_typed_and_prompt_request_views(mock_runtime):
         "createdAt": "2026-08-24T12:30:00Z",
     }
     assert passed.typed == {
-        "customer_id": "<unavailable>",
-        "created_at": "<unavailable>",
+        "customer_id": customer_id,
+        "created_at": created_at,
     }
     from summonpot._execution import _prepare_request, _registered_plan
 

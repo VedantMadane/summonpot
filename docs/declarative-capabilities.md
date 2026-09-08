@@ -121,10 +121,14 @@ once. The transport carrier exposes separate compatibility views for custom runt
 mutating those views cannot change operation inputs, and replaying a consumed transport
 carrier is rejected. The framework does not call application-defined copy hooks while
 handing values off.
-Compatibility projection uses only exact built-in JSON scalars, lists, tuples (as lists),
-and dictionaries with exact string keys. Other values (including subclasses, native
-UUID/datetime values, and non-finite floats), cycles, and nesting beyond 64 containers
-become `"<unavailable>"`; non-string keys are omitted without conversion. It calls no
+Compatibility projection preserves exact built-in JSON scalars, lists, tuples (as lists),
+and dictionaries with exact string keys. Exact UUID, date, datetime, time, timedelta,
+Decimal, and bytes values remain usable: prompts receive framework-safe strings and
+custom-runtime typed views retain native values, with UUIDs independently reconstructed.
+Datetime/time zones must be absent or exact fixed-offset `datetime.timezone` or Pydantic
+`TzInfo` values; application-defined timezone callbacks are not invoked.
+Unsupported values (including subclasses and non-finite floats), cycles, and nesting
+beyond 64 containers become `"<unavailable>"`; non-string keys are omitted without conversion. It calls no
 application serializers, copy, string, representation, or container hooks. The runtime
 prompt receives its own detached projection, while bound operations retain the exact
 validated Python values. This does not change the HTTP adapter's earlier body serialization

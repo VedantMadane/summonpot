@@ -8,12 +8,15 @@ import math
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
+from datetime import date, datetime, time, timedelta, timezone
+from decimal import Decimal
 from types import MappingProxyType
 from typing import Any
+from uuid import UUID
 from weakref import ReferenceType, ref
 
 from pydantic import TypeAdapter
-from pydantic_core import SchemaValidator
+from pydantic_core import SchemaValidator, TzInfo
 
 from summonpot._output_validation import _compile_output_validator
 from summonpot.contracts import AgentChoice, FromRequest
@@ -137,9 +140,26 @@ _TRANSPORT_SNAPSHOTS: dict[int, _TransportSnapshot | _ConsumedTransport] = {}
 _UNAVAILABLE = "<unavailable>"
 
 
-def _inert_transport_value(value: Any, ancestors: frozenset[int] = frozenset()) -> Any:
-    """Project exact built-ins only; never inspect or serialize application objects."""
+def _inert_transport_value(
+    value: Any, ancestors: frozenset[int] = frozenset(), *, native: bool = False
+) -> Any:
+    """Project known exact types only, without application serialization hooks."""
     kind = type(value)
+    if kind is UUID and type(value.int) is int and 0 <= value.int < 1 << 128:
+        # UUID can be changed through object.__setattr__, so never share it.
+        detached = UUID(int=value.int)
+        return detached if native else str(detached)
+    if kind is bytes or kind is date or kind is timedelta or kind is Decimal:
+        # Exact immutable native values contain no application-owned graph.
+        return value if native else str(value)
+    if kind is datetime or kind is time:
+        tz = value.tzinfo
+        if tz is None or type(tz) is timezone or type(tz) is TzInfo:
+            # These fixed-offset zones have no application callbacks. Unknown
+            # tzinfo implementations must not be asked for offsets or names.
+            detached_datetime = value.replace()
+            return detached_datetime if native else str(detached_datetime)
+        return _UNAVAILABLE
     if kind is type(None) or kind is bool or kind is int or kind is str:
         return value
     if kind is float:
@@ -154,11 +174,11 @@ def _inert_transport_value(value: Any, ancestors: frozenset[int] = frozenset()) 
     if kind is dict:
         # Do not stringify keys: even hashing an application key can execute code.
         return {
-            key: _inert_transport_value(item, ancestors)
+            key: _inert_transport_value(item, ancestors, native=native)
             for key, item in value.items()
             if type(key) is str
         }
-    return [_inert_transport_value(item, ancestors) for item in value]
+    return [_inert_transport_value(item, ancestors, native=native) for item in value]
 
 
 def _public_transport_views(
@@ -167,7 +187,7 @@ def _public_transport_views(
     typed: Mapping[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Return independent inert trees, not declared serializer representations."""
-    return _inert_transport_value(prompt), _inert_transport_value(typed)
+    return _inert_transport_value(prompt), _inert_transport_value(typed, native=True)
 
 
 def _validated_transport_request(
