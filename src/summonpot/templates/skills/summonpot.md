@@ -207,9 +207,25 @@ Runtime-enforced output schemas must not define a custom model `__init__`, inclu
 nested models. Registration rejects that unsupported constructor path rather than
 allowing it to bypass nested output validation. Use Pydantic model validators instead.
 
-HTTP request validation runs once. The server transfers a detached, plan-bound validated
-snapshot to the runtime rather than revalidating its JSON prompt representation. Raw
-runtime inputs still undergo validation; ordinary request wrappers are not trusted.
+HTTP request validation runs once. The adapter transfers a private, plan-bound validated
+value graph to the runtime rather than revalidating its JSON prompt representation or
+calling application-defined copy hooks. Mutable compatibility views cannot change bound
+operation inputs, and consumed transports cannot be replayed through request defaults.
+Compatibility projection preserves exact built-in JSON scalars and dictionaries with exact
+string keys. Exact list, tuple, set, and frozenset containers are recursively detached;
+typed views preserve their native kind, while prompts receive JSON arrays.
+Exact UUID, date, datetime, time, timedelta,
+Decimal, and bytes values remain usable: prompts receive framework-safe strings and
+custom-runtime typed views retain native values, with UUIDs independently reconstructed.
+Datetime/time zones must be absent or exact fixed-offset `datetime.timezone` or Pydantic
+`TzInfo` values; application-defined timezone callbacks are not invoked.
+Unsupported values (including subclasses and non-finite floats), cycles, and nesting
+beyond 64 containers become `"<unavailable>"`; non-string keys are omitted without conversion. It calls no
+application serializers, copy, string, representation, or container hooks. The runtime
+prompt receives its own detached projection, while bound operations retain the exact
+validated Python values. This does not change the HTTP adapter's earlier body serialization
+or path-parameter rendering.
+Raw runtime inputs still undergo validation; ordinary request wrappers are not trusted.
 
 
 Supported immutable callable defaults are exact built-in `None`, `bool`, `int`,
