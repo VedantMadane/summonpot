@@ -119,7 +119,7 @@ def test_public_docs_describe_one_permitted_start_not_exactly_once_execution():
         assert "exact-once slices" not in text.lower()
 
     roadmap = " ".join(ROADMAP.read_text(encoding="utf-8").split())
-    assert "operation-start reservation slices" in roadmap
+    assert "required single-start slices" in roadmap
 
     assert "one permitted start per request" in README.read_text(encoding="utf-8")
 
