@@ -14,7 +14,8 @@ from summonpot._execution import (
     _RequestValues,
     _validated_transport_request,
 )
-from summonpot.summon import BODYLESS_METHODS, _unwrap_annotated
+from summonpot.models import operation_id_for
+from summonpot.summon import BODYLESS_METHODS, SUPPORTED_METHODS, _unwrap_annotated
 
 if TYPE_CHECKING:
     from summonpot.summon import Summon
@@ -35,29 +36,44 @@ def build_app(summon: Summon) -> Any:
         version=__version__,
     )
 
-    for endpoint in summon.endpoints:
-        # Registration-time metadata is authoritative for both transport and
-        # execution; later mutation of the public definition cannot change a route.
-        definition = _registered_plan(endpoint) or endpoint
+    # Pair each public endpoint with the metadata that will actually be served,
+    # then validate *that*. Registration-time metadata is authoritative for
+    # transport and execution alike, so the checks below have to read the same
+    # thing the routes do -- checking the mutable EndpointDef would pass or fail
+    # on values no route ever sees.
+    served = [
+        (endpoint, _registered_plan(endpoint) or endpoint)
+        for endpoint in summon.endpoints
+    ]
+    _reject_invalid_operation_ids([definition for _, definition in served])
+
+    for endpoint, definition in served:
         route_path = definition.path
         method = definition.method
+
+        # One argument dictionary for all three handler shapes. The three
+        # add_api_route calls below differ only in the handler they pass, so a
+        # per-call argument list is how one of them silently loses its
+        # operation_id -- or its summary -- in a later edit. Every value comes
+        # from `definition`, the registration-time plan, for the same reason
+        # the rest of this loop uses it: the public EndpointDef is mutable.
+        route_kwargs: dict[str, Any] = {
+            "methods": [method],
+            "response_model": definition.output_model,
+            "summary": (
+                definition.description.split("\n")[0]
+                if definition.description
+                else definition.name
+            ),
+            "description": definition.description,
+            "operation_id": definition.operation_id,
+        }
 
         if definition.parameters and method in BODYLESS_METHODS:
             # GET/DELETE/HEAD carry no request body, so the declared parameters
             # become query parameters instead.
             _handle_with_query = _make_query_handler(endpoint, summon, definition)
-            app.add_api_route(
-                route_path,
-                _handle_with_query,
-                methods=[method],
-                response_model=definition.output_model,
-                summary=(
-                    definition.description.split("\n")[0]
-                    if definition.description
-                    else definition.name
-                ),
-                description=definition.description,
-            )
+            app.add_api_route(route_path, _handle_with_query, **route_kwargs)
         elif definition.parameters:
             RequestModel: Any
             if definition.input_model is not None:
@@ -89,35 +105,92 @@ def build_app(summon: Summon) -> Any:
                 endpoint, summon, RequestModel, definition
             )
 
-            app.add_api_route(
-                route_path,
-                _handle_with_body,
-                methods=[method],
-                response_model=definition.output_model,
-                summary=(
-                    definition.description.split("\n")[0]
-                    if definition.description
-                    else definition.name
-                ),
-                description=definition.description,
-            )
+            app.add_api_route(route_path, _handle_with_body, **route_kwargs)
         else:
             _handle_without_body = _make_no_body_handler(endpoint, summon)
 
-            app.add_api_route(
-                route_path,
-                _handle_without_body,
-                methods=[method],
-                response_model=definition.output_model,
-                summary=(
-                    definition.description.split("\n")[0]
-                    if definition.description
-                    else definition.name
-                ),
-                description=definition.description,
-            )
+            app.add_api_route(route_path, _handle_without_body, **route_kwargs)
 
     return app
+
+
+def _reject_invalid_operation_ids(endpoints: list[Any]) -> None:
+    """Re-check operation ids against the set actually being served.
+
+    Registration already derives and checks them, but that verdict is about the
+    endpoints as declared. `Summon.endpoints` hands out the live `EndpointDef`
+    objects, and they are plain dataclasses: anything holding one can assign
+    `operation_id` -- or `name`, or `method` -- afterwards. The registration
+    check cannot see that, and the result was a schema with two operations
+    sharing an id and a FastAPI warning as the only symptom.
+
+    Uniqueness alone is too weak a re-check. An id is *derived*; it is not a
+    free-form label that merely has to differ from its neighbours. A unique but
+    arbitrary value -- one carrying spaces or a slash, or simply left behind
+    after `name` or `method` was mutated -- passed a uniqueness test and was
+    emitted into the schema unchanged, which is the same broken generated
+    client the derivation exists to prevent. So the derivation itself is what
+    gets enforced here, where the final set is known and nothing can be changed
+    after it without building a new app. Uniqueness then follows for free,
+    except where two endpoints genuinely share a name and method, which is
+    still reported below.
+
+    The argument is the *served* metadata, not `Summon.endpoints`. For a
+    registered endpoint that is the immutable compiled plan, so a reassignment
+    after registration is already inert by the time this runs. The public
+    definition is still what reaches here when no plan is registered -- an
+    `EndpointDef` built by hand and appended -- and that is the case these
+    checks exist for.
+    """
+    seen: dict[str, Any] = {}
+    for endpoint in endpoints:
+        # Before the id, because the id is derived from this. `operation_id_for`
+        # folds the method (`.strip().lower()`), so an equivalent-but-
+        # noncanonical method still derives the id it was registered with and
+        # would satisfy the check below -- while FastAPI registers the literal
+        # string, emitting `" get "` as an OpenAPI path key. Registration
+        # accepts only a member of SUPPORTED_METHODS, so requiring one here
+        # holds the same invariant rather than inventing a second one.
+        if endpoint.method not in SUPPORTED_METHODS:
+            raise ValueError(
+                f"Endpoint {endpoint.name!r} is served with the HTTP method "
+                f"{endpoint.method!r}, which is not one of "
+                f"{', '.join(sorted(SUPPORTED_METHODS))}. Methods are normalized "
+                "at registration, so this endpoint had its method reassigned "
+                "afterwards. Serving it would put the literal string into the "
+                "schema as a path key."
+            )
+        operation_id = endpoint.operation_id
+        if not operation_id:
+            raise ValueError(
+                f"Endpoint {endpoint.name!r} has no operationId. It is assigned at "
+                "registration, so this endpoint was constructed some other way or "
+                "cleared afterwards."
+            )
+        # A collision is reported before a bad derivation, because when both
+        # hold it is the more specific diagnosis: it names the other endpoint
+        # involved, which is what the reader needs in order to act.
+        clashing = seen.get(operation_id)
+        if clashing is not None:
+            raise ValueError(
+                f"{endpoint.name!r} and {clashing.name!r} both carry the OpenAPI "
+                f"operationId {operation_id!r}. Operation ids must be unique, so a "
+                "generated client would have two methods with the same name. This "
+                "passed registration, so one of them was reassigned afterwards -- "
+                "operation ids are derived from the endpoint name and method and "
+                "are not meant to be set by hand."
+            )
+        expected = operation_id_for(endpoint.name, endpoint.method)
+        if operation_id != expected:
+            raise ValueError(
+                f"Endpoint {endpoint.name!r} carries the OpenAPI operationId "
+                f"{operation_id!r}, but its name and method derive {expected!r}. "
+                "Operation ids are derived at registration and are not meant to be "
+                "set by hand, so this endpoint had its operationId, name or method "
+                "reassigned afterwards. Serving the reassigned value would emit it "
+                "into the schema unchanged."
+            )
+        seen[operation_id] = endpoint
 
 
 async def _run_endpoint(summon: Any, endpoint: Any, params: dict[str, Any]) -> Any:
