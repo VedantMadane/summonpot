@@ -116,6 +116,28 @@ immutability. Scalar request declarations also remain agent-backed.
 
 ## What the boundary does and does not cover
 
+HTTP validation hands the framework-owned validated value graph to the runtime exactly
+once. The transport carrier exposes separate compatibility views for custom runtimes;
+mutating those views cannot change operation inputs, and replaying a consumed transport
+carrier is rejected. The framework does not call application-defined copy hooks while
+handing values off.
+Compatibility projection preserves exact built-in JSON scalars and dictionaries with exact
+string keys. Exact list, tuple, set, and frozenset containers are recursively detached;
+typed views preserve their native kind, while prompts receive JSON arrays.
+Exact UUID, date, datetime, time, timedelta,
+Decimal, and bytes values remain usable: prompts receive framework-safe strings and
+custom-runtime typed views retain native values, with UUIDs independently reconstructed.
+Datetime/time zones must be absent or exact fixed-offset `datetime.timezone` or Pydantic
+`TzInfo` values; application-defined timezone callbacks are not invoked.
+Unsupported values (including subclasses and non-finite floats), cycles, and nesting
+beyond 64 containers become `"<unavailable>"`; non-string keys are omitted without conversion. It calls no
+application serializers, copy, string, representation, or container hooks. The runtime
+prompt receives its own detached projection, while bound operations retain the exact
+validated Python values. This does not change the HTTP adapter's earlier body serialization
+or path-parameter rendering.
+As with any Pydantic application validator, code that retains and later mutates an object
+it returned remains application-owned behavior rather than a second request input.
+
 Output from runtime-enforced operations is validated against its declared schema without
 invoking serializers. Custom model `__init__` methods in these output schemas (including
 nested models) are rejected at registration: core's custom-constructor path can leave the
