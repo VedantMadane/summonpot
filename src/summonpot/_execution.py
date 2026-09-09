@@ -109,6 +109,7 @@ class _CompiledEndpoint:
     output_model: Any
     model: str | None
     method: str
+    operation_id: str
     path_parameter_names: tuple[str, ...]
     tools: tuple[_CompiledTool, ...]
     direct_tool: int | None
@@ -307,6 +308,7 @@ def _compile_endpoint(
         output_model=endpoint.output_model,
         model=endpoint.model,
         method=endpoint.method,
+        operation_id=endpoint.operation_id,
         path_parameter_names=tuple(endpoint.path_parameter_names),
         tools=tools,
         direct_tool=direct_index,
