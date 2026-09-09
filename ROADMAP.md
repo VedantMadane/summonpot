@@ -135,8 +135,8 @@ context contract:
 
 ### 4. Broader bounds and private path classification
 
-Extend the identity-keyed invocation ledger and private plan after the exact-once slices are
-stable:
+Extend the identity-keyed invocation ledger and private plan after the required single-start
+slices are stable:
 
 - Enforce broader minimum and maximum call bounds against successful and started calls
   respectively.

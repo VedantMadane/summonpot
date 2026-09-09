@@ -9,7 +9,10 @@ are asserted together.
 from __future__ import annotations
 
 import re
+import tarfile
+import textwrap
 import tomllib
+import zipfile
 from importlib.resources import files
 from pathlib import Path
 
@@ -19,6 +22,8 @@ import summonpot
 
 ROOT = Path(__file__).resolve().parent.parent
 PACKAGE = ROOT / "src" / "summonpot"
+CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
+RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
 PRODUCT_DESCRIPTION = (
     "A contract-first Python framework for modernizing APIs for AI through exact "
     "application behavior and explicitly bounded agent-owned decisions."
@@ -85,12 +90,72 @@ def test_contributor_guidance_is_excluded_from_both_targets(target):
     this test names the setting so dropping it fails here first.
     """
     assert "**/AGENTS.md" in _build_config()[target].get("exclude", [])
+    assert "/CLAUDE.md" in _build_config()[target].get("exclude", [])
+    assert "/.claude" in _build_config()[target].get("exclude", [])
 
 
 def test_agents_guidance_is_what_is_being_excluded():
     """A guard on the guard: if the file is renamed, the pattern is now dead."""
     assert (ROOT / "AGENTS.md").is_file()
     assert (PACKAGE / "AGENTS.md").is_file()
+    assert (ROOT / "CLAUDE.md").is_file()
+    assert (ROOT / ".claude").is_dir()
+
+
+@pytest.mark.parametrize("workflow", [CI_WORKFLOW, RELEASE_WORKFLOW])
+@pytest.mark.parametrize("target", ["wheel", "sdist"])
+@pytest.mark.parametrize(
+    "member",
+    [
+        "AGENTS.md",
+        "CLAUDE.md",
+        ".claude/skills/review.md",
+        ".claude/",
+        "project/AGENTS.md",
+        "project/src/summonpot/CLAUDE.md",
+        "project/.claude/skills/review.md",
+        None,
+    ],
+)
+def test_artifact_workflows_reject_all_contributor_guidance(
+    workflow, target, member, tmp_path, monkeypatch
+):
+    """Execute each real workflow verifier against root and nested archive members."""
+    text = workflow.read_text(encoding="utf-8")
+    step = re.split(r"      - name: Verify (?:distribution|release) artifacts\n", text)[
+        1
+    ]
+    script = textwrap.dedent(
+        step.split("python3 - <<'PY'\n", 1)[1].split("          PY", 1)[0]
+    )
+    monkeypatch.chdir(tmp_path)
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    # Similar names and the installed consumer skill must remain allowed.
+    allowed = [
+        "summonpot/__init__.py",
+        "summonpot/py.typed",
+        "summonpot/templates/skills/summonpot.md",
+        "docs/NOT_AGENTS.md",
+        "docs/CLAUDE.md.example",
+        ".claude-backup/notes.md",
+    ]
+    with zipfile.ZipFile(dist / "summonpot.whl", "w") as archive:
+        for name in allowed + ([member] if target == "wheel" and member else []):
+            archive.writestr(name, b"")
+    with tarfile.open(dist / "summonpot.tar.gz", "w:gz") as archive:
+        names = [f"project/src/{name}" for name in allowed]
+        if target == "sdist" and member:
+            names.append(member)
+        for name in names:
+            archive.addfile(tarfile.TarInfo(name))
+
+    if member is None:
+        exec(compile(script, str(workflow), "exec"), {})
+    else:
+        with pytest.raises(AssertionError) as exc:
+            exec(compile(script, str(workflow), "exec"), {})
+        assert exc.value.args == ([member],)
 
 
 def test_the_consumer_type_check_pins_its_pyright():

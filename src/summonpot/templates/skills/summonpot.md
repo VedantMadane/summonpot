@@ -51,13 +51,14 @@ Four parts, all load-bearing:
 | Part | Becomes |
 |---|---|
 | Pydantic request model | the JSON body, its validation, and the OpenAPI input schema |
-| docstring | the endpoint's goal — the agent's instructions |
-| `Depends` / `Required` | the complete set of operations the agent may call |
-| return model | the structured-output schema, validated locally before responding |
+| docstring | the fixed execution goal; on the agent path, the agent's instructions |
+| `Depends` / `Required` | the complete set of operations available to execution |
+| return model | the final local validator; on the agent path, the structured-output schema |
 
-`Depends(op)` — the agent *may* call it. `Required(op)` — a final response is rejected
-until it has completed successfully. Required use is checked from runtime state, not
-asked for in the prompt.
+`Depends(op)` makes an operation available to execution. On the agent-backed path, the
+agent *may* call it. `Required(op)` rejects a final response until the operation has
+completed successfully. Required use is checked from runtime state, not asked for in the
+prompt.
 
 ## Do not write these
 
@@ -308,6 +309,8 @@ Anthropic:
 ```bash
 pip install "summonpot[serve,cli,anthropic]"
 ```
+
+Python 3.11 through 3.13 is supported.
 
 `serve` installs FastAPI and uvicorn, `cli` installs the `summonpot` command, and the
 provider extra installs that provider's client. Replace `anthropic` with the provider

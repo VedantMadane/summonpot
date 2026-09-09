@@ -56,7 +56,8 @@ def test_issue_forms_define_the_shared_contribution_contract() -> None:
 
     assert 'name: "Bug report"' in bug
     assert "Summonpot version or source revision" in bug
-    assert "Model and provider" in bug
+    assert "Execution path or model and provider" in bug
+    assert "Direct execution / no model resolved" in bug
     assert "Minimal runnable application" in bug
     assert "Contribution intent" in bug
     assert "removed API keys" in bug
@@ -104,6 +105,7 @@ def test_contributing_states_the_supported_binding_slice_precisely() -> None:
         "Unsupported binding shapes, including `FromContext`, remain model-supplied"
         in contributing
     )
+    assert "direct execution with no model resolved" in contributing
 
 
 def test_reviewing_separates_shipped_ordering_validation_from_runtime_enforcement() -> (
