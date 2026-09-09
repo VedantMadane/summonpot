@@ -44,3 +44,13 @@ def test_root_guidance_documents_the_shipped_direct_path():
     assert (
         "All other declarations retain the provider-neutral agent runtime" in guidance
     )
+
+
+def test_source_guidance_includes_direct_executor_review_rules():
+    guidance = " ".join(
+        (ROOT / "src/summonpot/AGENTS.md").read_text(encoding="utf-8").split()
+    )
+
+    assert "direct-execution predicate" in guidance
+    assert "one permitted start per request" in guidance
+    assert "exactly-once completion" in guidance

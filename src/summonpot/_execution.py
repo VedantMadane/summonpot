@@ -4,15 +4,19 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import math
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
+from datetime import date, datetime, time, timedelta, timezone
+from decimal import Decimal
 from types import MappingProxyType
 from typing import Any
+from uuid import UUID
 from weakref import ReferenceType, ref
 
 from pydantic import TypeAdapter
-from pydantic_core import SchemaValidator
+from pydantic_core import SchemaValidator, TzInfo
 
 from summonpot._output_validation import _compile_output_validator
 from summonpot.contracts import AgentChoice, FromRequest
@@ -128,7 +132,70 @@ class _TransportSnapshot:
     typed: dict[str, Any]
 
 
-_TRANSPORT_SNAPSHOTS: dict[int, _TransportSnapshot] = {}
+@dataclass(frozen=True, slots=True)
+class _ConsumedTransport:
+    reference: ReferenceType[_TransportRequest]
+
+
+_TRANSPORT_SNAPSHOTS: dict[int, _TransportSnapshot | _ConsumedTransport] = {}
+_UNAVAILABLE = "<unavailable>"
+
+
+def _inert_transport_value(
+    value: Any, ancestors: frozenset[int] = frozenset(), *, native: bool = False
+) -> Any:
+    """Project known exact types only, without application serialization hooks."""
+    kind = type(value)
+    if kind is UUID and type(value.int) is int and 0 <= value.int < 1 << 128:
+        # UUID can be changed through object.__setattr__, so never share it.
+        detached = UUID(int=value.int)
+        return detached if native else str(detached)
+    if kind is bytes or kind is date or kind is timedelta or kind is Decimal:
+        # Exact immutable native values contain no application-owned graph.
+        return value if native else str(value)
+    if kind is datetime or kind is time:
+        tz = value.tzinfo
+        if tz is None or type(tz) is timezone or type(tz) is TzInfo:
+            # These fixed-offset zones have no application callbacks. Unknown
+            # tzinfo implementations must not be asked for offsets or names.
+            detached_datetime = value.replace()
+            return detached_datetime if native else str(detached_datetime)
+        return _UNAVAILABLE
+    if kind is type(None) or kind is bool or kind is int or kind is str:
+        return value
+    if kind is float:
+        return value if math.isfinite(value) else _UNAVAILABLE
+    if (
+        (
+            kind is not dict
+            and kind is not list
+            and kind is not tuple
+            and kind is not set
+            and kind is not frozenset
+        )
+        or id(value) in ancestors
+        or len(ancestors) >= 64
+    ):
+        return _UNAVAILABLE
+    ancestors = ancestors | {id(value)}
+    if kind is dict:
+        # Do not stringify keys: even hashing an application key can execute code.
+        return {
+            key: _inert_transport_value(item, ancestors, native=native)
+            for key, item in value.items()
+            if type(key) is str
+        }
+    items = [_inert_transport_value(item, ancestors, native=native) for item in value]
+    return kind(items) if native else items
+
+
+def _public_transport_views(
+    plan: _CompiledEndpoint,
+    prompt: Mapping[str, Any],
+    typed: Mapping[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Return independent inert trees, not declared serializer representations."""
+    return _inert_transport_value(prompt), _inert_transport_value(typed, native=True)
 
 
 def _validated_transport_request(
@@ -137,13 +204,17 @@ def _validated_transport_request(
     *,
     typed: Mapping[str, Any],
 ) -> _RequestValues:
-    """Seal FastAPI-validated values for this exact compiled route plan.
+    """Transfer FastAPI-validated values to this exact compiled route plan.
 
     Only the HTTP adapter calls this factory after validation. Neither an ordinary
     _RequestValues nor the envelope's mutable views is proof of validation. Keep
-    detached data privately, and release it when the envelope leaves scope.
+    the framework-owned source graphs private, and release them after one use.
     """
-    request = _TransportRequest(prompt, typed=typed)
+    # The envelope carries compatibility views for custom runtimes, but never the
+    # authoritative graph. Its values are inert built-in projections;
+    # only the private one-shot snapshot proves prior validation.
+    public_prompt, public_typed = _public_transport_views(plan, prompt, typed)
+    request = _TransportRequest(public_prompt, typed=public_typed)
     identity = id(request)
 
     def discard(reference: ReferenceType[_TransportRequest]) -> None:
@@ -152,7 +223,7 @@ def _validated_transport_request(
             _TRANSPORT_SNAPSHOTS.pop(identity, None)
 
     _TRANSPORT_SNAPSHOTS[identity] = _TransportSnapshot(
-        ref(request, discard), plan, deepcopy(dict(prompt)), deepcopy(dict(typed))
+        ref(request, discard), plan, _inert_transport_value(prompt), dict(typed)
     )
     return request
 
@@ -401,9 +472,15 @@ def _prepare_request(
     """Validate raw external input once, or consume a plan-bound transport snapshot."""
     snapshot = _TRANSPORT_SNAPSHOTS.get(id(params))
     if snapshot is not None and snapshot.reference() is params:
+        if isinstance(snapshot, _ConsumedTransport):
+            raise ValueError("Validated request transport was already consumed")
         if snapshot.plan is not plan:
             raise ValueError("Validated request belongs to a different endpoint plan")
-        return _RequestValues(deepcopy(snapshot.prompt), typed=deepcopy(snapshot.typed))
+        # Transfer the already validated graph exactly once. Copying arbitrary
+        # application values here is both unnecessary and unsafe: __deepcopy__
+        # is application code and can replace or mutate validated values.
+        _TRANSPORT_SNAPSHOTS[id(params)] = _ConsumedTransport(snapshot.reference)
+        return _RequestValues(snapshot.prompt, typed=snapshot.typed)
 
     if plan.input_adapter is not None:
         validated = plan.input_adapter.validate_python(deepcopy(dict(params)))

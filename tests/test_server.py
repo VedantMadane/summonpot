@@ -259,6 +259,14 @@ def test_http_boundary_preserves_typed_and_prompt_request_views(mock_runtime):
         "customer_id": customer_id,
         "created_at": created_at,
     }
+    from summonpot._execution import _prepare_request, _registered_plan
+
+    plan = _registered_plan(summon.endpoints[0])
+    assert plan is not None
+    prepared = _prepare_request(plan, passed)
+    assert prepared.typed == {"customer_id": customer_id, "created_at": created_at}
+    assert type(prepared.typed["customer_id"]) is UUID
+    assert type(prepared.typed["created_at"]) is datetime
 
 
 def test_dependency_parameters_do_not_leak_into_http_contract(mock_runtime):

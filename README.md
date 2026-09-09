@@ -166,10 +166,11 @@ routing, and OpenAPI under Summonpot.
 - **Closed capability sets** made from exact application-owned callables.
 - **Optional and mandatory operations** through `Depends(...)` and `Required(...)`.
 - **Runtime-enforced required use**, tracked per request rather than trusted to a prompt.
-- **Bound exactly-once operations** for the first complete runtime slice: trusted
+- **Per-request operation-start enforcement** for the first complete runtime slice: trusted
   `FromRequest` values and callable defaults are removed from the operation tool schema,
-  direct `AgentChoice` arguments remain visible, one start is permitted, and `output=` is
-  locally validated before success.
+  direct `AgentChoice` arguments remain visible, one permitted start per request is reserved
+  before application code, and `output=` is locally validated before success. This is not a
+  distributed exactly-once completion guarantee.
 - **Single-operation deterministic execution** when one required `Exactly(1)` operation
   uses a Pydantic request model and has at least one `FromRequest` binding; every remaining argument comes from `FromRequest`
   or an immutable identity-stable callable default, and its output is exactly the endpoint
@@ -197,12 +198,12 @@ routing, and OpenAPI under Summonpot.
 pip install "summonpot[serve,cli]"
 ```
 
-This source revision requires Pydantic `>=2.13.5,<2.14` and pydantic-core
-`>=2.46.5,<2.47`. Earlier Pydantic versions are no longer supported. Output
+Python 3.11 through 3.13 is supported. Summonpot requires Pydantic
+`>=2.13.5,<2.14` and pydantic-core `>=2.46.5,<2.47`. Earlier Pydantic versions
+are no longer supported. Output
 revalidation uses a version-sensitive core option to avoid reusing validators that
 trust existing model instances; the dependency bounds keep that integration on the
-tested minor versions. These requirements apply to newly built artifacts, not to
-already-published packages.
+tested minor versions.
 
 Start without a provider account by selecting the built-in test model:
 
@@ -425,9 +426,10 @@ Local Pydantic response validation
 HTTP response
 ```
 
-The endpoint docstring becomes the fixed goal. Request data becomes the user message.
-Capabilities become the complete set of callable operations. The response model becomes
-both the structured-output schema and the final local validator.
+The endpoint docstring becomes the fixed execution goal. Request data becomes validated
+execution input. Capabilities become the complete set of operations available to execution.
+The response model is always the final local validator; on the agent-backed path, it also
+becomes the structured-output schema and validated request data becomes the user message.
 
 Pydantic AI is an internal runtime dependency. Applications use `Summon`, `@summon`,
 Pydantic models, and declarative capabilities; they do not construct provider clients or

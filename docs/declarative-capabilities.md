@@ -26,15 +26,17 @@ def research(
 The signature defines four things:
 
 - The Pydantic request model is the JSON contract.
-- The docstring is the fixed endpoint goal.
-- Dependencies are the complete set of deterministic operations exposed to the agent.
+- The docstring is the fixed execution goal.
+- Dependencies are the complete set of deterministic operations available to execution.
 - The Pydantic return model is the required output contract.
 
 ## Dependency semantics
 
-`Depends(operation)` exposes an exact operation that the agent may call.
+`Depends(operation)` makes an exact operation available to execution. On the agent-backed
+path, the agent may call it.
 
-`Required(operation)` exposes an exact operation and prevents successful final output until that operation has completed.
+`Required(operation)` makes an exact operation available and prevents successful final
+output until that operation has completed.
 
 Required use is checked by runtime state. It is not only written into the prompt.
 
@@ -116,6 +118,28 @@ immutability. Scalar request declarations also remain agent-backed.
 
 ## What the boundary does and does not cover
 
+HTTP validation hands the framework-owned validated value graph to the runtime exactly
+once. The transport carrier exposes separate compatibility views for custom runtimes;
+mutating those views cannot change operation inputs, and replaying a consumed transport
+carrier is rejected. The framework does not call application-defined copy hooks while
+handing values off.
+Compatibility projection preserves exact built-in JSON scalars and dictionaries with exact
+string keys. Exact list, tuple, set, and frozenset containers are recursively detached;
+typed views preserve their native kind, while prompts receive JSON arrays.
+Exact UUID, date, datetime, time, timedelta,
+Decimal, and bytes values remain usable: prompts receive framework-safe strings and
+custom-runtime typed views retain native values, with UUIDs independently reconstructed.
+Datetime/time zones must be absent or exact fixed-offset `datetime.timezone` or Pydantic
+`TzInfo` values; application-defined timezone callbacks are not invoked.
+Unsupported values (including subclasses and non-finite floats), cycles, and nesting
+beyond 64 containers become `"<unavailable>"`; non-string keys are omitted without conversion. It calls no
+application serializers, copy, string, representation, or container hooks. The runtime
+prompt receives its own detached projection, while bound operations retain the exact
+validated Python values. This does not change the HTTP adapter's earlier body serialization
+or path-parameter rendering.
+As with any Pydantic application validator, code that retains and later mutates an object
+it returned remains application-owned behavior rather than a second request input.
+
 Output from runtime-enforced operations is validated against its declared schema without
 invoking serializers. Custom model `__init__` methods in these output schemas (including
 nested models) are rejected at registration: core's custom-constructor path can leave the
@@ -141,9 +165,10 @@ The agent receives the operation's typed callable schema—not the statement, SQ
 
 ### Arguments are constrained for the first bound runtime slice
 
-The closed set always covers *which* operations the agent may call. For one required
-`Exactly(1)` operation using `FromRequest`, direct `AgentChoice`, or callable defaults, the
-runtime now also constrains *what the model may pass*:
+The closed set always covers *which* operations execution may use. On the agent-backed path,
+the agent may call only that set. For one required `Exactly(1)` operation using
+`FromRequest`, direct `AgentChoice`, or callable defaults, the runtime now also constrains
+*what the model may pass*:
 
 - `FromRequest` receives the canonical validated request value and is absent from the model schema;
 - callable defaults are absent from the model schema and remain application-owned;

@@ -76,6 +76,7 @@ jobs:
         run: |
           python3 - <<'PY'
           import glob
+          from pathlib import PurePosixPath
           import tarfile
           import zipfile
 
@@ -91,7 +92,13 @@ jobs:
               # classifier true for an installed wheel.
               assert "summonpot/py.typed" in names, names
               # Contributor guidance must not reach users.
-              assert not [n for n in names if n.endswith("AGENTS.md")], names
+              contributor_guidance = [
+                  name
+                  for name in names
+                  if PurePosixPath(name).name in {"AGENTS.md", "CLAUDE.md"}
+                  or ".claude" in PurePosixPath(name).parts
+              ]
+              assert not contributor_guidance, contributor_guidance
 
           with tarfile.open(sdists[0]) as archive:
               names = archive.getnames()
@@ -99,7 +106,13 @@ jobs:
               assert any(name.endswith("/src/summonpot/py.typed") for name in names), names
               # The wheel exclusion does not reach the sdist: hatchling
               # configures the two targets separately.
-              assert not [n for n in names if n.endswith("AGENTS.md")], names
+              contributor_guidance = [
+                  name
+                  for name in names
+                  if PurePosixPath(name).name in {"AGENTS.md", "CLAUDE.md"}
+                  or ".claude" in PurePosixPath(name).parts
+              ]
+              assert not contributor_guidance, contributor_guidance
 
           print(f"verified {wheels[0]} and {sdists[0]}")
           PY

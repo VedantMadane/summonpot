@@ -106,9 +106,9 @@ effect, a maintainer may apply the `skip-changelog` label.
 ## Reporting issues
 
 Search existing issues and pull requests first. A useful bug report includes the installed
-version or exact source revision, Python and operating-system versions, provider/model or the
-keyless test model, a minimal complete endpoint, the exact request or command, and observed
-versus expected behavior.
+version or exact source revision, Python and operating-system versions, direct execution with
+no model resolved or the provider/model or keyless test model used, a minimal complete
+endpoint, the exact request or command, and observed versus expected behavior.
 
 Remove API keys, tokens, credentials, connection strings, private request data, and provider
 output before posting publicly.

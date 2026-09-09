@@ -51,13 +51,14 @@ Four parts, all load-bearing:
 | Part | Becomes |
 |---|---|
 | Pydantic request model | the JSON body, its validation, and the OpenAPI input schema |
-| docstring | the endpoint's goal — the agent's instructions |
-| `Depends` / `Required` | the complete set of operations the agent may call |
-| return model | the structured-output schema, validated locally before responding |
+| docstring | the fixed execution goal; on the agent path, the agent's instructions |
+| `Depends` / `Required` | the complete set of operations available to execution |
+| return model | the final local validator; on the agent path, the structured-output schema |
 
-`Depends(op)` — the agent *may* call it. `Required(op)` — a final response is rejected
-until it has completed successfully. Required use is checked from runtime state, not
-asked for in the prompt.
+`Depends(op)` makes an operation available to execution. On the agent-backed path, the
+agent *may* call it. `Required(op)` rejects a final response until the operation has
+completed successfully. Required use is checked from runtime state, not asked for in the
+prompt.
 
 ## Do not write these
 
@@ -206,9 +207,25 @@ Runtime-enforced output schemas must not define a custom model `__init__`, inclu
 nested models. Registration rejects that unsupported constructor path rather than
 allowing it to bypass nested output validation. Use Pydantic model validators instead.
 
-HTTP request validation runs once. The server transfers a detached, plan-bound validated
-snapshot to the runtime rather than revalidating its JSON prompt representation. Raw
-runtime inputs still undergo validation; ordinary request wrappers are not trusted.
+HTTP request validation runs once. The adapter transfers a private, plan-bound validated
+value graph to the runtime rather than revalidating its JSON prompt representation or
+calling application-defined copy hooks. Mutable compatibility views cannot change bound
+operation inputs, and consumed transports cannot be replayed through request defaults.
+Compatibility projection preserves exact built-in JSON scalars and dictionaries with exact
+string keys. Exact list, tuple, set, and frozenset containers are recursively detached;
+typed views preserve their native kind, while prompts receive JSON arrays.
+Exact UUID, date, datetime, time, timedelta,
+Decimal, and bytes values remain usable: prompts receive framework-safe strings and
+custom-runtime typed views retain native values, with UUIDs independently reconstructed.
+Datetime/time zones must be absent or exact fixed-offset `datetime.timezone` or Pydantic
+`TzInfo` values; application-defined timezone callbacks are not invoked.
+Unsupported values (including subclasses and non-finite floats), cycles, and nesting
+beyond 64 containers become `"<unavailable>"`; non-string keys are omitted without conversion. It calls no
+application serializers, copy, string, representation, or container hooks. The runtime
+prompt receives its own detached projection, while bound operations retain the exact
+validated Python values. This does not change the HTTP adapter's earlier body serialization
+or path-parameter rendering.
+Raw runtime inputs still undergo validation; ordinary request wrappers are not trusted.
 
 
 Supported immutable callable defaults are exact built-in `None`, `bool`, `int`,
@@ -292,6 +309,8 @@ Anthropic:
 ```bash
 pip install "summonpot[serve,cli,anthropic]"
 ```
+
+Python 3.11 through 3.13 is supported.
 
 `serve` installs FastAPI and uvicorn, `cli` installs the `summonpot` command, and the
 provider extra installs that provider's client. Replace `anthropic` with the provider
