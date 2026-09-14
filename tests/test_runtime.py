@@ -7,6 +7,7 @@ import functools
 import threading
 import time
 from dataclasses import replace
+from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
@@ -25,8 +26,16 @@ from summonpot import (
     Summon,
     UsageLimits,
 )
-from summonpot._execution import _prepare_request, _registered_plan, _RequestValues
-from summonpot.runtime import Runtime, _OperationOutputError
+from summonpot._execution import (
+    _compile_tool,
+    _EndpointRun,
+    _OperationState,
+    _prepare_request,
+    _registered_plan,
+    _RequestValues,
+)
+from summonpot.models import ToolDef
+from summonpot.runtime import Runtime, _OperationOutputError, _tracked_operation
 
 
 class ResearchRequest(BaseModel):
@@ -1084,16 +1093,14 @@ def test_post_registration_metadata_mutation_cannot_change_execution():
     assert attacker_calls == 0
 
 
-def test_unsupported_broader_call_bound_keeps_legacy_required_once_behavior():
-    starts = 0
+def test_legacy_runtime_bookkeeping_ignores_unenforced_broader_call_bounds():
+    """The legacy kernel still records success as required-once, not explicit bounds."""
 
     def load_customer(customer_id: str, format: str) -> CustomerRecord:
         """Load one customer in the selected format."""
-        nonlocal starts
-        starts += 1
         return CustomerRecord(customer_id=customer_id, format=format)
 
-    lookup = Operation(
+    contract = Operation(
         load_customer,
         bind={
             "customer_id": FromRequest("query"),
@@ -1101,53 +1108,30 @@ def test_unsupported_broader_call_bound_keeps_legacy_required_once_behavior():
         },
         output=CustomerRecord,
     )
-    summon = Summon("svc")
-
-    @summon("/research")
-    def research(
-        request: ResearchRequest,
-        customer=Required(lookup, calls=Exactly(2)),
-    ) -> ResearchResponse:
-        """Use the legacy model-supplied path for unsupported broader bounds."""
-        ...
-
-    turns = 0
-
-    def model_function(messages, info: AgentInfo):
-        nonlocal turns
-        turns += 1
-        if turns == 1:
-            assert sorted(
-                info.function_tools[0].parameters_json_schema["properties"]
-            ) == [
-                "customer_id",
-                "format",
-            ]
-            return ModelResponse(
-                parts=[
-                    ToolCallPart(
-                        "load_customer",
-                        {"customer_id": "customer-7", "format": "summary"},
-                    )
-                ]
-            )
-        return ModelResponse(
-            parts=[
-                ToolCallPart(
-                    info.output_tools[0].name,
-                    {"summary": "legacy", "confidence": 1.0},
-                )
-            ]
-        )
+    compiled = _compile_tool(
+        ToolDef(
+            name="load_customer",
+            description=load_customer.__doc__ or "",
+            fn=load_customer,
+            required=True,
+            contract=contract,
+            bounds=Exactly(2),
+        ),
+        0,
+        enforce=False,
+        snapshot_defaults=False,
+    )
+    run = _EndpointRun(request={}, states=[_OperationState()])
 
     result = asyncio.run(
-        Runtime(model=FunctionModel(model_function)).call(
-            summon.endpoints[0], {"query": "customer-7"}
-        )
+        _tracked_operation(compiled)(SimpleNamespace(deps=run), "customer-7", "summary")
     )
 
-    assert result.summary == "legacy"
-    assert starts == 1
+    assert list(compiled.visible_signature.parameters) == ["customer_id", "format"]
+    assert compiled.minimum == 1
+    assert compiled.maximum is None
+    assert result == CustomerRecord(customer_id="customer-7", format="summary")
+    assert run.states[0] == _OperationState(succeeded=1)
 
 
 def test_runtime_normalizes_explicit_and_legacy_model_names():
