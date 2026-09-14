@@ -8,6 +8,8 @@ it needed the rejection case.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 from pydantic import BaseModel
 
@@ -71,6 +73,48 @@ def test_a_bare_callable_with_implicit_marker_bounds_needs_no_contract(dependenc
         ...
 
     assert summon.endpoints[0].tools[0].contract is None
+
+
+def test_a_copied_legacy_tool_cannot_disguise_changed_bounds_as_implicit():
+    source = Summon("source")
+
+    @source("/source")
+    def source_endpoint(
+        request: OrderRequest, customer=Required(lookup_customer)
+    ) -> OrderResponse:
+        """Load one customer through the legacy path."""
+        ...
+
+    forged = replace(source.endpoints[0].tools[0], bounds=Exactly(2))
+    summon = Summon("svc", tools=[forged])
+
+    with pytest.raises(TypeError, match="cannot enforce the declared call bound"):
+
+        @summon("/orders")
+        def create_order(request: OrderRequest) -> OrderResponse:
+            """Place an order."""
+            ...
+
+
+def test_an_unchanged_copy_of_a_legacy_tool_keeps_implicit_marker_bounds():
+    source = Summon("source")
+
+    @source("/source")
+    def source_endpoint(
+        request: OrderRequest, customer=Required(lookup_customer)
+    ) -> OrderResponse:
+        """Load one customer through the legacy path."""
+        ...
+
+    copied = replace(source.endpoints[0].tools[0])
+    summon = Summon("svc", tools=[copied])
+
+    @summon("/orders")
+    def create_order(request: OrderRequest) -> OrderResponse:
+        """Place an order."""
+        ...
+
+    assert summon.endpoints[0].tools[0].bounds == copied.bounds
 
 
 def test_a_bare_operation_contract_is_rejected_instead_of_using_the_legacy_path():

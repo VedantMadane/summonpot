@@ -1134,6 +1134,87 @@ def test_legacy_runtime_bookkeeping_ignores_unenforced_broader_call_bounds():
     assert run.states[0] == _OperationState(succeeded=1)
 
 
+def test_unchanged_copied_legacy_tool_runs_through_function_model_runtime():
+    starts = 0
+
+    def load_customer(customer_id: str) -> CustomerRecord:
+        """Load one customer through the legacy runtime."""
+        nonlocal starts
+        starts += 1
+        return CustomerRecord(customer_id=customer_id, format="summary")
+
+    source = Summon("source")
+
+    @source("/source")
+    def source_endpoint(
+        request: ResearchRequest, customer=Required(load_customer)
+    ) -> ResearchResponse:
+        """Create public metadata carrying implicit Required bounds."""
+        ...
+
+    copied = replace(source.endpoints[0].tools[0])
+    turns = 0
+
+    def model_function(messages, info: AgentInfo):
+        nonlocal turns
+        turns += 1
+        if turns == 1:
+            return ModelResponse(
+                parts=[ToolCallPart("load_customer", {"customer_id": "customer-7"})]
+            )
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    info.output_tools[0].name,
+                    {"summary": "legacy", "confidence": 1.0},
+                )
+            ]
+        )
+
+    runtime = Runtime(model=FunctionModel(model_function))
+    summon = Summon("svc", tools=[copied], runtime=runtime)
+    _register_endpoint(summon)
+
+    result = asyncio.run(runtime.call(summon.endpoints[0], {"query": "customer-7"}))
+
+    assert result == ResearchResponse(summary="legacy", confidence=1.0)
+    assert starts == 1
+    assert turns == 2
+
+
+def test_changed_copied_legacy_bounds_fail_before_function_model_runtime_starts():
+    model_turns = 0
+
+    def load_customer(customer_id: str) -> CustomerRecord:
+        """Load one customer through the legacy runtime."""
+        return CustomerRecord(customer_id=customer_id, format="summary")
+
+    source = Summon("source")
+
+    @source("/source")
+    def source_endpoint(
+        request: ResearchRequest, customer=Required(load_customer)
+    ) -> ResearchResponse:
+        """Create public metadata carrying implicit Required bounds."""
+        ...
+
+    forged = replace(source.endpoints[0].tools[0], bounds=Exactly(2))
+
+    def model_function(messages, info: AgentInfo):
+        nonlocal model_turns
+        model_turns += 1
+        return ModelResponse(parts=[TextPart("should not run")])
+
+    summon = Summon(
+        "svc", tools=[forged], runtime=Runtime(model=FunctionModel(model_function))
+    )
+
+    with pytest.raises(TypeError, match="cannot enforce the declared call bound"):
+        _register_endpoint(summon)
+
+    assert model_turns == 0
+
+
 def test_runtime_normalizes_explicit_and_legacy_model_names():
     runtime = Runtime(model="anthropic:claude-sonnet-4-5")
 

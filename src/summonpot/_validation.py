@@ -379,11 +379,18 @@ def _validate_runtime_admission(*, endpoint: str, tools: list[Any]) -> None:
     for index, tool in enumerate(tools):
         contract = tool.contract
         explicit_contract = contract is not None
-        explicit_bounds = (
-            tool.bounds is not None
-            if tool.bounds_explicit is None
-            else tool.bounds_explicit
-        )
+        explicit_bounds = tool.bounds_explicit
+        if explicit_bounds is None:
+            explicit_bounds = tool.bounds is not None
+        elif not explicit_bounds and tool.bounds is not None:
+            # ``False`` is only registration provenance for the bounds implied by
+            # the dependency marker. ToolDef is public and copyable, so a caller can
+            # replace ``bounds`` while preserving the flag; treat that mismatch as
+            # an external explicit declaration rather than trusting stale metadata.
+            explicit_bounds = (
+                tool.bounds.minimum != (1 if tool.required else 0)
+                or tool.bounds.maximum is not None
+            )
         bounds_are_exactly_once = (
             tool.bounds is not None
             and tool.bounds.minimum == 1
