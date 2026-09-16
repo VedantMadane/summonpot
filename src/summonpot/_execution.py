@@ -410,7 +410,7 @@ def _number_ok(
     value: Any, schema: Mapping[str, Any], model_config: Mapping[str, Any]
 ) -> bool:
     allow_inf_nan = schema.get("allow_inf_nan", model_config.get("allow_inf_nan"))
-    if allow_inf_nan is False:
+    if allow_inf_nan is False and type(value) in {float, Decimal}:
         finite = value.is_finite() if type(value) is Decimal else math.isfinite(value)
         if not finite:
             return False

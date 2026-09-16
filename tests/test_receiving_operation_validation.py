@@ -848,6 +848,87 @@ def test_receiver_model_config_constraints_apply_to_constructed_fields():
     assert received == [valid]
 
 
+@pytest.mark.parametrize(
+    "value",
+    [pytest.param(10**400, id="positive"), pytest.param(-(10**400), id="negative")],
+)
+def test_receiver_model_config_accepts_large_integer_fields_directly(value: int):
+    class Payload(BaseModel):
+        model_config = ConfigDict(allow_inf_nan=False)
+
+        number: int
+
+    received: list[Any] = []
+    summon = _receiver_service(Payload, received)
+    canonical = Payload(number=value)
+
+    assert _call_with_canonical(summon, canonical) == Result(value=1)
+    assert received == [canonical]
+
+
+def test_receiver_model_config_preserves_float_and_decimal_finiteness_checks():
+    class FloatPayload(BaseModel):
+        model_config = ConfigDict(allow_inf_nan=False)
+
+        number: float
+
+    class DecimalPayload(BaseModel):
+        model_config = ConfigDict(allow_inf_nan=False)
+
+        number: Decimal
+
+    cases = (
+        (FloatPayload, 1e300, float("inf")),
+        (DecimalPayload, Decimal("1E+1000"), Decimal("Infinity")),
+    )
+    for payload_type, finite, non_finite in cases:
+        received: list[Any] = []
+        summon = _receiver_service(payload_type, received)
+        valid = payload_type.model_construct(number=finite)
+        invalid = payload_type.model_construct(number=non_finite)
+
+        assert _call_with_canonical(summon, valid) == Result(value=1)
+        with pytest.raises(_OperationInputError):
+            _call_with_canonical(summon, invalid)
+
+        assert received == [valid]
+
+
+@pytest.mark.parametrize(
+    "value",
+    [pytest.param(10**400, id="positive"), pytest.param(-(10**400), id="negative")],
+)
+def test_receiver_model_config_accepts_large_integer_fields_over_http(value: int):
+    class Payload(BaseModel):
+        model_config = ConfigDict(allow_inf_nan=False)
+
+        number: int
+
+    class Request(BaseModel):
+        value: Payload
+
+    def apply(value: Any) -> Result:
+        return Result(value=value.number)
+
+    apply.__annotations__ = {"value": Payload, "return": Result}
+    operation = Operation(apply, bind={"value": FromRequest("value")}, output=Result)
+    summon = Summon("http-large-integer-receiver")
+
+    def endpoint(request, result=Required(operation, calls=Exactly(1))):
+        """Accept finite integer fields without float conversion."""
+        ...
+
+    endpoint.__annotations__ = {"request": Request, "return": Result}
+    summon("/apply")(endpoint)
+
+    response = TestClient(build_app(summon), raise_server_exceptions=False).post(
+        "/apply", json={"value": {"number": value}}
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"value": value}
+
+
 def test_receiver_uses_narrow_model_config_for_a_broader_validated_subclass():
     class NarrowPayload(BaseModel):
         model_config = ConfigDict(str_max_length=2)
