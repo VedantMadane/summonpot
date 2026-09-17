@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import UserDict
+from collections.abc import Mapping
 from typing import Annotated, Any
 
 import pytest
@@ -209,6 +210,62 @@ def _model_service(request_model: type[BaseModel], received: list[Any]) -> Summo
     return summon
 
 
+def test_raw_runtime_rejects_non_exact_outer_mappings_without_hooks():
+    hooks: list[str] = []
+
+    class Request(BaseModel):
+        value: int
+
+    class HostileMapping(Mapping[str, Any]):
+        def __getitem__(self, key: str) -> Any:
+            hooks.append("mapping getitem")
+            raise RuntimeError("application getitem")
+
+        def __iter__(self):
+            hooks.append("mapping iter")
+            raise RuntimeError("application iter")
+
+        def __len__(self) -> int:
+            hooks.append("mapping len")
+            raise RuntimeError("application len")
+
+        def __repr__(self) -> str:
+            hooks.append("mapping repr")
+            raise RuntimeError("application repr")
+
+    class HostileUserDict(UserDict[str, Any]):
+        def __init__(self) -> None:
+            self.data = {"value": 7}
+
+        def __getitem__(self, key: str) -> Any:
+            hooks.append("userdict getitem")
+            raise RuntimeError("application getitem")
+
+        def __iter__(self):
+            hooks.append("userdict iter")
+            raise RuntimeError("application iter")
+
+        def __repr__(self) -> str:
+            hooks.append("userdict repr")
+            raise RuntimeError("application repr")
+
+    received: list[Any] = []
+    summon = _model_service(Request, received)
+
+    assert asyncio.run(Runtime().call(summon.endpoints[0], {"value": 3})) == Result(
+        value=3
+    )
+    for params in (HostileMapping(), HostileUserDict()):
+        with pytest.raises(ValidationError, match="exact dictionary"):
+            asyncio.run(Runtime().call(summon.endpoints[0], params))
+
+    response = TestClient(build_app(summon)).post("/model", json={"value": 5})
+    assert response.status_code == 200, response.text
+    assert response.json() == {"value": 5}
+    assert received == [3, 5]
+    assert hooks == []
+
+
 def test_model_alias_default_required_and_canonical_values_match_http():
     class Request(BaseModel):
         value: int = Field(alias="external")
@@ -302,6 +359,54 @@ def test_custom_init_request_runs_once_for_direct_raw_and_http():
     assert http_received == [7]
     assert initializations == [3, 5]
     assert validations == [4, 6]
+
+
+def test_custom_init_hostile_top_level_storage_fails_closed_for_raw_only():
+    hooks: list[str] = []
+    base_descriptor = BaseModel.__dict__["__dict__"]
+
+    class HostileDict(dict[str, Any]):
+        def __contains__(self, key: object) -> bool:
+            hooks.append("contains")
+            raise RuntimeError("application contains")
+
+        def __getitem__(self, key: str) -> Any:
+            hooks.append("getitem")
+            raise RuntimeError("application getitem")
+
+        def __iter__(self):
+            hooks.append("iter")
+            raise RuntimeError("application iter")
+
+        def items(self):
+            hooks.append("items")
+            raise RuntimeError("application items")
+
+        def __repr__(self) -> str:
+            hooks.append("repr")
+            raise RuntimeError("application repr")
+
+    class Request(BaseModel):
+        value: int
+
+        def __init__(self, *, value: int) -> None:
+            super().__init__(value=value)
+            base_descriptor.__set__(self, HostileDict(value=value))
+
+    raw_received: list[Any] = []
+    raw = _model_service(Request, raw_received)
+    with pytest.raises(ValidationError, match="canonical storage"):
+        asyncio.run(Runtime().call(raw.endpoints[0], {"value": 7}))
+
+    http_received: list[Any] = []
+    http = _model_service(Request, http_received)
+    response = TestClient(build_app(http)).post("/model", json={"value": 11})
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"value": 11}
+    assert raw_received == []
+    assert http_received == [11]
+    assert hooks == []
 
 
 def test_custom_init_request_runs_once_for_agent_raw_and_http():

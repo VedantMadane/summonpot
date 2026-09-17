@@ -10,12 +10,12 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 from types import MappingProxyType
-from typing import Any
+from typing import Any, LiteralString
 from uuid import UUID
 from weakref import ReferenceType, ref
 
-from pydantic import BaseModel, ConfigDict, TypeAdapter, create_model
-from pydantic_core import SchemaValidator, TzInfo
+from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError, create_model
+from pydantic_core import PydanticCustomError, SchemaValidator, TzInfo
 
 from summonpot._output_validation import (
     _compile_input_validator,
@@ -163,6 +163,17 @@ def _prompt_field_name(name: str, field: Any) -> str:
 def _field_is_statically_excluded(field: Any) -> bool:
     """Read static Field(exclude=True) metadata without application dispatch."""
     return object.__getattribute__(field, "exclude") is True
+
+
+def _unsupported_raw_request(
+    error_type: LiteralString, message: LiteralString
+) -> ValidationError:
+    """Build a stable admission error without rendering application-owned input."""
+    error = PydanticCustomError(error_type, message)
+    return ValidationError.from_exception_data(
+        "request input",
+        [{"type": error, "loc": (), "input": "<unsupported raw value>"}],
+    )
 
 
 def _inert_hashable(value: Any) -> bool:
@@ -553,9 +564,25 @@ def _prepare_request(
         _TRANSPORT_SNAPSHOTS[id(params)] = _ConsumedTransport(snapshot.reference)
         return _RequestValues(snapshot.prompt, typed=snapshot.typed)
 
-    validated = plan.input_validator.validate_python(dict(params))
+    if type(params) is dict or type(params) is _RequestValues:
+        # The exact compatibility carrier has no overridable mapping hooks. Its
+        # typed view is still untrusted; validate only a built-in copy of the
+        # public values, preserving caller isolation and provenance semantics.
+        raw_params = dict.copy(params)
+    else:
+        raise _unsupported_raw_request(
+            "outer_mapping_type",
+            "raw request input must be an exact dictionary",
+        )
+
+    validated = plan.input_validator.validate_python(raw_params)
     fields = _pydantic_fields(validated)
     storage = _BASE_MODEL_DICT_DESCRIPTOR.__get__(validated, type(validated))
+    if type(storage) is not dict:
+        raise _unsupported_raw_request(
+            "canonical_storage_type",
+            "validated request has unsupported canonical storage",
+        )
     typed = {name: storage[name] for name in fields if name in storage}
     prompt = {
         _prompt_field_name(name, field): _inert_transport_value(typed[name])
