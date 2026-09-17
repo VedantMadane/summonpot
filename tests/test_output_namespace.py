@@ -760,6 +760,54 @@ class SafeMutatingTypedDictEnvelope(BaseModel):
         return self
 
 
+class ReplacingTypedDictEnvelope(BaseModel):
+    item: AllowedExtraTypedDict
+
+    @model_validator(mode="after")
+    def replace_nested_mapping(self) -> "ReplacingTypedDictEnvelope":
+        self.item = {**self.item, "wireValue": 99}  # type: ignore[typeddict-unknown-key]
+        return self
+
+
+MAPPING_AUDIT_HOOKS: list[str] = []
+
+
+class HostileDict(dict[str, Any]):
+    def __iter__(self):
+        MAPPING_AUDIT_HOOKS.append("iter")
+        raise AssertionError("iteration hook called during output audit")
+
+    def keys(self):
+        MAPPING_AUDIT_HOOKS.append("keys")
+        raise AssertionError("keys hook called during output audit")
+
+    def items(self):
+        MAPPING_AUDIT_HOOKS.append("items")
+        raise AssertionError("items hook called during output audit")
+
+    def values(self):
+        MAPPING_AUDIT_HOOKS.append("values")
+        raise AssertionError("values hook called during output audit")
+
+    def __eq__(self, other: object) -> bool:
+        MAPPING_AUDIT_HOOKS.append("eq")
+        raise AssertionError("equality hook called during output audit")
+
+    def __repr__(self) -> str:
+        MAPPING_AUDIT_HOOKS.append("repr")
+        raise AssertionError("repr hook called during output audit")
+
+
+class HostileReplacingTypedDictEnvelope(BaseModel):
+    item: AllowedExtraTypedDict
+
+    @model_validator(mode="after")
+    def replace_nested_mapping(self) -> "HostileReplacingTypedDictEnvelope":
+        self.item = HostileDict({**self.item, "wireValue": 99})  # type: ignore[assignment]
+        MAPPING_AUDIT_HOOKS.clear()
+        return self
+
+
 SET_AUDIT_HOOKS: list[str] = []
 
 
@@ -917,6 +965,61 @@ def test_parent_validator_can_add_nested_typed_dict_noncolliding_extra():
     assert validated.model_dump(mode="json", by_alias=True) == {
         "item": {"wireValue": 7, "note": "safe"}
     }
+
+
+@pytest.mark.parametrize(
+    "output,value",
+    [
+        (ReplacingTypedDictEnvelope, {"item": {"value": 7}}),
+        (ReplacingTypedDictEnvelope | int, {"item": {"value": 7}}),
+        (RootModel[ReplacingTypedDictEnvelope], {"item": {"value": 7}}),
+        (list[ReplacingTypedDictEnvelope], [{"item": {"value": 7}}]),
+        (tuple[ReplacingTypedDictEnvelope], [{"item": {"value": 7}}]),
+        (
+            tuple[ReplacingTypedDictEnvelope, ...],
+            [{"item": {"value": 7}}, {"item": {"value": 8}}],
+        ),
+        (dict[str, ReplacingTypedDictEnvelope], {"entry": {"item": {"value": 7}}}),
+    ],
+)
+def test_final_audit_follows_schema_after_typed_dict_replacement(
+    output: Any, value: Any
+):
+    with pytest.raises(ValidationError, match="wireValue"):
+        _compile_output_validator(TypeAdapter(output)).validate_python(value)
+
+
+def test_replacement_audit_does_not_call_mapping_hooks():
+    MAPPING_AUDIT_HOOKS.clear()
+
+    with pytest.raises(ValidationError, match="wireValue"):
+        _compile_output_validator(
+            TypeAdapter(HostileReplacingTypedDictEnvelope)
+        ).validate_python({"item": {"value": 7}})
+
+    assert MAPPING_AUDIT_HOOKS == []
+
+
+def test_runtime_rejects_prevalidated_model_nested_typed_dict_alias_collision():
+    result = ReplacingTypedDictEnvelope.model_construct(item={"value": 7})
+    summon = _direct_summon(ReplacingTypedDictEnvelope, result)
+
+    with pytest.raises(_OperationOutputError, match="invalid declared output"):
+        asyncio.run(
+            Runtime(model="invalid:no-model").call(summon.endpoints[0], {"value": 7})
+        )
+
+
+def test_http_rejects_prevalidated_model_nested_typed_dict_alias_collision():
+    result = ReplacingTypedDictEnvelope.model_construct(item={"value": 7})
+    summon = _direct_summon(ReplacingTypedDictEnvelope, result)
+
+    response = TestClient(build_app(summon), raise_server_exceptions=False).post(
+        "/output", json={"value": 7}
+    )
+
+    assert response.status_code == 500
+    assert '"wireValue":7,"wireValue":99' not in response.text
 
 
 @pytest.mark.parametrize(

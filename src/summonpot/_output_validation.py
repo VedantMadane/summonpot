@@ -281,6 +281,7 @@ def _reject_ambiguous_object_namespaces(schema: Any) -> None:
 def _runtime_model_extra_collision_auditor(schema: Any) -> Any:
     """Build a final schema-aware storage audit without application hooks."""
     dataclass_fields: list[tuple[type[Any], tuple[str, ...]]] = []
+    definitions: dict[str, dict[str, Any]] = {}
     seen_schema: set[int] = set()
 
     def collect_dataclasses(node: Any) -> None:
@@ -291,6 +292,9 @@ def _runtime_model_extra_collision_auditor(schema: Any) -> Any:
             seen_schema.add(identity)
             if node.get("type") == "dataclass" and isinstance(node.get("cls"), type):
                 dataclass_fields.append((node["cls"], tuple(node.get("fields", ()))))
+            reference = node.get("ref")
+            if isinstance(reference, str):
+                definitions[reference] = node
             for value in dict.values(node):
                 collect_dataclasses(value)
         elif isinstance(node, (list, tuple)):
@@ -298,6 +302,180 @@ def _runtime_model_extra_collision_auditor(schema: Any) -> Any:
                 collect_dataclasses(value)
 
     collect_dataclasses(schema)
+
+    def dataclass_storage(value: Any) -> tuple[dict[Any, Any], ...]:
+        state = object.__getstate__(value)
+        if isinstance(state, dict):
+            return (state,)
+        if isinstance(state, tuple):
+            return tuple(item for item in state if isinstance(item, dict))
+        return ()
+
+    def schema_audit(value: Any) -> None:
+        """Follow schema-owned storage after outer validators may replace values."""
+        seen: set[tuple[int, int]] = set()
+
+        def inspect_schema(current: Any, node: Any) -> None:
+            if not isinstance(node, dict):
+                return
+            marker = (id(current), id(node))
+            if marker in seen:
+                return
+            seen.add(marker)
+            node_type = node.get("type")
+
+            if node_type == "definitions":
+                inspect_schema(current, node.get("schema"))
+                return
+            if node_type == "definition-ref":
+                reference = node.get("schema_ref")
+                if isinstance(reference, str):
+                    inspect_schema(current, definitions.get(reference))
+                return
+            if node_type in {
+                "default",
+                "function-after",
+                "function-before",
+                "function-plain",
+                "function-wrap",
+                "nullable",
+                "custom-error",
+                "json",
+            }:
+                inspect_schema(current, node.get("schema"))
+                return
+            if node_type == "lax-or-strict":
+                inspect_schema(current, node.get("lax_schema"))
+                inspect_schema(current, node.get("strict_schema"))
+                return
+            if node_type == "model":
+                cls = node.get("cls")
+                if not isinstance(cls, type) or not any(
+                    base is cls for base in type(current).__mro__
+                ):
+                    return
+                if node.get("root_model"):
+                    storage = object.__getattribute__(current, "__dict__")
+                    if dict.__contains__(storage, "root"):
+                        inspect_schema(
+                            dict.__getitem__(storage, "root"), node.get("schema")
+                        )
+                    return
+                inspect_schema(current, node.get("schema"))
+                return
+            if node_type == "model-fields":
+                if not isinstance(current, BaseModel):
+                    return
+                storage = object.__getattribute__(current, "__dict__")
+                for name, field in node.get("fields", {}).items():
+                    if dict.__contains__(storage, name):
+                        inspect_schema(dict.__getitem__(storage, name), field)
+                return
+            if node_type == "model-field" or node_type == "typed-dict-field":
+                inspect_schema(current, node.get("schema"))
+                return
+            if node_type == "typed-dict":
+                if not isinstance(current, dict):
+                    return
+                fields = node.get("fields", {})
+                field_names = set(fields)
+                emitted_names = {
+                    field.get("serialization_alias", name)
+                    for name, field in fields.items()
+                    if not field.get("serialization_exclude")
+                }
+                pairs = tuple(
+                    zip(dict.__iter__(current), dict.values(current), strict=True)
+                )
+                string_values = {key: item for key, item in pairs if type(key) is str}
+                required = {
+                    name
+                    for name, field in fields.items()
+                    if field.get("required", True)
+                }
+                if not required.issubset(string_values):
+                    return
+                extras = set(string_values).difference(field_names)
+                shadowed = emitted_names.intersection(extras)
+                if shadowed:
+                    names = ", ".join(repr(name) for name in sorted(shadowed))
+                    raise ValueError(
+                        f"output extras shadow declared serialized field keys: {names}"
+                    )
+                for name, field in fields.items():
+                    if name in string_values:
+                        inspect_schema(string_values[name], field)
+                extras_schema = node.get("extras_schema")
+                if extras_schema is not None:
+                    for key, item in pairs:
+                        if type(key) is not str or key in extras:
+                            inspect_schema(item, extras_schema)
+                return
+            if node_type == "dataclass":
+                cls = node.get("cls")
+                if not isinstance(cls, type) or not any(
+                    base is cls for base in type(current).__mro__
+                ):
+                    return
+                inspect_schema(current, node.get("schema"))
+                return
+            if node_type == "dataclass-args":
+                storages = dataclass_storage(current)
+                for field in node.get("fields", ()):
+                    name = field.get("name")
+                    for storage in storages:
+                        if dict.__contains__(storage, name):
+                            inspect_schema(dict.__getitem__(storage, name), field)
+                            break
+                return
+            if node_type == "dataclass-field":
+                inspect_schema(current, node.get("schema"))
+                return
+            if node_type in {"union", "tagged-union"}:
+                choices = node.get("choices", ())
+                values = choices.values() if isinstance(choices, dict) else choices
+                for choice in values:
+                    candidate = choice[0] if isinstance(choice, tuple) else choice
+                    inspect_schema(current, candidate)
+                return
+            if node_type == "list" and isinstance(current, list):
+                for item in list.__iter__(current):
+                    inspect_schema(item, node.get("items_schema"))
+                return
+            if node_type == "tuple" and isinstance(current, tuple):
+                item_schemas = node.get("items_schema", ())
+                variadic_index = node.get("variadic_item_index")
+                for index, item in enumerate(tuple.__iter__(current)):
+                    if index < len(item_schemas):
+                        inspect_schema(item, item_schemas[index])
+                    elif isinstance(variadic_index, int) and variadic_index < len(
+                        item_schemas
+                    ):
+                        inspect_schema(item, item_schemas[variadic_index])
+                return
+            if node_type == "set" and isinstance(current, set):
+                for item in set.__iter__(current):
+                    inspect_schema(item, node.get("items_schema"))
+                return
+            if node_type == "frozenset" and isinstance(current, frozenset):
+                for item in frozenset.__iter__(current):
+                    inspect_schema(item, node.get("items_schema"))
+                return
+            if node_type == "dict" and isinstance(current, dict):
+                values_schema = node.get("values_schema")
+                for item in dict.values(current):
+                    inspect_schema(item, values_schema)
+                return
+            if node_type == "json-or-python":
+                inspect_schema(current, node.get("python_schema"))
+                inspect_schema(current, node.get("json_schema"))
+                return
+            if node_type == "chain":
+                steps = node.get("steps", ())
+                if steps:
+                    inspect_schema(current, steps[-1])
+
+        inspect_schema(value, schema)
 
     def reject(value: Any) -> Any:
         seen: set[int] = set()
@@ -311,14 +489,7 @@ def _runtime_model_extra_collision_auditor(schema: Any) -> Any:
                 if identity in seen:
                     return
                 seen.add(identity)
-                state = object.__getstate__(current)
-                storages = (
-                    (state,)
-                    if isinstance(state, dict)
-                    else tuple(item for item in state if isinstance(item, dict))
-                    if isinstance(state, tuple)
-                    else ()
-                )
+                storages = dataclass_storage(current)
                 for name in field_names:
                     for storage in storages:
                         if name in storage:
@@ -344,7 +515,10 @@ def _runtime_model_extra_collision_auditor(schema: Any) -> Any:
                     for name, field in model_type.model_computed_fields.items()
                 )
                 extras = object.__getattribute__(current, "__pydantic_extra__") or {}
-                shadowed = (set(model_type.model_fields) | emitted).intersection(extras)
+                extra_names = {key for key in dict.__iter__(extras) if type(key) is str}
+                shadowed = (set(model_type.model_fields) | emitted).intersection(
+                    extra_names
+                )
                 if shadowed:
                     names = ", ".join(repr(name) for name in sorted(shadowed))
                     raise ValueError(
@@ -365,7 +539,9 @@ def _runtime_model_extra_collision_auditor(schema: Any) -> Any:
                 if namespace is not None and namespace[0] is current:
                     _, field_names, emitted_names = namespace
                     extras = {
-                        key for key in dict.__iter__(current) if key not in field_names
+                        key
+                        for key in dict.__iter__(current)
+                        if type(key) is str and key not in field_names
                     }
                     shadowed = emitted_names.intersection(extras)
                     if shadowed:
@@ -406,6 +582,7 @@ def _runtime_model_extra_collision_auditor(schema: Any) -> Any:
                     inspect(item)
 
         inspect(value)
+        schema_audit(value)
         return value
 
     return reject
