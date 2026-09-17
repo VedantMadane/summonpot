@@ -457,68 +457,188 @@ def _runtime_model_extra_collision_auditor(schema: Any) -> Any:
         "tuple": tuple,
     }
 
-    def schema_accepts_type(current: Any, node: Any) -> bool | None:
-        """Match union branches by runtime type without application operations."""
+    def schema_match_score(
+        current: Any,
+        node: Any,
+        active: set[tuple[int, int]] | None = None,
+    ) -> int | None:
+        """Score structural runtime evidence for one union branch.
+
+        ``None`` is a proven mismatch. Non-negative scores are compatible, with
+        larger values carrying more exact runtime evidence. Inspection is limited to
+        exact built-in storage and object-owned model/dataclass storage: branch
+        selection must not rerun validators or invoke application iteration,
+        equality, representation, or hashing hooks.
+        """
         if not isinstance(node, dict):
-            return None
-        node_type = node.get("type")
-        expected = declared_container_type(node)
-        if expected is not None:
-            return type(current) is expected
-        scalar = scalar_types.get(node_type) if isinstance(node_type, str) else None
-        if scalar is not None:
-            return type(current) is scalar
-        if node_type in {"model", "dataclass"}:
-            cls = node.get("cls")
-            return isinstance(cls, type) and any(
-                base is cls for base in type(current).__mro__
-            )
-        if node_type == "typed-dict":
-            return type(current) is dict
-        if node_type == "is-instance":
-            cls = node.get("cls")
-            return isinstance(cls, type) and any(
-                base is cls for base in type(current).__mro__
-            )
-        if node_type == "definition-ref":
-            reference = node.get("schema_ref")
-            return schema_accepts_type(
-                current,
-                definitions.get(reference) if isinstance(reference, str) else None,
-            )
-        if node_type == "definitions":
-            return schema_accepts_type(current, node.get("schema"))
-        if node_type == "nullable":
-            return (
-                True
-                if current is None
-                else schema_accepts_type(current, node.get("schema"))
-            )
-        if node_type in {
-            "default",
-            "function-after",
-            "function-before",
-            "function-wrap",
-            "custom-error",
-            "json",
-        }:
-            return schema_accepts_type(current, node.get("schema"))
-        if node_type == "chain":
-            steps = node.get("steps", ())
-            return schema_accepts_type(current, steps[-1]) if steps else None
-        if node_type in {"json-or-python", "lax-or-strict"}:
-            branches = (
-                (node.get("python_schema"), node.get("json_schema"))
-                if node_type == "json-or-python"
-                else (node.get("lax_schema"), node.get("strict_schema"))
-            )
-            matches = [schema_accepts_type(current, branch) for branch in branches]
-            if True in matches:
-                return True
-            return None if None in matches else False
-        if node_type == "any":
-            return True
-        return None
+            return 0
+        if active is None:
+            active = set()
+        marker = (id(current), id(node))
+        if marker in active:
+            return 0
+        active.add(marker)
+        try:
+            node_type = node.get("type")
+            if node_type == "definition-ref":
+                reference = node.get("schema_ref")
+                return schema_match_score(
+                    current,
+                    definitions.get(reference) if isinstance(reference, str) else None,
+                    active,
+                )
+            if node_type == "definitions":
+                return schema_match_score(current, node.get("schema"), active)
+            if node_type == "nullable":
+                if current is None:
+                    return 1
+                return schema_match_score(current, node.get("schema"), active)
+            if node_type in {
+                "default",
+                "function-after",
+                "function-before",
+                "function-plain",
+                "function-wrap",
+                "custom-error",
+                "json",
+            }:
+                return schema_match_score(current, node.get("schema"), active)
+            if node_type == "chain":
+                steps = node.get("steps", ())
+                return schema_match_score(current, steps[-1], active) if steps else 0
+            if node_type in {"json-or-python", "lax-or-strict"}:
+                branches = (
+                    (node.get("python_schema"), node.get("json_schema"))
+                    if node_type == "json-or-python"
+                    else (node.get("lax_schema"), node.get("strict_schema"))
+                )
+                scores = [
+                    score
+                    for branch in branches
+                    if (score := schema_match_score(current, branch, active))
+                    is not None
+                ]
+                return max(scores) if scores else None
+
+            if node_type in {"union", "tagged-union"}:
+                choices = node.get("choices", ())
+                values = choices.values() if isinstance(choices, dict) else choices
+                scores = [
+                    score
+                    for choice in values
+                    if (
+                        score := schema_match_score(
+                            current,
+                            choice[0] if isinstance(choice, tuple) else choice,
+                            active,
+                        )
+                    )
+                    is not None
+                ]
+                return max(scores) if scores else None
+
+            expected = declared_container_type(node)
+            if expected is not None:
+                if type(current) is not expected:
+                    return None
+                concrete = concrete_container_schema(node, expected) or {}
+                score = 1
+                children: list[tuple[Any, Any]] = []
+                if expected is dict:
+                    keys_schema = concrete.get("keys_schema")
+                    values_schema = concrete.get("values_schema")
+                    children.extend(
+                        zip(dict.__iter__(current), dict.values(current), strict=True)
+                    )
+                    child_schemas = (keys_schema, values_schema)
+                    for key, item in children:
+                        for child, child_schema in zip(
+                            (key, item), child_schemas, strict=True
+                        ):
+                            child_score = schema_match_score(
+                                child, child_schema, active
+                            )
+                            if child_score is None:
+                                return None
+                            score += child_score
+                    return score
+                if expected is tuple:
+                    item_schemas = concrete.get("items_schema", ())
+                    variadic_index = concrete.get("variadic_item_index")
+                    for index, item in enumerate(tuple.__iter__(current)):
+                        child_schema = None
+                        if index < len(item_schemas):
+                            child_schema = item_schemas[index]
+                        elif isinstance(variadic_index, int) and variadic_index < len(
+                            item_schemas
+                        ):
+                            child_schema = item_schemas[variadic_index]
+                        child_score = schema_match_score(item, child_schema, active)
+                        if child_score is None:
+                            return None
+                        score += child_score
+                    return score
+                items_schema = container_items_schema(node, expected)
+                iterator = {
+                    list: list.__iter__,
+                    set: set.__iter__,
+                    frozenset: frozenset.__iter__,
+                    deque: deque.__iter__,
+                }[expected]
+                for item in iterator(current):
+                    child_score = schema_match_score(item, items_schema, active)
+                    if child_score is None:
+                        return None
+                    score += child_score
+                return score
+
+            scalar = scalar_types.get(node_type) if isinstance(node_type, str) else None
+            if scalar is not None:
+                return 1 if type(current) is scalar else None
+            if node_type in {"model", "dataclass"}:
+                cls = node.get("cls")
+                if not isinstance(cls, type) or cls not in type(current).__mro__:
+                    return None
+                return 2 if type(current) is cls else 1
+            if node_type == "is-instance":
+                cls = node.get("cls")
+                if not isinstance(cls, type) or cls not in type(current).__mro__:
+                    return None
+                return 2 if type(current) is cls else 1
+            if node_type == "typed-dict":
+                if type(current) is not dict:
+                    return None
+                fields = node.get("fields", {})
+                pairs = tuple(
+                    zip(dict.__iter__(current), dict.values(current), strict=True)
+                )
+                string_values = {key: item for key, item in pairs if type(key) is str}
+                required = {
+                    name
+                    for name, field in fields.items()
+                    if field.get("required", True)
+                }
+                if not required.issubset(string_values):
+                    return None
+                score = 1 + len(required)
+                for name, field in fields.items():
+                    if name not in string_values:
+                        continue
+                    child_score = schema_match_score(string_values[name], field, active)
+                    if child_score is None:
+                        return None
+                    score += child_score
+                return score
+            if node_type == "typed-dict-field" or node_type == "model-field":
+                return schema_match_score(current, node.get("schema"), active)
+            if node_type == "literal":
+                expected_types = {type(value) for value in node.get("expected", ())}
+                return 1 if type(current) in expected_types else None
+            if node_type == "any":
+                return 0
+            return 0
+        finally:
+            active.remove(marker)
 
     def dataclass_storage(value: Any) -> tuple[dict[Any, Any], ...]:
         state = object.__getstate__(value)
@@ -558,9 +678,6 @@ def _runtime_model_extra_collision_auditor(schema: Any) -> Any:
                         "output container storage must use the exact built-in "
                         f"{expected_container.__name__} type"
                     )
-                identity = id(current)
-                if any(item[0] == identity for item in seen if item != marker):
-                    return
                 concrete = concrete_container_schema(node, expected_container) or {}
                 if expected_container is dict:
                     values_schema = concrete.get("values_schema")
@@ -695,23 +812,18 @@ def _runtime_model_extra_collision_auditor(schema: Any) -> Any:
                     choice[0] if isinstance(choice, tuple) else choice
                     for choice in values
                 ]
-                matching = [
-                    candidate
-                    for candidate in candidates
-                    if schema_accepts_type(current, candidate) is True
+                scored = [
+                    (score, index, candidate)
+                    for index, candidate in enumerate(candidates)
+                    if (score := schema_match_score(current, candidate)) is not None
                 ]
-                if matching:
-                    for candidate in matching:
-                        inspect_schema(current, candidate)
-                    return
-                unknown = [
-                    candidate
-                    for candidate in candidates
-                    if schema_accepts_type(current, candidate) is None
-                ]
-                if unknown:
-                    for candidate in unknown:
-                        inspect_schema(current, candidate)
+                if scored:
+                    # Pydantic's smart unions prefer exact runtime evidence and use
+                    # declaration order when branches remain indistinguishable. Audit
+                    # only that conservative winner: applying every compatible branch
+                    # can impose contradictory child-container schemas on valid output.
+                    _, _, candidate = max(scored, key=lambda item: (item[0], -item[1]))
+                    inspect_schema(current, candidate)
                     return
                 container_choices = [
                     expected

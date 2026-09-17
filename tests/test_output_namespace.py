@@ -1079,6 +1079,30 @@ class GeneratorReplacingDequeEnvelope(BaseModel):
         return self
 
 
+class ListBranchModel(BaseModel):
+    items: list[int]
+
+
+class TupleBranchModel(BaseModel):
+    items: tuple[int, ...]
+
+
+class ListBranchTypedDict(TypedDict):
+    items: list[int]
+
+
+class TupleBranchTypedDict(TypedDict):
+    items: tuple[int, ...]
+
+
+class LeftBranchTypedDict(TypedDict):
+    left: list[int]
+
+
+class RightBranchTypedDict(TypedDict):
+    right: tuple[int, ...]
+
+
 def test_mapping_extra_cannot_shadow_a_declared_serialization_alias():
     with pytest.raises(ValidationError, match="wireValue"):
         _compile_output_validator(TypeAdapter(AliasedExtraOutput)).validate_python(
@@ -1321,6 +1345,147 @@ def test_declared_concrete_containers_keep_safe_pydantic_transformations(
     validated = _compile_output_validator(TypeAdapter(output)).validate_python(value)
 
     assert type(validated) is expected_type
+
+
+@pytest.mark.parametrize(
+    "output,value,inner_type",
+    [
+        (list[list[int]] | list[tuple[int, ...]], [[1, 2]], list),
+        (list[tuple[int, ...]] | list[list[int]], [[1, 2]], list),
+        (list[list[int]] | list[tuple[int, ...]], [(1, 2)], tuple),
+        (list[tuple[int, ...]] | list[list[int]], [(1, 2)], tuple),
+    ],
+)
+def test_same_outer_list_union_audits_only_the_selected_nested_container_branch(
+    output: Any, value: Any, inner_type: type[Any]
+):
+    validated = _compile_output_validator(TypeAdapter(output)).validate_python(value)
+
+    assert type(validated) is list
+    assert type(list.__getitem__(validated, 0)) is inner_type
+
+
+@pytest.mark.parametrize(
+    "output,value,inner_type",
+    [
+        (dict[str, list[int]] | dict[str, tuple[int, ...]], {"item": [1, 2]}, list),
+        (dict[str, tuple[int, ...]] | dict[str, list[int]], {"item": [1, 2]}, list),
+        (dict[str, list[int]] | dict[str, tuple[int, ...]], {"item": (1, 2)}, tuple),
+        (dict[str, tuple[int, ...]] | dict[str, list[int]], {"item": (1, 2)}, tuple),
+    ],
+)
+def test_same_outer_dict_union_audits_only_the_selected_nested_container_branch(
+    output: Any, value: Any, inner_type: type[Any]
+):
+    validated = _compile_output_validator(TypeAdapter(output)).validate_python(value)
+
+    assert type(validated) is dict
+    assert type(dict.__getitem__(validated, "item")) is inner_type
+
+
+@pytest.mark.parametrize(
+    "output,value",
+    [
+        (list[list[int]] | list[tuple[int, ...]], []),
+        (list[tuple[int, ...]] | list[list[int]], []),
+        (list[list[int]] | list[tuple[int, ...]], [[]]),
+        (dict[str, list[int]] | dict[str, tuple[int, ...]], {}),
+    ],
+)
+def test_ambiguous_empty_same_container_unions_preserve_pydantic_output(
+    output: Any, value: Any
+):
+    expected = TypeAdapter(output).validate_python(value)
+
+    validated = _compile_output_validator(TypeAdapter(output)).validate_python(value)
+
+    assert type(validated) is type(expected)
+    if type(validated) is list and list.__len__(validated):
+        assert type(list.__getitem__(validated, 0)) is type(
+            list.__getitem__(expected, 0)
+        )
+
+
+@pytest.mark.parametrize(
+    "output,value,expected_model",
+    [
+        (
+            list[ListBranchModel] | list[TupleBranchModel],
+            [ListBranchModel(items=[1])],
+            ListBranchModel,
+        ),
+        (
+            list[TupleBranchModel] | list[ListBranchModel],
+            [ListBranchModel(items=[1])],
+            ListBranchModel,
+        ),
+        (
+            list[ListBranchModel] | list[TupleBranchModel],
+            [TupleBranchModel(items=(1,))],
+            TupleBranchModel,
+        ),
+    ],
+)
+def test_same_container_model_unions_follow_exact_model_instances(
+    output: Any, value: Any, expected_model: type[BaseModel]
+):
+    validated = _compile_output_validator(TypeAdapter(output)).validate_python(value)
+
+    assert type(list.__getitem__(validated, 0)) is expected_model
+
+
+@pytest.mark.parametrize(
+    "output,value,inner_type",
+    [
+        (
+            list[ListBranchTypedDict] | list[TupleBranchTypedDict],
+            [{"items": [1]}],
+            list,
+        ),
+        (
+            list[TupleBranchTypedDict] | list[ListBranchTypedDict],
+            [{"items": [1]}],
+            list,
+        ),
+        (
+            list[ListBranchTypedDict] | list[TupleBranchTypedDict],
+            [{"items": (1,)}],
+            tuple,
+        ),
+        (
+            list[LeftBranchTypedDict] | list[RightBranchTypedDict],
+            [{"right": (1,)}],
+            tuple,
+        ),
+    ],
+)
+def test_same_container_typed_dict_unions_follow_shape_and_nested_runtime_types(
+    output: Any, value: Any, inner_type: type[Any]
+):
+    validated = _compile_output_validator(TypeAdapter(output)).validate_python(value)
+    item = list.__getitem__(validated, 0)
+
+    assert type(item) is dict
+    key = "items" if dict.__contains__(item, "items") else "right"
+    assert type(dict.__getitem__(item, key)) is inner_type
+
+
+def test_same_container_union_still_audits_the_selected_nested_model_branch():
+    with pytest.raises(ValidationError, match="wireValue"):
+        _compile_output_validator(
+            TypeAdapter(list[ReplacingTypedDictEnvelope] | list[int])
+        ).validate_python([{"item": {"value": 7}}])
+
+
+def test_same_container_union_still_rejects_nested_generator_replacement():
+    CONTAINER_REPLACEMENT_HOOKS.clear()
+
+    with pytest.raises(ValidationError, match="deque"):
+        _compile_output_validator(
+            TypeAdapter(list[GeneratorReplacingDequeEnvelope] | list[int])
+        ).validate_python([{"items": [{"value": 7}]}])
+
+    assert CONTAINER_REPLACEMENT_HOOKS == []
 
 
 def test_runtime_rejects_generator_replacement_before_iteration():
