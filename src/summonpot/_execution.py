@@ -620,7 +620,8 @@ def _compile_receiving_schema(schema: Any) -> _ReceivingPredicate:
 
             def literal(value: Any, seen: set[tuple[int, int]]) -> bool:
                 return any(
-                    type(value) is type(expected) and value == expected
+                    type(value) is type(expected)
+                    and (value is expected or value == expected)
                     for expected in expected_values
                 )
 

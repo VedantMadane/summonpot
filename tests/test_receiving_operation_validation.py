@@ -795,6 +795,25 @@ def test_receiver_requires_exact_primitive_and_literal_types(
     assert received == []
 
 
+def test_literal_nan_matches_pydantic_identity_semantics():
+    nan = float("nan")
+    annotation = Literal[nan]  # pyright: ignore[reportInvalidTypeForm]
+    adapter = TypeAdapter(annotation)
+    received: list[Any] = []
+    summon = _receiver_service(annotation, received)
+
+    assert adapter.validate_python(nan, strict=True) is nan
+    assert _call_with_canonical(summon, nan) == Result(value=1)
+
+    other_nan = float("nan")
+    with pytest.raises(ValidationError):
+        adapter.validate_python(other_nan, strict=True)
+    with pytest.raises(_OperationInputError):
+        _call_with_canonical(summon, other_nan)
+
+    assert received == [nan]
+
+
 def test_receiver_rejects_a_mapping_for_a_model_parameter():
     class Payload(BaseModel):
         count: int
