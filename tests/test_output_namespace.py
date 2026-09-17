@@ -1,9 +1,10 @@
 """Output models must have one unambiguous emitted JSON namespace."""
 
 import asyncio
+import math
 from collections import deque
 from dataclasses import InitVar
-from typing import Annotated, Any, SupportsIndex
+from typing import Annotated, Any, Literal, SupportsIndex, get_args
 
 import pytest
 from fastapi.testclient import TestClient
@@ -1103,6 +1104,233 @@ class RightBranchTypedDict(TypedDict):
     right: tuple[int, ...]
 
 
+class SafeTaggedTypedDict(TypedDict):
+    kind: Literal["safe"]
+    value: int
+
+
+class CollisionTaggedTypedDict(TypedDict):
+    kind: Literal["collision"]
+    value: Annotated[int, Field(serialization_alias="wireValue")]
+
+
+CollisionTaggedTypedDict.__pydantic_config__ = ConfigDict(  # type: ignore[attr-defined]
+    extra="allow"
+)
+
+TaggedTypedDict = Annotated[
+    SafeTaggedTypedDict | CollisionTaggedTypedDict,
+    Field(discriminator="kind"),
+]
+ReversedTaggedTypedDict = Annotated[
+    CollisionTaggedTypedDict | SafeTaggedTypedDict,
+    Field(discriminator="kind"),
+]
+UntaggedTypedDict = SafeTaggedTypedDict | CollisionTaggedTypedDict
+ReversedUntaggedTypedDict = CollisionTaggedTypedDict | SafeTaggedTypedDict
+
+
+class TaggedTypedDictEnvelope(BaseModel):
+    item: TaggedTypedDict
+
+    @model_validator(mode="after")
+    def replace_selected_mapping(self) -> "TaggedTypedDictEnvelope":
+        self.item = {**self.item, "wireValue": 99}  # type: ignore[assignment,typeddict-unknown-key]
+        return self
+
+
+class ReversedTaggedTypedDictEnvelope(BaseModel):
+    item: ReversedTaggedTypedDict
+
+    @model_validator(mode="after")
+    def replace_selected_mapping(self) -> "ReversedTaggedTypedDictEnvelope":
+        self.item = {**self.item, "wireValue": 99}  # type: ignore[assignment,typeddict-unknown-key]
+        return self
+
+
+class AliasedSafeTaggedTypedDict(TypedDict):
+    kind: Annotated[Literal["safe"], Field(validation_alias="tag")]
+    value: int
+
+
+class AliasedCollisionTaggedTypedDict(TypedDict):
+    kind: Annotated[Literal["collision"], Field(validation_alias="tag")]
+    value: Annotated[int, Field(serialization_alias="wireValue")]
+
+
+AliasedCollisionTaggedTypedDict.__pydantic_config__ = ConfigDict(  # type: ignore[attr-defined]
+    extra="allow"
+)
+
+AliasedTaggedTypedDict = Annotated[
+    AliasedSafeTaggedTypedDict | AliasedCollisionTaggedTypedDict,
+    Field(discriminator="kind"),
+]
+
+
+class AliasPathTaggedTypedDictEnvelope(BaseModel):
+    item: AliasedTaggedTypedDict
+
+    @model_validator(mode="after")
+    def replace_with_alias_storage(self) -> "AliasPathTaggedTypedDictEnvelope":
+        self.item = {  # type: ignore[assignment]
+            "tag": self.item["kind"],
+            "value": self.item["value"],
+            "wireValue": 99,
+        }
+        return self
+
+
+class UntaggedTypedDictEnvelope(BaseModel):
+    item: UntaggedTypedDict
+
+    @model_validator(mode="after")
+    def replace_selected_mapping(self) -> "UntaggedTypedDictEnvelope":
+        self.item = {**self.item, "wireValue": 99}  # type: ignore[assignment,typeddict-unknown-key]
+        return self
+
+
+class ReversedUntaggedTypedDictEnvelope(BaseModel):
+    item: ReversedUntaggedTypedDict
+
+    @model_validator(mode="after")
+    def replace_selected_mapping(self) -> "ReversedUntaggedTypedDictEnvelope":
+        self.item = {**self.item, "wireValue": 99}  # type: ignore[assignment,typeddict-unknown-key]
+        return self
+
+
+NaNLiteral = Literal.__getitem__((float("nan"),))
+FloatOneLiteral = Literal.__getitem__((1.0,))
+
+
+class SafeFloatLiteralTypedDict(TypedDict):
+    kind: FloatOneLiteral  # type: ignore[valid-type]
+    value: int
+
+
+class NaNCollisionTypedDict(TypedDict):
+    kind: NaNLiteral  # type: ignore[valid-type]
+    value: Annotated[int, Field(serialization_alias="wireValue")]
+
+
+NaNCollisionTypedDict.__pydantic_config__ = ConfigDict(  # type: ignore[attr-defined]
+    extra="allow"
+)
+
+
+class NaNLiteralEnvelope(BaseModel):
+    item: SafeFloatLiteralTypedDict | NaNCollisionTypedDict
+
+    @model_validator(mode="after")
+    def replace_selected_mapping(self) -> "NaNLiteralEnvelope":
+        self.item = {**self.item, "wireValue": 99}  # type: ignore[assignment,typeddict-unknown-key]
+        return self
+
+
+TAGGED_STORAGE_HOOKS: list[str] = []
+
+
+class HostileTaggedDict(dict[str, Any]):
+    def __iter__(self):
+        TAGGED_STORAGE_HOOKS.append("iter")
+        raise AssertionError("iteration hook called during tagged-union audit")
+
+    def __getitem__(self, key: str):
+        TAGGED_STORAGE_HOOKS.append("getitem")
+        raise AssertionError("getitem hook called during tagged-union audit")
+
+    def __eq__(self, other: object) -> bool:
+        TAGGED_STORAGE_HOOKS.append("eq")
+        raise AssertionError("equality hook called during tagged-union audit")
+
+    def __repr__(self) -> str:
+        TAGGED_STORAGE_HOOKS.append("repr")
+        raise AssertionError("repr hook called during tagged-union audit")
+
+
+class HostileTaggedTypedDictEnvelope(BaseModel):
+    item: TaggedTypedDict
+
+    @model_validator(mode="after")
+    def replace_selected_mapping(self) -> "HostileTaggedTypedDictEnvelope":
+        self.item = HostileTaggedDict({**self.item, "wireValue": 99})  # type: ignore[assignment]
+        TAGGED_STORAGE_HOOKS.clear()
+        return self
+
+
+class SafeTaggedModel(BaseModel):
+    kind: Literal["safe"]
+    value: int
+
+
+class CollisionTaggedModel(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    kind: Literal["collision"]
+    value: int = Field(serialization_alias="wireValue")
+
+
+TaggedModel = Annotated[
+    SafeTaggedModel | CollisionTaggedModel,
+    Field(discriminator="kind"),
+]
+ReversedTaggedModel = Annotated[
+    CollisionTaggedModel | SafeTaggedModel,
+    Field(discriminator="kind"),
+]
+
+
+class TaggedModelEnvelope(BaseModel):
+    item: TaggedModel
+
+    @model_validator(mode="after")
+    def add_selected_collision(self) -> "TaggedModelEnvelope":
+        assert isinstance(self.item, CollisionTaggedModel)
+        assert self.item.__pydantic_extra__ is not None
+        self.item.__pydantic_extra__["wireValue"] = 99
+        return self
+
+
+class ReversedTaggedModelEnvelope(BaseModel):
+    item: ReversedTaggedModel
+
+    @model_validator(mode="after")
+    def add_selected_collision(self) -> "ReversedTaggedModelEnvelope":
+        assert isinstance(self.item, CollisionTaggedModel)
+        assert self.item.__pydantic_extra__ is not None
+        self.item.__pydantic_extra__["wireValue"] = 99
+        return self
+
+
+class HostileCollisionTaggedModel(CollisionTaggedModel):
+    def __getattribute__(self, name: str) -> Any:
+        if name in {"kind", "value", "__dict__", "__pydantic_extra__"}:
+            TAGGED_STORAGE_HOOKS.append("getattribute")
+            raise AssertionError("attribute hook called during tagged-union audit")
+        return object.__getattribute__(self, name)
+
+    def __eq__(self, other: object) -> bool:
+        TAGGED_STORAGE_HOOKS.append("eq")
+        raise AssertionError("equality hook called during tagged-union audit")
+
+    def __repr__(self) -> str:
+        TAGGED_STORAGE_HOOKS.append("repr")
+        raise AssertionError("repr hook called during tagged-union audit")
+
+
+class HostileTaggedModelEnvelope(BaseModel):
+    item: TaggedModel
+
+    @model_validator(mode="after")
+    def replace_selected_model(self) -> "HostileTaggedModelEnvelope":
+        replacement = HostileCollisionTaggedModel.model_construct(
+            kind="collision", value=7
+        )
+        object.__setattr__(replacement, "__pydantic_extra__", {"wireValue": 99})
+        object.__setattr__(self, "item", replacement)
+        TAGGED_STORAGE_HOOKS.clear()
+        return self
+
+
 def test_mapping_extra_cannot_shadow_a_declared_serialization_alias():
     with pytest.raises(ValidationError, match="wireValue"):
         _compile_output_validator(TypeAdapter(AliasedExtraOutput)).validate_python(
@@ -1486,6 +1714,108 @@ def test_same_container_union_still_rejects_nested_generator_replacement():
         ).validate_python([{"items": [{"value": 7}]}])
 
     assert CONTAINER_REPLACEMENT_HOOKS == []
+
+
+@pytest.mark.parametrize(
+    "output",
+    [UntaggedTypedDictEnvelope, ReversedUntaggedTypedDictEnvelope],
+)
+def test_literal_union_branch_matching_uses_exact_values_not_only_types(output: Any):
+    with pytest.raises(ValidationError, match="wireValue"):
+        _compile_output_validator(TypeAdapter(output)).validate_python(
+            {"item": {"kind": "collision", "value": 7}}
+        )
+
+
+def test_literal_union_nan_matches_only_the_identical_expected_object():
+    nan = get_args(NaNLiteral)[0]
+    assert type(nan) is float and math.isnan(nan)
+
+    with pytest.raises(ValidationError, match="wireValue"):
+        _compile_output_validator(TypeAdapter(NaNLiteralEnvelope)).validate_python(
+            {"item": {"kind": nan, "value": 7}}
+        )
+
+    with pytest.raises(ValidationError, match="literal"):
+        _compile_output_validator(TypeAdapter(NaNLiteralEnvelope)).validate_python(
+            {"item": {"kind": float("nan"), "value": 7}}
+        )
+
+
+@pytest.mark.parametrize(
+    "output",
+    [TaggedTypedDictEnvelope, ReversedTaggedTypedDictEnvelope],
+)
+def test_tagged_typed_dict_union_audits_only_the_discriminated_branch(output: Any):
+    with pytest.raises(ValidationError, match="wireValue"):
+        _compile_output_validator(TypeAdapter(output)).validate_python(
+            {"item": {"kind": "collision", "value": 7}}
+        )
+
+
+def test_tagged_union_alias_path_storage_fails_closed_after_replacement():
+    with pytest.raises(ValidationError, match="tagged union storage"):
+        _compile_output_validator(
+            TypeAdapter(AliasPathTaggedTypedDictEnvelope)
+        ).validate_python({"item": {"tag": "collision", "value": 7}})
+
+
+@pytest.mark.parametrize(
+    "output",
+    [TaggedModelEnvelope, ReversedTaggedModelEnvelope],
+)
+def test_tagged_model_union_audits_only_the_discriminated_branch(output: Any):
+    with pytest.raises(ValidationError, match="wireValue"):
+        _compile_output_validator(TypeAdapter(output)).validate_python(
+            {"item": {"kind": "collision", "value": 7}}
+        )
+
+
+def test_tagged_union_fails_closed_on_hostile_mapping_storage_without_hooks():
+    TAGGED_STORAGE_HOOKS.clear()
+
+    with pytest.raises(ValidationError, match="tagged union"):
+        _compile_output_validator(
+            TypeAdapter(HostileTaggedTypedDictEnvelope)
+        ).validate_python({"item": {"kind": "collision", "value": 7}})
+
+    assert TAGGED_STORAGE_HOOKS == []
+
+
+def test_tagged_union_reads_hostile_model_storage_without_hooks():
+    TAGGED_STORAGE_HOOKS.clear()
+
+    with pytest.raises(ValidationError, match="wireValue"):
+        _compile_output_validator(
+            TypeAdapter(HostileTaggedModelEnvelope)
+        ).validate_python({"item": {"kind": "collision", "value": 7}})
+
+    assert TAGGED_STORAGE_HOOKS == []
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        TaggedTypedDictEnvelope,
+        ReversedTaggedTypedDictEnvelope,
+        TaggedModelEnvelope,
+        ReversedTaggedModelEnvelope,
+    ],
+)
+def test_runtime_and_http_reject_tagged_union_selected_branch_collision(output: Any):
+    result = {"item": {"kind": "collision", "value": 7}}
+    summon = _direct_summon(output, result)
+
+    with pytest.raises(_OperationOutputError, match="invalid declared output"):
+        asyncio.run(
+            Runtime(model="invalid:no-model").call(summon.endpoints[0], {"value": 7})
+        )
+
+    response = TestClient(build_app(summon), raise_server_exceptions=False).post(
+        "/output", json={"value": 7}
+    )
+    assert response.status_code == 500
+    assert "wireValue" not in response.text
 
 
 def test_runtime_rejects_generator_replacement_before_iteration():

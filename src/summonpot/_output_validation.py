@@ -457,6 +457,97 @@ def _runtime_model_extra_collision_auditor(schema: Any) -> Any:
         "tuple": tuple,
     }
 
+    _missing = object()
+    literal_primitive_equality = {
+        bool: bool.__eq__,
+        bytes: bytes.__eq__,
+        complex: complex.__eq__,
+        float: float.__eq__,
+        int: int.__eq__,
+        str: str.__eq__,
+        type(None): lambda left, right: left is right,
+    }
+
+    def safe_literal_equal(current: Any, expected: Any) -> bool:
+        """Compare exact primitive Literal values without application dispatch."""
+        if current is expected:
+            return True
+        current_type = type(current)
+        if current_type is not type(expected):
+            return False
+        equality = literal_primitive_equality.get(current_type)
+        if equality is None:
+            return False
+        return equality(current, expected) is True
+
+    def exact_dict_value(current: dict[Any, Any], key: Any) -> Any:
+        """Read a primitive key from exact dict storage without key hooks."""
+        for stored_key, value in zip(
+            dict.__iter__(current), dict.values(current), strict=True
+        ):
+            if safe_literal_equal(stored_key, key):
+                return value
+        return _missing
+
+    def discriminator_paths(discriminator: Any) -> tuple[tuple[str | int, ...], ...]:
+        if type(discriminator) is str:
+            return ((discriminator,),)
+        if type(discriminator) is not list or not discriminator:
+            return ()
+        if all(type(path) is list for path in discriminator):
+            raw_paths = discriminator
+        else:
+            raw_paths = (discriminator,)
+        paths: list[tuple[str | int, ...]] = []
+        for raw_path in raw_paths:
+            if not raw_path or not all(type(part) in {str, int} for part in raw_path):
+                return ()
+            paths.append(tuple(raw_path))
+        return tuple(paths)
+
+    def discriminator_step(current: Any, part: str | int) -> Any:
+        if type(current) is dict:
+            return exact_dict_value(current, part)
+        if BaseModel in type(current).__mro__:
+            storage = object.__getattribute__(current, "__dict__")
+            if type(storage) is not dict:
+                return _missing
+            value = exact_dict_value(storage, part)
+            if value is not _missing:
+                return value
+            extras = object.__getattribute__(current, "__pydantic_extra__")
+            if type(extras) is dict:
+                return exact_dict_value(extras, part)
+            return _missing
+        if type(part) is int and type(current) is list:
+            length = list.__len__(current)
+            if -length <= part < length:
+                return list.__getitem__(current, part)
+        if type(part) is int and type(current) is tuple:
+            length = tuple.__len__(current)
+            if -length <= part < length:
+                return tuple.__getitem__(current, part)
+        return _missing
+
+    def tagged_union_choice(current: Any, node: dict[str, Any]) -> Any:
+        choices = node.get("choices")
+        if type(choices) is not dict:
+            return _missing
+        for path in discriminator_paths(node.get("discriminator")):
+            tag = current
+            for part in path:
+                tag = discriminator_step(tag, part)
+                if tag is _missing:
+                    break
+            if tag is _missing:
+                continue
+            for expected, choice in zip(
+                dict.__iter__(choices), dict.values(choices), strict=True
+            ):
+                if safe_literal_equal(tag, expected):
+                    return choice[0] if type(choice) is tuple else choice
+        return _missing
+
     def schema_match_score(
         current: Any,
         node: Any,
@@ -520,7 +611,13 @@ def _runtime_model_extra_collision_auditor(schema: Any) -> Any:
                 ]
                 return max(scores) if scores else None
 
-            if node_type in {"union", "tagged-union"}:
+            if node_type == "tagged-union":
+                selected = tagged_union_choice(current, node)
+                if selected is _missing:
+                    return None
+                return schema_match_score(current, selected, active)
+
+            if node_type == "union":
                 choices = node.get("choices", ())
                 values = choices.values() if isinstance(choices, dict) else choices
                 scores = [
@@ -632,8 +729,14 @@ def _runtime_model_extra_collision_auditor(schema: Any) -> Any:
             if node_type == "typed-dict-field" or node_type == "model-field":
                 return schema_match_score(current, node.get("schema"), active)
             if node_type == "literal":
-                expected_types = {type(value) for value in node.get("expected", ())}
-                return 1 if type(current) in expected_types else None
+                return (
+                    2
+                    if any(
+                        safe_literal_equal(current, expected)
+                        for expected in node.get("expected", ())
+                    )
+                    else None
+                )
             if node_type == "any":
                 return 0
             return 0
@@ -805,7 +908,21 @@ def _runtime_model_extra_collision_auditor(schema: Any) -> Any:
             if node_type == "dataclass-field":
                 inspect_schema(current, node.get("schema"))
                 return
-            if node_type in {"union", "tagged-union"}:
+            if node_type == "tagged-union":
+                selected = tagged_union_choice(current, node)
+                if selected is _missing:
+                    raise ValueError(
+                        "output tagged union discriminator cannot be read safely "
+                        "from exact built-in or model storage"
+                    )
+                if schema_match_score(current, selected) is None:
+                    raise ValueError(
+                        "output tagged union storage is incompatible with its "
+                        "selected discriminator branch"
+                    )
+                inspect_schema(current, selected)
+                return
+            if node_type == "union":
                 choices = node.get("choices", ())
                 values = choices.values() if isinstance(choices, dict) else choices
                 candidates = [
