@@ -31,7 +31,6 @@ from typing import (
 from pydantic import BaseModel, TypeAdapter
 
 from summonpot._output_validation import _reject_ambiguous_object_namespaces
-
 from summonpot.contracts import (
     AgentChoice,
     FromContext,
