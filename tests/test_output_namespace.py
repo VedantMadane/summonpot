@@ -1,8 +1,9 @@
 """Output models must have one unambiguous emitted JSON namespace."""
 
 import asyncio
+from collections import deque
 from dataclasses import InitVar
-from typing import Annotated, Any
+from typing import Annotated, Any, SupportsIndex
 
 import pytest
 from fastapi.testclient import TestClient
@@ -911,6 +912,68 @@ class SafeMutatingFrozenSetEnvelope(BaseModel):
         return self
 
 
+DEQUE_AUDIT_HOOKS: list[str] = []
+
+
+class HostileDeque(deque[AliasedExtraOutput]):
+    def __iter__(self):
+        DEQUE_AUDIT_HOOKS.append("iter")
+        raise AssertionError("iteration hook called during output audit")
+
+    def __getitem__(self, index: SupportsIndex):
+        DEQUE_AUDIT_HOOKS.append("getitem")
+        raise AssertionError("getitem hook called during output audit")
+
+    def __len__(self) -> int:
+        DEQUE_AUDIT_HOOKS.append("len")
+        raise AssertionError("length hook called during output audit")
+
+    def __repr__(self) -> str:
+        DEQUE_AUDIT_HOOKS.append("repr")
+        raise AssertionError("repr hook called during output audit")
+
+
+class MutatingDequeEnvelope(BaseModel):
+    items: deque[AliasedExtraOutput]
+
+    @model_validator(mode="after")
+    def add_nested_collision(self) -> "MutatingDequeEnvelope":
+        item = deque.__getitem__(self.items, 0)
+        assert item.__pydantic_extra__ is not None
+        item.__pydantic_extra__["wireValue"] = 99
+        return self
+
+
+class SafeMutatingDequeEnvelope(BaseModel):
+    items: deque[AliasedExtraOutput]
+
+    @model_validator(mode="after")
+    def add_nested_extra(self) -> "SafeMutatingDequeEnvelope":
+        item = deque.__getitem__(self.items, 0)
+        assert item.__pydantic_extra__ is not None
+        item.__pydantic_extra__["note"] = "safe"
+        return self
+
+
+class HostileMutatingDequeEnvelope(BaseModel):
+    items: deque[AliasedExtraOutput]
+
+    @model_validator(mode="after")
+    def replace_deque_with_hostile_subclass(self) -> "HostileMutatingDequeEnvelope":
+        object.__setattr__(self, "items", HostileDeque(deque.__iter__(self.items)))
+        DEQUE_AUDIT_HOOKS.clear()
+        return self
+
+
+class CyclicDequeEnvelope(BaseModel):
+    items: deque[Any]
+
+    @model_validator(mode="after")
+    def add_self_reference(self) -> "CyclicDequeEnvelope":
+        deque.append(self.items, self)
+        return self
+
+
 def test_mapping_extra_cannot_shadow_a_declared_serialization_alias():
     with pytest.raises(ValidationError, match="wireValue"):
         _compile_output_validator(TypeAdapter(AliasedExtraOutput)).validate_python(
@@ -1059,6 +1122,92 @@ def test_parent_validator_preserves_noncolliding_extra_in_frozenset():
     item = next(frozenset.__iter__(validated.items))
 
     assert item.__pydantic_extra__ == {"note": "safe"}
+
+
+def test_parent_validator_cannot_hide_collision_in_deque():
+    with pytest.raises(ValidationError, match="wireValue"):
+        _compile_output_validator(TypeAdapter(MutatingDequeEnvelope)).validate_python(
+            {"items": [{"value": 7}]}
+        )
+
+
+def test_parent_validator_preserves_noncolliding_extra_in_deque():
+    validated = _compile_output_validator(
+        TypeAdapter(SafeMutatingDequeEnvelope)
+    ).validate_python({"items": [{"value": 7}]})
+    item = deque.__getitem__(validated.items, 0)
+
+    assert type(validated.items) is deque
+    assert item.__pydantic_extra__ == {"note": "safe"}
+
+
+def test_deque_audit_rejects_subclass_without_calling_hooks():
+    DEQUE_AUDIT_HOOKS.clear()
+
+    with pytest.raises(ValidationError, match="deque"):
+        _compile_output_validator(
+            TypeAdapter(HostileMutatingDequeEnvelope)
+        ).validate_python({"items": [{"value": 7}]})
+
+    assert DEQUE_AUDIT_HOOKS == []
+
+
+def test_deque_audit_stops_at_cycles():
+    validated = _compile_output_validator(
+        TypeAdapter(CyclicDequeEnvelope)
+    ).validate_python({"items": []})
+
+    assert deque.__len__(validated.items) == 1
+    assert deque.__getitem__(validated.items, 0) is validated
+
+
+def test_http_rejects_parent_validator_nested_deque_collision():
+    summon = _direct_summon(
+        MutatingDequeEnvelope,
+        {"items": [{"value": 7}]},
+    )
+
+    with pytest.raises(_OperationOutputError, match="invalid declared output"):
+        asyncio.run(
+            Runtime(model="invalid:no-model").call(summon.endpoints[0], {"value": 7})
+        )
+
+    response = TestClient(build_app(summon), raise_server_exceptions=False).post(
+        "/output", json={"value": 7}
+    )
+    assert response.status_code == 500
+    assert "wireValue" not in response.text
+
+
+def test_http_emits_noncolliding_deque_extra_once():
+    response = TestClient(
+        build_app(
+            _direct_summon(
+                SafeMutatingDequeEnvelope,
+                {"items": [{"value": 7}]},
+            )
+        )
+    ).post("/output", json={"value": 7})
+
+    assert response.status_code == 200
+    assert response.json() == {"items": [{"wireValue": 7, "note": "safe"}]}
+    assert response.text.count('"wireValue"') == 1
+    assert response.text.count('"note"') == 1
+
+
+def test_http_rejects_deque_subclass_without_calling_hooks():
+    DEQUE_AUDIT_HOOKS.clear()
+    summon = _direct_summon(
+        HostileMutatingDequeEnvelope,
+        {"items": [{"value": 7}]},
+    )
+
+    response = TestClient(build_app(summon), raise_server_exceptions=False).post(
+        "/output", json={"value": 7}
+    )
+
+    assert response.status_code == 500
+    assert DEQUE_AUDIT_HOOKS == []
 
 
 @pytest.mark.parametrize(

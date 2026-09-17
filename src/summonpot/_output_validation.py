@@ -9,6 +9,7 @@ fall back to the original adapter if compilation fails.
 
 from __future__ import annotations
 
+from collections import deque
 from contextvars import ContextVar
 from dataclasses import is_dataclass
 from typing import Any, cast
@@ -552,6 +553,17 @@ def _runtime_model_extra_collision_auditor(schema: Any) -> Any:
                         )
                 for item in dict.values(current):
                     inspect(item)
+            elif type(current) is deque:
+                identity = id(current)
+                if identity in seen:
+                    return
+                seen.add(identity)
+                for item in deque.__iter__(current):
+                    inspect(item)
+            elif isinstance(current, deque):
+                raise ValueError(
+                    "output deque storage must use the exact collections.deque type"
+                )
             elif isinstance(current, list):
                 identity = id(current)
                 if identity in seen:
