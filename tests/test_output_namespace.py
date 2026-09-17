@@ -8,6 +8,7 @@ from typing import Annotated, Any, SupportsIndex
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import (
+    AfterValidator,
     AliasPath,
     BaseModel,
     ConfigDict,
@@ -974,6 +975,110 @@ class CyclicDequeEnvelope(BaseModel):
         return self
 
 
+CONTAINER_REPLACEMENT_HOOKS: list[str] = []
+
+
+class HostileIterable:
+    def __iter__(self):
+        CONTAINER_REPLACEMENT_HOOKS.append("iter")
+        raise AssertionError("iteration hook called during output audit")
+
+    def __repr__(self) -> str:
+        CONTAINER_REPLACEMENT_HOOKS.append("repr")
+        raise AssertionError("repr hook called during output audit")
+
+    def __eq__(self, other: object) -> bool:
+        CONTAINER_REPLACEMENT_HOOKS.append("eq")
+        raise AssertionError("equality hook called during output audit")
+
+    def __hash__(self) -> int:
+        CONTAINER_REPLACEMENT_HOOKS.append("hash")
+        raise AssertionError("hash hook called during output audit")
+
+
+class HostileList(list[int]):
+    def __iter__(self):
+        CONTAINER_REPLACEMENT_HOOKS.append("iter")
+        raise AssertionError("iteration hook called during output audit")
+
+    def __repr__(self) -> str:
+        CONTAINER_REPLACEMENT_HOOKS.append("repr")
+        raise AssertionError("repr hook called during output audit")
+
+    def __eq__(self, other: object) -> bool:
+        CONTAINER_REPLACEMENT_HOOKS.append("eq")
+        raise AssertionError("equality hook called during output audit")
+
+
+class HostileTuple(tuple[int, ...]):
+    def __iter__(self):
+        CONTAINER_REPLACEMENT_HOOKS.append("iter")
+        raise AssertionError("iteration hook called during output audit")
+
+    def __repr__(self) -> str:
+        CONTAINER_REPLACEMENT_HOOKS.append("repr")
+        raise AssertionError("repr hook called during output audit")
+
+    def __eq__(self, other: object) -> bool:
+        CONTAINER_REPLACEMENT_HOOKS.append("eq")
+        raise AssertionError("equality hook called during output audit")
+
+
+def _replace_with_hostile_iterable(value: Any) -> HostileIterable:
+    return HostileIterable()
+
+
+def _replace_deque_with_collision_generator(value: deque[AliasedExtraOutput]) -> Any:
+    item = deque.__getitem__(value, 0)
+    assert item.__pydantic_extra__ is not None
+    item.__pydantic_extra__["wireValue"] = 99
+
+    def generate():
+        CONTAINER_REPLACEMENT_HOOKS.append("iter")
+        yield item
+
+    return generate()
+
+
+HostileListOutput = Annotated[list[int], AfterValidator(_replace_with_hostile_iterable)]
+HostileTupleOutput = Annotated[
+    tuple[int, ...], AfterValidator(_replace_with_hostile_iterable)
+]
+HostileDictOutput = Annotated[
+    dict[str, int], AfterValidator(_replace_with_hostile_iterable)
+]
+HostileSetOutput = Annotated[set[int], AfterValidator(_replace_with_hostile_iterable)]
+HostileFrozenSetOutput = Annotated[
+    frozenset[int], AfterValidator(_replace_with_hostile_iterable)
+]
+HostileDequeOutput = Annotated[
+    deque[int], AfterValidator(_replace_with_hostile_iterable)
+]
+HostileUnionOutput = HostileListOutput | int
+HostileListSubclassOutput = Annotated[
+    list[int], AfterValidator(lambda value: HostileList(value))
+]
+HostileTupleSubclassOutput = Annotated[
+    tuple[int, ...], AfterValidator(lambda value: HostileTuple(value))
+]
+GeneratorDequeOutput = Annotated[
+    deque[AliasedExtraOutput], AfterValidator(_replace_deque_with_collision_generator)
+]
+
+
+class GeneratorReplacingDequeEnvelope(BaseModel):
+    items: deque[AliasedExtraOutput]
+
+    @model_validator(mode="after")
+    def replace_deque_with_generator(self) -> "GeneratorReplacingDequeEnvelope":
+        object.__setattr__(
+            self,
+            "items",
+            _replace_deque_with_collision_generator(self.items),
+        )
+        return self
+
+
 def test_mapping_extra_cannot_shadow_a_declared_serialization_alias():
     with pytest.raises(ValidationError, match="wireValue"):
         _compile_output_validator(TypeAdapter(AliasedExtraOutput)).validate_python(
@@ -1056,6 +1161,17 @@ def test_replacement_audit_does_not_call_mapping_hooks():
     MAPPING_AUDIT_HOOKS.clear()
 
     with pytest.raises(ValidationError, match="wireValue"):
+        _compile_output_validator(
+            TypeAdapter(HostileReplacingTypedDictEnvelope)
+        ).validate_python({"item": {"value": 7}})
+
+    assert MAPPING_AUDIT_HOOKS == []
+
+
+def test_typed_dict_replacement_requires_exact_dict_without_calling_hooks():
+    MAPPING_AUDIT_HOOKS.clear()
+
+    with pytest.raises(ValidationError, match="dict"):
         _compile_output_validator(
             TypeAdapter(HostileReplacingTypedDictEnvelope)
         ).validate_python({"item": {"value": 7}})
@@ -1159,6 +1275,77 @@ def test_deque_audit_stops_at_cycles():
 
     assert deque.__len__(validated.items) == 1
     assert deque.__getitem__(validated.items, 0) is validated
+
+
+@pytest.mark.parametrize(
+    "output,value,container_name",
+    [
+        (HostileListOutput, [1], "list"),
+        (HostileTupleOutput, [1], "tuple"),
+        (HostileDictOutput, {"value": 1}, "dict"),
+        (HostileSetOutput, [1], "set"),
+        (HostileFrozenSetOutput, [1], "frozenset"),
+        (HostileDequeOutput, [1], "deque"),
+        (HostileListOutput | None, [1], "list"),
+        (HostileUnionOutput, [1], "list"),
+        (RootModel[HostileListOutput], [1], "list"),
+        (HostileListSubclassOutput, [1], "list"),
+        (HostileTupleSubclassOutput, [1], "tuple"),
+    ],
+)
+def test_post_validator_must_preserve_declared_concrete_container_type(
+    output: Any, value: Any, container_name: str
+):
+    CONTAINER_REPLACEMENT_HOOKS.clear()
+
+    with pytest.raises(ValidationError, match=container_name):
+        _compile_output_validator(TypeAdapter(output)).validate_python(value)
+
+    assert CONTAINER_REPLACEMENT_HOOKS == []
+
+
+@pytest.mark.parametrize(
+    "output,value,expected_type",
+    [
+        (list[int], [1], list),
+        (tuple[int, ...], [1], tuple),
+        (dict[str, int], {"value": 1}, dict),
+        (set[int], [1], set),
+        (frozenset[int], [1], frozenset),
+        (deque[int], [1], deque),
+    ],
+)
+def test_declared_concrete_containers_keep_safe_pydantic_transformations(
+    output: Any, value: Any, expected_type: type[Any]
+):
+    validated = _compile_output_validator(TypeAdapter(output)).validate_python(value)
+
+    assert type(validated) is expected_type
+
+
+def test_runtime_rejects_generator_replacement_before_iteration():
+    CONTAINER_REPLACEMENT_HOOKS.clear()
+    summon = _direct_summon(GeneratorReplacingDequeEnvelope, {"items": [{"value": 7}]})
+
+    with pytest.raises(_OperationOutputError, match="invalid declared output"):
+        asyncio.run(
+            Runtime(model="invalid:no-model").call(summon.endpoints[0], {"value": 7})
+        )
+
+    assert CONTAINER_REPLACEMENT_HOOKS == []
+
+
+def test_http_rejects_generator_replacement_before_serialization_or_iteration():
+    CONTAINER_REPLACEMENT_HOOKS.clear()
+    summon = _direct_summon(GeneratorReplacingDequeEnvelope, {"items": [{"value": 7}]})
+
+    response = TestClient(build_app(summon), raise_server_exceptions=False).post(
+        "/output", json={"value": 7}
+    )
+
+    assert response.status_code == 500
+    assert "wireValue" not in response.text
+    assert CONTAINER_REPLACEMENT_HOOKS == []
 
 
 def test_http_rejects_parent_validator_nested_deque_collision():

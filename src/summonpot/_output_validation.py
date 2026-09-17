@@ -304,6 +304,222 @@ def _runtime_model_extra_collision_auditor(schema: Any) -> Any:
 
     collect_dataclasses(schema)
 
+    container_types = {
+        "list": list,
+        "tuple": tuple,
+        "dict": dict,
+        "set": set,
+        "frozenset": frozenset,
+    }
+
+    def declared_container_type(node: Any) -> type[Any] | None:
+        """Resolve concrete built-in container schemas through transparent wrappers."""
+        if not isinstance(node, dict):
+            return None
+        node_type = node.get("type")
+        direct = container_types.get(node_type) if isinstance(node_type, str) else None
+        if direct is not None:
+            return direct
+        if node_type == "definition-ref":
+            reference = node.get("schema_ref")
+            return declared_container_type(
+                definitions.get(reference) if isinstance(reference, str) else None
+            )
+        if node_type == "definitions":
+            return declared_container_type(node.get("schema"))
+        if node_type in {
+            "default",
+            "function-after",
+            "function-before",
+            "function-plain",
+            "function-wrap",
+            "custom-error",
+            "json",
+        }:
+            return declared_container_type(node.get("schema"))
+        if node_type == "chain":
+            steps = node.get("steps", ())
+            return declared_container_type(steps[-1]) if steps else None
+        if node_type in {"json-or-python", "lax-or-strict"}:
+            # A concrete deque is represented as a lax list conversion plus a
+            # strict instance branch. Derive its public result type from that
+            # branch rather than mistaking the implementation list for output.
+            pending = [
+                node.get("strict_schema"),
+                node.get("python_schema"),
+            ]
+            while pending:
+                candidate = pending.pop()
+                if not isinstance(candidate, dict):
+                    continue
+                if (
+                    candidate.get("type") == "is-instance"
+                    and candidate.get("cls") is deque
+                ):
+                    return deque
+                candidate_type = candidate.get("type")
+                if candidate_type == "chain":
+                    pending.extend(candidate.get("steps", ()))
+                elif candidate_type in {"json-or-python", "lax-or-strict"}:
+                    pending.extend(
+                        (
+                            candidate.get("strict_schema"),
+                            candidate.get("python_schema"),
+                        )
+                    )
+            branches = (
+                (node.get("python_schema"), node.get("json_schema"))
+                if node_type == "json-or-python"
+                else (node.get("lax_schema"), node.get("strict_schema"))
+            )
+            resolved = {declared_container_type(branch) for branch in branches}
+            resolved.discard(None)
+            if len(resolved) == 1:
+                return resolved.pop()
+        return None
+
+    def container_items_schema(node: Any, expected: type[Any]) -> Any:
+        """Find the item schema hidden by a concrete container wrapper."""
+        if not isinstance(node, dict):
+            return None
+        node_type = node.get("type")
+        if expected is deque and node_type == "list":
+            return node.get("items_schema")
+        if node_type == expected.__name__:
+            return node.get("items_schema")
+        if node_type == "definition-ref":
+            reference = node.get("schema_ref")
+            return container_items_schema(
+                definitions.get(reference) if isinstance(reference, str) else None,
+                expected,
+            )
+        for key in (
+            "schema",
+            "lax_schema",
+            "strict_schema",
+            "python_schema",
+            "json_schema",
+        ):
+            found = container_items_schema(node.get(key), expected)
+            if found is not None:
+                return found
+        if node_type == "chain":
+            for step in reversed(node.get("steps", ())):
+                found = container_items_schema(step, expected)
+                if found is not None:
+                    return found
+        return None
+
+    def concrete_container_schema(node: Any, expected: type[Any]) -> Any:
+        """Return the concrete node that owns a container's child schemas."""
+        if not isinstance(node, dict):
+            return None
+        node_type = node.get("type")
+        if node_type == expected.__name__ or (
+            expected is deque and node_type == "list"
+        ):
+            return node
+        if node_type == "definition-ref":
+            reference = node.get("schema_ref")
+            return concrete_container_schema(
+                definitions.get(reference) if isinstance(reference, str) else None,
+                expected,
+            )
+        for key in (
+            "schema",
+            "lax_schema",
+            "strict_schema",
+            "python_schema",
+            "json_schema",
+        ):
+            found = concrete_container_schema(node.get(key), expected)
+            if found is not None:
+                return found
+        if node_type == "chain":
+            for step in reversed(node.get("steps", ())):
+                found = concrete_container_schema(step, expected)
+                if found is not None:
+                    return found
+        return None
+
+    scalar_types = {
+        "bool": bool,
+        "bytes": bytes,
+        "complex": complex,
+        "dict": dict,
+        "float": float,
+        "frozenset": frozenset,
+        "int": int,
+        "list": list,
+        "none": type(None),
+        "set": set,
+        "str": str,
+        "tuple": tuple,
+    }
+
+    def schema_accepts_type(current: Any, node: Any) -> bool | None:
+        """Match union branches by runtime type without application operations."""
+        if not isinstance(node, dict):
+            return None
+        node_type = node.get("type")
+        expected = declared_container_type(node)
+        if expected is not None:
+            return type(current) is expected
+        scalar = scalar_types.get(node_type) if isinstance(node_type, str) else None
+        if scalar is not None:
+            return type(current) is scalar
+        if node_type in {"model", "dataclass"}:
+            cls = node.get("cls")
+            return isinstance(cls, type) and any(
+                base is cls for base in type(current).__mro__
+            )
+        if node_type == "typed-dict":
+            return type(current) is dict
+        if node_type == "is-instance":
+            cls = node.get("cls")
+            return isinstance(cls, type) and any(
+                base is cls for base in type(current).__mro__
+            )
+        if node_type == "definition-ref":
+            reference = node.get("schema_ref")
+            return schema_accepts_type(
+                current,
+                definitions.get(reference) if isinstance(reference, str) else None,
+            )
+        if node_type == "definitions":
+            return schema_accepts_type(current, node.get("schema"))
+        if node_type == "nullable":
+            return (
+                True
+                if current is None
+                else schema_accepts_type(current, node.get("schema"))
+            )
+        if node_type in {
+            "default",
+            "function-after",
+            "function-before",
+            "function-wrap",
+            "custom-error",
+            "json",
+        }:
+            return schema_accepts_type(current, node.get("schema"))
+        if node_type == "chain":
+            steps = node.get("steps", ())
+            return schema_accepts_type(current, steps[-1]) if steps else None
+        if node_type in {"json-or-python", "lax-or-strict"}:
+            branches = (
+                (node.get("python_schema"), node.get("json_schema"))
+                if node_type == "json-or-python"
+                else (node.get("lax_schema"), node.get("strict_schema"))
+            )
+            matches = [schema_accepts_type(current, branch) for branch in branches]
+            if True in matches:
+                return True
+            return None if None in matches else False
+        if node_type == "any":
+            return True
+        return None
+
     def dataclass_storage(value: Any) -> tuple[dict[Any, Any], ...]:
         state = object.__getstate__(value)
         if isinstance(state, dict):
@@ -332,6 +548,46 @@ def _runtime_model_extra_collision_auditor(schema: Any) -> Any:
                 reference = node.get("schema_ref")
                 if isinstance(reference, str):
                     inspect_schema(current, definitions.get(reference))
+                return
+            if node_type == "nullable" and current is None:
+                return
+            expected_container = declared_container_type(node)
+            if expected_container is not None:
+                if type(current) is not expected_container:
+                    raise ValueError(
+                        "output container storage must use the exact built-in "
+                        f"{expected_container.__name__} type"
+                    )
+                identity = id(current)
+                if any(item[0] == identity for item in seen if item != marker):
+                    return
+                concrete = concrete_container_schema(node, expected_container) or {}
+                if expected_container is dict:
+                    values_schema = concrete.get("values_schema")
+                    for item in dict.values(current):
+                        inspect_schema(item, values_schema)
+                    return
+                if expected_container is tuple:
+                    item_schemas = concrete.get("items_schema", ())
+                    variadic_index = concrete.get("variadic_item_index")
+                    for index, item in enumerate(tuple.__iter__(current)):
+                        if index < len(item_schemas):
+                            inspect_schema(item, item_schemas[index])
+                        elif isinstance(variadic_index, int) and variadic_index < len(
+                            item_schemas
+                        ):
+                            inspect_schema(item, item_schemas[variadic_index])
+                    return
+                items_schema = container_items_schema(node, expected_container)
+                iterator = {
+                    list: list.__iter__,
+                    tuple: tuple.__iter__,
+                    set: set.__iter__,
+                    frozenset: frozenset.__iter__,
+                    deque: deque.__iter__,
+                }[expected_container]
+                for item in iterator(current):
+                    inspect_schema(item, items_schema)
                 return
             if node_type in {
                 "default",
@@ -435,38 +691,40 @@ def _runtime_model_extra_collision_auditor(schema: Any) -> Any:
             if node_type in {"union", "tagged-union"}:
                 choices = node.get("choices", ())
                 values = choices.values() if isinstance(choices, dict) else choices
-                for choice in values:
-                    candidate = choice[0] if isinstance(choice, tuple) else choice
-                    inspect_schema(current, candidate)
+                candidates = [
+                    choice[0] if isinstance(choice, tuple) else choice
+                    for choice in values
+                ]
+                matching = [
+                    candidate
+                    for candidate in candidates
+                    if schema_accepts_type(current, candidate) is True
+                ]
+                if matching:
+                    for candidate in matching:
+                        inspect_schema(current, candidate)
+                    return
+                unknown = [
+                    candidate
+                    for candidate in candidates
+                    if schema_accepts_type(current, candidate) is None
+                ]
+                if unknown:
+                    for candidate in unknown:
+                        inspect_schema(current, candidate)
+                    return
+                container_choices = [
+                    expected
+                    for candidate in candidates
+                    if (expected := declared_container_type(candidate)) is not None
+                ]
+                if container_choices:
+                    raise ValueError(
+                        "output container storage is incompatible with the declared "
+                        f"built-in {container_choices[0].__name__} type"
+                    )
                 return
-            if node_type == "list" and isinstance(current, list):
-                for item in list.__iter__(current):
-                    inspect_schema(item, node.get("items_schema"))
-                return
-            if node_type == "tuple" and isinstance(current, tuple):
-                item_schemas = node.get("items_schema", ())
-                variadic_index = node.get("variadic_item_index")
-                for index, item in enumerate(tuple.__iter__(current)):
-                    if index < len(item_schemas):
-                        inspect_schema(item, item_schemas[index])
-                    elif isinstance(variadic_index, int) and variadic_index < len(
-                        item_schemas
-                    ):
-                        inspect_schema(item, item_schemas[variadic_index])
-                return
-            if node_type == "set" and isinstance(current, set):
-                for item in set.__iter__(current):
-                    inspect_schema(item, node.get("items_schema"))
-                return
-            if node_type == "frozenset" and isinstance(current, frozenset):
-                for item in frozenset.__iter__(current):
-                    inspect_schema(item, node.get("items_schema"))
-                return
-            if node_type == "dict" and isinstance(current, dict):
-                values_schema = node.get("values_schema")
-                for item in dict.values(current):
-                    inspect_schema(item, values_schema)
-                return
+
             if node_type == "json-or-python":
                 inspect_schema(current, node.get("python_schema"))
                 inspect_schema(current, node.get("json_schema"))
