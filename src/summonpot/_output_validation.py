@@ -279,6 +279,33 @@ def _reject_ambiguous_object_namespaces(schema: Any) -> None:
     inspect(schema)
 
 
+def _reject_callable_output_discriminators(schema: Any) -> None:
+    """Reject branch selection that the final audit cannot replay inertly."""
+    seen: set[int] = set()
+
+    def inspect(node: Any) -> None:
+        if isinstance(node, dict):
+            identity = id(node)
+            if identity in seen:
+                return
+            seen.add(identity)
+            if node.get("type") == "tagged-union" and callable(
+                node.get("discriminator")
+            ):
+                raise TypeError(
+                    "Callable discriminators are unsupported for runtime-enforced "
+                    "operation outputs; use a field-name discriminator instead."
+                )
+            for value in dict.values(node):
+                inspect(value)
+            return
+        if isinstance(node, (list, tuple)):
+            for value in node:
+                inspect(value)
+
+    inspect(schema)
+
+
 def _runtime_model_extra_collision_auditor(schema: Any) -> Any:
     """Build a final schema-aware storage audit without application hooks."""
     dataclass_fields: list[tuple[type[Any], tuple[str, ...]]] = []
@@ -1198,6 +1225,7 @@ def _revalidating_schema(node: Any) -> Any:
 def _compile_output_validator(adapter: TypeAdapter[Any]) -> SchemaValidator:
     """Compile once at registration without modifying class-owned schemas."""
     _reject_ambiguous_object_namespaces(adapter.core_schema)
+    _reject_callable_output_discriminators(adapter.core_schema)
     audit = _runtime_model_extra_collision_auditor(adapter.core_schema)
 
     def validate(value: Any, handler: Any) -> Any:

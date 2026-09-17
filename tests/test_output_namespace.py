@@ -13,8 +13,10 @@ from pydantic import (
     AliasPath,
     BaseModel,
     ConfigDict,
+    Discriminator,
     Field,
     RootModel,
+    Tag,
     TypeAdapter,
     ValidationError,
     computed_field,
@@ -28,6 +30,53 @@ from summonpot import Exactly, FromRequest, Operation, Required, Summon
 from summonpot._output_validation import _compile_output_validator
 from summonpot.runtime import Runtime, _OperationOutputError
 from summonpot.server import build_app
+
+CALLABLE_DISCRIMINATOR_CALLS: list[str] = []
+
+
+def callable_output_discriminator(value: Any) -> str:
+    CALLABLE_DISCRIMINATOR_CALLS.append("called")
+    return "safe"
+
+
+class CallableDiscriminatorSafe(BaseModel):
+    value: int
+
+
+class CallableDiscriminatorOther(BaseModel):
+    value: str
+
+
+CallableDiscriminatorOutput = Annotated[
+    Annotated[CallableDiscriminatorSafe, Tag("safe")]
+    | Annotated[CallableDiscriminatorOther, Tag("other")],
+    Discriminator(callable_output_discriminator),
+]
+
+
+@pytest.mark.parametrize(
+    "output",
+    [CallableDiscriminatorOutput, list[CallableDiscriminatorOutput]],
+)
+def test_callable_output_discriminator_is_rejected_without_invocation(output: Any):
+    CALLABLE_DISCRIMINATOR_CALLS.clear()
+
+    with pytest.raises(TypeError, match="Callable discriminators are unsupported"):
+        _compile_output_validator(TypeAdapter(output))
+
+    assert CALLABLE_DISCRIMINATOR_CALLS == []
+
+
+def test_callable_output_discriminator_fails_during_endpoint_registration():
+    CALLABLE_DISCRIMINATOR_CALLS.clear()
+
+    with pytest.raises(TypeError, match="Callable discriminators are unsupported"):
+        _direct_summon(
+            CallableDiscriminatorOutput,
+            CallableDiscriminatorSafe(value=7),
+        )
+
+    assert CALLABLE_DISCRIMINATOR_CALLS == []
 
 
 class Request(BaseModel):
