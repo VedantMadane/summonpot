@@ -64,6 +64,28 @@ class _CompiledParameter:
 
 
 @dataclass(frozen=True, slots=True)
+class _ProjectionField:
+    name: str
+    prompt_name: str
+    excluded: bool
+    schema: _ProjectionSchema
+
+
+@dataclass(frozen=True, slots=True)
+class _ProjectionSchema:
+    kind: str
+    cls: type[Any] | None = None
+    fields: tuple[_ProjectionField, ...] = ()
+    item: _ProjectionSchema | None = None
+    keys: _ProjectionSchema | None = None
+    values: _ProjectionSchema | None = None
+    choices: tuple[_ProjectionSchema, ...] = ()
+    items: tuple[_ProjectionSchema, ...] = ()
+    reference: str | None = None
+    allow_extras: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class _CompiledTool:
     identity: int
     name: str
@@ -109,6 +131,8 @@ class _CompiledEndpoint:
     input_model: Any
     input_adapter: TypeAdapter[Any]
     input_validator: SchemaValidator
+    prompt_schema: _ProjectionSchema
+    prompt_definitions: Mapping[str, _ProjectionSchema]
     output_model: Any
     model: str | None
     method: str
@@ -165,6 +189,108 @@ def _field_is_statically_excluded(field: Any) -> bool:
     return object.__getattribute__(field, "exclude") is True
 
 
+def _compile_projection_contract(
+    source: Any,
+) -> tuple[_ProjectionSchema, Mapping[str, _ProjectionSchema]]:
+    """Snapshot the structural serialization boundary from Pydantic's schema."""
+    definitions: dict[str, _ProjectionSchema] = {}
+    root = source
+    if source.get("type") == "definitions":
+        root = source["schema"]
+        for definition in source["definitions"]:
+            reference = definition.get("ref")
+            if type(reference) is str:
+                definitions[reference] = _compile_projection_schema(definition)
+    return _compile_projection_schema(root), MappingProxyType(definitions)
+
+
+def _compile_projection_schema(source: Any) -> _ProjectionSchema:
+    """Retain only inert structure needed for model-facing prompt projection."""
+    if type(source) is not dict or type(source.get("type")) is not str:
+        return _ProjectionSchema("any")
+    kind = source["type"]
+    if kind == "definition-ref":
+        reference = source.get("schema_ref")
+        return _ProjectionSchema(
+            "ref", reference=reference if type(reference) is str else None
+        )
+    if kind == "model":
+        fields_schema = source.get("schema")
+        while (
+            type(fields_schema) is dict and fields_schema.get("type") != "model-fields"
+        ):
+            fields_schema = fields_schema.get("schema")
+        fields: list[_ProjectionField] = []
+        if type(fields_schema) is dict and type(fields_schema.get("fields")) is dict:
+            for name, field_schema in fields_schema["fields"].items():
+                if type(name) is not str or type(field_schema) is not dict:
+                    continue
+                alias = field_schema.get("serialization_alias", name)
+                fields.append(
+                    _ProjectionField(
+                        name=name,
+                        prompt_name=alias if type(alias) is str else name,
+                        excluded=field_schema.get("serialization_exclude") is True,
+                        schema=_compile_projection_schema(field_schema.get("schema")),
+                    )
+                )
+        config = source.get("config")
+        return _ProjectionSchema(
+            "model",
+            cls=source.get("cls"),
+            fields=tuple(fields),
+            allow_extras=(
+                type(config) is dict and config.get("extra_fields_behavior") == "allow"
+            ),
+        )
+    if kind in ("list", "set", "frozenset", "generator"):
+        return _ProjectionSchema(
+            kind, item=_compile_projection_schema(source.get("items_schema"))
+        )
+    if kind == "dict":
+        return _ProjectionSchema(
+            kind,
+            keys=_compile_projection_schema(source.get("keys_schema")),
+            values=_compile_projection_schema(source.get("values_schema")),
+        )
+    if kind == "tuple":
+        return _ProjectionSchema(
+            kind,
+            items=tuple(
+                _compile_projection_schema(item)
+                for item in source.get("items_schema", ())
+            ),
+        )
+    if kind in ("union", "tagged-union"):
+        raw_choices = source.get("choices", ())
+        if type(raw_choices) is dict:
+            raw_choices = tuple(raw_choices.values())
+        return _ProjectionSchema(
+            "union",
+            choices=tuple(_compile_projection_schema(choice) for choice in raw_choices),
+        )
+    if kind == "nullable":
+        return _ProjectionSchema(
+            kind, item=_compile_projection_schema(source.get("schema"))
+        )
+    if kind in {
+        "default",
+        "function-before",
+        "function-after",
+        "function-wrap",
+        "function-plain",
+    }:
+        return _compile_projection_schema(source.get("schema"))
+    if kind in ("lax-or-strict", "json-or-python"):
+        return _compile_projection_schema(
+            source.get("python_schema", source.get("strict_schema"))
+        )
+    if kind == "chain":
+        steps = source.get("steps", ())
+        return _compile_projection_schema(steps[-1] if steps else None)
+    return _ProjectionSchema(kind)
+
+
 def _unsupported_raw_request(
     error_type: LiteralString, message: LiteralString
 ) -> ValidationError:
@@ -200,9 +326,34 @@ def _inert_hashable(value: Any) -> bool:
 
 
 def _inert_transport_value(
-    value: Any, ancestors: frozenset[int] = frozenset(), *, native: bool = False
+    value: Any,
+    ancestors: frozenset[int] = frozenset(),
+    *,
+    native: bool = False,
+    schema: _ProjectionSchema | None = None,
+    definitions: Mapping[str, _ProjectionSchema] = MappingProxyType({}),
 ) -> Any:
     """Project known exact types only, without application serialization hooks."""
+    if schema is not None:
+        while (
+            schema.kind == "ref"
+            and schema.reference is not None
+            and schema.reference in definitions
+        ):
+            schema = definitions[schema.reference]
+        if schema.kind == "nullable":
+            if value is None:
+                return None
+            schema = schema.item
+            while (
+                schema is not None
+                and schema.kind == "ref"
+                and schema.reference is not None
+                and schema.reference in definitions
+            ):
+                schema = definitions[schema.reference]
+        if schema is not None and schema.kind == "union":
+            schema = _projection_union_choice(value, schema.choices, definitions)
     kind = type(value)
     if kind is UUID and type(value.int) is int and 0 <= value.int < 1 << 128:
         # UUID can be changed through object.__setattr__, so never share it.
@@ -233,15 +384,28 @@ def _inert_transport_value(
         storage = _BASE_MODEL_DICT_DESCRIPTOR.__get__(value, kind)
         if type(storage) is not dict:
             return _UNAVAILABLE
-        projected = {
-            _prompt_field_name(name, field): _inert_transport_value(
-                storage[name], ancestors, native=native
-            )
-            for name, field in _pydantic_fields(value).items()
-            if name in storage and not _field_is_statically_excluded(field)
-        }
+        if schema is not None and schema.kind == "model":
+            projected = {
+                field.prompt_name: _inert_transport_value(
+                    storage[field.name],
+                    ancestors,
+                    native=native,
+                    schema=field.schema,
+                    definitions=definitions,
+                )
+                for field in schema.fields
+                if field.name in storage and not field.excluded
+            }
+        else:
+            projected = {
+                _prompt_field_name(name, field): _inert_transport_value(
+                    storage[name], ancestors, native=native
+                )
+                for name, field in _pydantic_fields(value).items()
+                if name in storage and not _field_is_statically_excluded(field)
+            }
         extras = _BASE_MODEL_EXTRA_DESCRIPTOR.__get__(value, kind)
-        if type(extras) is dict:
+        if type(extras) is dict and (schema is None or schema.allow_extras):
             projected.update(
                 {
                     key: _inert_transport_value(item, ancestors, native=native)
@@ -265,17 +429,96 @@ def _inert_transport_value(
     ancestors = ancestors | {id(value)}
     if kind is dict:
         # Do not stringify keys: even hashing an application key can execute code.
+        value_schema = (
+            schema.values if schema is not None and schema.kind == "dict" else None
+        )
         return {
-            key: _inert_transport_value(item, ancestors, native=native)
+            key: _inert_transport_value(
+                item,
+                ancestors,
+                native=native,
+                schema=value_schema,
+                definitions=definitions,
+            )
             for key, item in value.items()
             if type(key) is str
         }
-    items = [_inert_transport_value(item, ancestors, native=native) for item in value]
+    if schema is not None and schema.kind == "tuple" and schema.items:
+        item_schemas: tuple[_ProjectionSchema | None, ...] = tuple(
+            schema.items[min(index, len(schema.items) - 1)]
+            for index in range(len(value))
+        )
+    else:
+        item_schema = (
+            schema.item
+            if schema is not None
+            and schema.kind in ("list", "set", "frozenset", "generator")
+            else None
+        )
+        item_schemas = (item_schema,) * len(value)
+    items = [
+        _inert_transport_value(
+            item,
+            ancestors,
+            native=native,
+            schema=item_schemas[index],
+            definitions=definitions,
+        )
+        for index, item in enumerate(value)
+    ]
     if native and kind in (set, frozenset):
         if not all(_inert_hashable(item) for item in items):
             return _UNAVAILABLE
         return kind(items)
     return kind(items) if native else items
+
+
+def _projection_union_choice(
+    value: Any,
+    choices: tuple[_ProjectionSchema, ...],
+    definitions: Mapping[str, _ProjectionSchema],
+) -> _ProjectionSchema | None:
+    """Choose a declared union branch from canonical runtime types only."""
+    resolved: list[_ProjectionSchema] = []
+    for choice in choices:
+        while (
+            choice.kind == "ref"
+            and choice.reference is not None
+            and choice.reference in definitions
+        ):
+            choice = definitions[choice.reference]
+        resolved.append(choice)
+    kind = type(value)
+    if isinstance(value, BaseModel):
+        runtime_mro = type.__getattribute__(kind, "__mro__")
+        for exact in (True, False):
+            for choice in resolved:
+                if choice.kind != "model" or choice.cls is None:
+                    continue
+                matches = (
+                    kind is choice.cls
+                    if exact
+                    else any(base is choice.cls for base in runtime_mro)
+                )
+                if matches:
+                    return choice
+    expected = {
+        "list": list,
+        "set": set,
+        "frozenset": frozenset,
+        "tuple": tuple,
+        "dict": dict,
+        "none": type(None),
+        "bool": bool,
+        "int": int,
+        "float": float,
+        "str": str,
+        "bytes": bytes,
+    }
+    for choice in resolved:
+        if expected.get(choice.kind) is kind:
+            return choice
+    return next((choice for choice in resolved if choice.kind == "any"), None)
 
 
 def _public_transport_views(
@@ -383,6 +626,9 @@ def _compile_endpoint(
         for index, tool in enumerate(source_tools)
     )
     input_adapter = _compile_input_adapter(endpoint)
+    prompt_schema, prompt_definitions = _compile_projection_contract(
+        input_adapter.core_schema
+    )
     return _CompiledEndpoint(
         path=endpoint.path,
         name=endpoint.name,
@@ -392,6 +638,8 @@ def _compile_endpoint(
         input_model=endpoint.input_model,
         input_adapter=input_adapter,
         input_validator=_compile_input_validator(input_adapter),
+        prompt_schema=prompt_schema,
+        prompt_definitions=prompt_definitions,
         output_model=endpoint.output_model,
         model=endpoint.model,
         method=endpoint.method,
@@ -584,19 +832,15 @@ def _prepare_request(
             "validated request has unsupported canonical storage",
         )
     typed = {name: storage[name] for name in fields if name in storage}
-    prompt = {
-        _prompt_field_name(name, field): _inert_transport_value(typed[name])
-        for name, field in fields.items()
-        if not _field_is_statically_excluded(field)
-    }
-    extras = _BASE_MODEL_EXTRA_DESCRIPTOR.__get__(validated, type(validated))
-    if type(extras) is dict:
-        prompt.update(
-            {
-                key: _inert_transport_value(value)
-                for key, value in extras.items()
-                if type(key) is str and key not in prompt
-            }
+    prompt = _inert_transport_value(
+        validated,
+        schema=plan.prompt_schema,
+        definitions=plan.prompt_definitions,
+    )
+    if type(prompt) is not dict:
+        raise _unsupported_raw_request(
+            "canonical_projection_type",
+            "validated request has unsupported canonical projection",
         )
     return _RequestValues(prompt, typed=typed)
 

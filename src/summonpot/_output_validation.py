@@ -10,7 +10,6 @@ fall back to the original adapter if compilation fails.
 from __future__ import annotations
 
 from contextvars import ContextVar
-from dataclasses import is_dataclass
 from typing import Any, cast
 
 from pydantic import BaseModel, TypeAdapter, ValidationError
@@ -20,8 +19,7 @@ from pydantic_core import PydanticCustomError, SchemaValidator, core_schema
 def _input_kind(value: Any) -> str:
     return (
         "instance"
-        if isinstance(value, BaseModel)
-        or (is_dataclass(value) and not isinstance(value, type))
+        if isinstance(value, BaseModel) or _is_dataclass_instance(value)
         else "input"
     )
 
@@ -264,6 +262,11 @@ def _has_nested_model_instance(
     if kind in (str, bytes):
         return False
     if kind not in (dict, list, tuple, set, frozenset):
+        if _is_dataclass_instance(value):
+            # Dataclass fields may be descriptors or slots owned by application
+            # code. Reject the carrier before custom initialization rather than
+            # read arbitrary storage while searching for constructed models.
+            return True
         # Non-exact containers cannot be traversed without dispatching application
         # iteration, indexing, or mapping hooks. Detect their protocol statically
         # through the class dictionaries and fail closed before custom __init__.
@@ -283,6 +286,18 @@ def _has_nested_model_instance(
             for key, item in dict.items(value)
         )
     return any(_has_nested_model_instance(item, ancestors) for item in value)
+
+
+def _is_dataclass_instance(value: Any) -> bool:
+    """Detect dataclass storage statically, without metaclass/attribute dispatch."""
+    kind = type(value)
+    if kind is type:
+        return False
+    mro = type.__getattribute__(kind, "__mro__")
+    return any(
+        "__dataclass_fields__" in type.__getattribute__(base, "__dict__")
+        for base in mro
+    )
 
 
 def _has_static_container_protocol(kind: type[Any]) -> bool:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections import UserDict
 from collections.abc import Mapping
+from dataclasses import dataclass, make_dataclass
 from typing import Annotated, Any
 
 import pytest
@@ -848,6 +849,130 @@ def test_custom_init_rejects_uninspectable_container_like_values_without_hooks(
     assert events == []
 
 
+@pytest.mark.parametrize("dataclass_kind", ["normal", "frozen", "slots"])
+@pytest.mark.parametrize("constructed_x", [-1, "7"])
+def test_custom_init_rejects_dataclass_carriers_before_application_code(
+    dataclass_kind: str,
+    constructed_x: Any,
+):
+    events: list[str] = []
+    initializations: list[Any] = []
+    received: list[Any] = []
+
+    class Inner(BaseModel):
+        x: int = Field(gt=0)
+
+        def __getattribute__(self, name: str) -> Any:
+            if name == "x":
+                events.append("attribute")
+            return super().__getattribute__(name)
+
+        def __repr__(self) -> str:
+            events.append("repr")
+            raise RuntimeError("application repr")
+
+    Box = make_dataclass(
+        "Box",
+        [("inner", Inner)],
+        frozen=dataclass_kind == "frozen",
+        slots=dataclass_kind == "slots",
+    )
+
+    class CustomRequest(BaseModel):
+        def __init__(self, **data: Any) -> None:
+            initializations.append(data["payload"])
+            super().__init__(**data)
+
+    Request = create_model(
+        f"DataclassCarrierRequest{dataclass_kind}",
+        payload=(Box, ...),
+        __base__=CustomRequest,
+    )
+
+    def apply(payload: Any) -> Result:
+        received.append(payload)
+        return Result(value=payload.inner.x)
+
+    operation = Operation(
+        apply, bind={"payload": FromRequest("payload")}, output=Result
+    )
+    summon = Summon(f"custom-init-dataclass-{dataclass_kind}")
+
+    def endpoint(
+        request: Any,
+        result=Required(operation, calls=Exactly(1)),
+    ) -> Result:
+        """Apply one dataclass-backed request value."""
+        ...
+
+    endpoint.__annotations__["request"] = Request
+    summon("/dataclass")(endpoint)
+
+    carrier = Box(Inner.model_construct(x=constructed_x))
+    with pytest.raises(ValidationError, match="equivalent mapping"):
+        asyncio.run(Runtime().call(summon.endpoints[0], {"payload": carrier}))
+
+    assert initializations == []
+    assert received == []
+    assert events == []
+
+
+@pytest.mark.parametrize("dataclass_options", [{}, {"frozen": True}, {"slots": True}])
+def test_custom_init_dataclass_mapping_matches_http_canonicalization_once(
+    dataclass_options: dict[str, bool],
+):
+    initializations: list[Any] = []
+    received: list[Any] = []
+
+    class Inner(BaseModel):
+        x: int = Field(gt=0)
+
+    @dataclass(**dataclass_options)
+    class Box:
+        inner: Inner
+
+    class Request(BaseModel):
+        payload: Box
+
+        def __init__(self, *, payload: Box) -> None:
+            initializations.append(payload)
+            super().__init__(payload=payload)
+
+    def apply(payload: Box) -> Result:
+        received.append(payload)
+        return Result(value=payload.inner.x)
+
+    operation = Operation(
+        apply, bind={"payload": FromRequest("payload")}, output=Result
+    )
+
+    def service(name: str) -> Summon:
+        summon = Summon(name)
+
+        def endpoint(
+            request: Any,
+            result=Required(operation, calls=Exactly(1)),
+        ) -> Result:
+            """Apply one validated dataclass-backed request value."""
+            ...
+
+        endpoint.__annotations__["request"] = Request
+        summon("/dataclass")(endpoint)
+        return summon
+
+    body = {"payload": {"inner": {"x": "7"}}}
+    raw = service("custom-init-dataclass-mapping-raw")
+    assert asyncio.run(Runtime().call(raw.endpoints[0], body)) == Result(value=7)
+
+    http = service("custom-init-dataclass-mapping-http")
+    response = TestClient(build_app(http)).post("/dataclass", json=body)
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"value": 7}
+    assert len(initializations) == len(received) == 2
+    assert all(type(box.inner.x) is int for box in received)
+
+
 def _custom_init_payload_service(
     name: str, initializations: list[Any], received: list[Any]
 ) -> Summon:
@@ -1489,6 +1614,90 @@ def test_raw_and_http_prompts_omit_statically_excluded_fields_without_hooks():
         ("top-secret", "nested-secret"),
         ("top-secret", "nested-secret"),
     ]
+    assert hooks == []
+
+
+def test_raw_prompt_projects_runtime_subclasses_through_declared_nested_schemas():
+    prompts: list[str] = []
+    hooks: list[str] = []
+    marker = "PRIVATE_CREDENTIAL_MARKER"
+
+    class Public(BaseModel):
+        visible: int
+
+    class Private(Public):
+        credential: str
+
+        def __getattribute__(self, name: str) -> Any:
+            if name in {"visible", "credential"}:
+                hooks.append(f"attribute:{name}")
+            return super().__getattribute__(name)
+
+        def __repr__(self) -> str:
+            hooks.append("repr")
+            raise RuntimeError("application repr")
+
+    class Request(BaseModel):
+        value: Public
+        nested: list[dict[str, Public | None]]
+
+        @field_validator("value", "nested", mode="after")
+        @classmethod
+        def return_runtime_subclasses(cls, value: Any) -> Any:
+            if isinstance(value, Public):
+                return Private(visible=value.visible, credential=marker)
+            return [
+                {
+                    key: (
+                        Private(visible=item.visible, credential=marker)
+                        if item is not None
+                        else None
+                    )
+                    for key, item in group.items()
+                }
+                for group in value
+            ]
+
+    def model(messages, info):
+        prompt = next(
+            part.content
+            for message in messages
+            for part in message.parts
+            if isinstance(part, UserPromptPart)
+        )
+        assert type(prompt) is str
+        prompts.append(prompt)
+        return ModelResponse(parts=[TextPart("done")])
+
+    def service(name: str) -> Summon:
+        summon = Summon(name)
+        summon._runtime = Runtime(model=FunctionModel(model))
+
+        def endpoint(request: Any) -> str:
+            """Inspect values through their declared public request schema."""
+            ...
+
+        endpoint.__annotations__["request"] = Request
+        summon("/declared-schema-prompt")(endpoint)
+        return summon
+
+    body = {
+        "value": {"visible": 1},
+        "nested": [{"first": {"visible": 2}, "empty": None}],
+    }
+    raw = service("declared-schema-prompt-raw")
+    assert asyncio.run(raw._runtime.call(raw.endpoints[0], body)) == "done"
+
+    http = service("declared-schema-prompt-http")
+    response = TestClient(build_app(http)).post("/declared-schema-prompt", json=body)
+
+    assert response.status_code == 200, response.text
+    assert response.json() == "done"
+    assert prompts[0] == prompts[1]
+    assert marker not in prompts[0]
+    assert "credential" not in prompts[0]
+    assert '  value: {"visible": 1}' in prompts[0]
+    assert '  nested: [{"first": {"visible": 2}, "empty": null}]' in prompts[0]
     assert hooks == []
 
 
