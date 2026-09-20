@@ -1009,6 +1009,160 @@ def test_receiver_structurally_checks_typed_model_extras():
     assert received[0] is valid
 
 
+def test_receiver_enforces_typed_model_extra_key_constraints_on_a_subclass():
+    class NarrowPayload(BaseModel):
+        model_config = ConfigDict(extra="allow")
+
+        __pydantic_extra__: dict[Annotated[str, Field(min_length=3)], int] = Field(  # type: ignore[reportIncompatibleVariableOverride]
+            init=False
+        )
+        count: int = Field(alias="total")
+
+    class BroadPayload(NarrowPayload):
+        __pydantic_extra__: dict[str, int] = Field(init=False)
+
+    starts = 0
+
+    def apply(value: Any) -> Result:
+        nonlocal starts
+        starts += 1
+        return Result(value=value.count)
+
+    apply.__annotations__ = {"value": NarrowPayload, "return": Result}
+    operation = Operation(apply, bind={"value": FromRequest("value")}, output=Result)
+    summon = Summon("extra-key-receiver")
+
+    @summon("/apply")
+    def endpoint(
+        request: AnyRequest, result=Required(operation, calls=Exactly(1))
+    ) -> Result:
+        """Enforce the narrow receiver's extra-key schema."""
+        ...
+
+    invalid = BroadPayload.model_validate({"total": 1, "x": 1})
+    with pytest.raises(_OperationInputError):
+        _call_with_canonical(summon, invalid)
+
+    valid = BroadPayload.model_validate({"total": 2, "valid": 1})
+    assert _call_with_canonical(summon, valid) == Result(value=2)
+    assert starts == 1
+
+
+def test_http_receiver_enforces_typed_model_extra_key_constraints():
+    class NarrowPayload(BaseModel):
+        model_config = ConfigDict(extra="allow")
+
+        __pydantic_extra__: dict[Annotated[str, Field(min_length=3)], int] = Field(  # type: ignore[reportIncompatibleVariableOverride]
+            init=False
+        )
+        count: int = Field(alias="total")
+
+    class BroadPayload(NarrowPayload):
+        __pydantic_extra__: dict[str, int] = Field(init=False)
+
+    class Request(BaseModel):
+        value: BroadPayload
+
+    starts = 0
+
+    def apply(value: Any) -> Result:
+        nonlocal starts
+        starts += 1
+        return Result(value=value.count)
+
+    apply.__annotations__ = {"value": NarrowPayload, "return": Result}
+    operation = Operation(apply, bind={"value": FromRequest("value")}, output=Result)
+    summon = Summon("http-extra-key-receiver")
+
+    def endpoint(request, result=Required(operation, calls=Exactly(1))):
+        """Reject invalid extra keys after broader HTTP validation."""
+        ...
+
+    endpoint.__annotations__ = {"request": Request, "return": Result}
+    summon("/apply")(endpoint)
+    client = TestClient(build_app(summon), raise_server_exceptions=False)
+
+    rejected = client.post("/apply", json={"value": {"total": 1, "x": 1}})
+    accepted = client.post("/apply", json={"value": {"total": 2, "valid": 1}})
+
+    assert rejected.status_code == 422
+    assert rejected.json() == {
+        "detail": "Request data did not satisfy a receiving operation contract."
+    }
+    assert accepted.status_code == 200
+    assert accepted.json() == {"value": 2}
+    assert starts == 1
+
+
+def test_typed_model_extra_keys_are_inspected_without_application_hooks():
+    events: list[str] = []
+
+    class Payload(BaseModel):
+        model_config = ConfigDict(extra="allow")
+
+        __pydantic_extra__: dict[Annotated[str, Field(min_length=3)], int] = Field(  # type: ignore[reportIncompatibleVariableOverride]
+            init=False
+        )
+        count: int
+
+    class HostileKey(str):
+        def __hash__(self) -> int:
+            events.append("hash")
+            return str.__hash__(self)
+
+        def __eq__(self, other: object) -> bool:
+            events.append("eq")
+            raise AssertionError("equality must not run")
+
+        def __repr__(self) -> str:
+            events.append("repr")
+            raise AssertionError("repr must not run")
+
+    invalid = Payload.model_validate({"count": 1, "valid": 1})
+    dict_descriptor = BaseModel.__dict__["__dict__"]
+    values = type(dict_descriptor).__get__(dict_descriptor, invalid, type(invalid))
+    extras = dict.__getitem__(values, "__pydantic_extra__")
+    dict.clear(extras)
+    extras[HostileKey("valid")] = 1
+    events.clear()
+    starts = 0
+
+    def apply(value: Any) -> Result:
+        nonlocal starts
+        starts += 1
+        return Result(value=1)
+
+    apply.__annotations__ = {"value": Payload, "return": Result}
+    operation = Operation(apply, bind={"value": FromRequest("value")}, output=Result)
+    summon = Summon("hostile-extra-key-receiver")
+
+    @summon("/apply")
+    def endpoint(
+        request: AnyRequest, result=Required(operation, calls=Exactly(1))
+    ) -> Result:
+        """Reject application-owned extra keys without invoking their hooks."""
+        ...
+
+    with pytest.raises(_OperationInputError):
+        _call_with_canonical(summon, invalid)
+
+    assert starts == 0
+    assert events == []
+
+
+def test_unsupported_typed_model_extra_key_contract_is_rejected_at_registration():
+    class Payload(BaseModel):
+        model_config = ConfigDict(extra="allow")
+
+        __pydantic_extra__: dict[Annotated[str, Field(pattern=r"^safe$")], int] = Field(  # type: ignore[reportIncompatibleVariableOverride]
+            init=False
+        )
+        count: int
+
+    with pytest.raises(TypeError, match=r"string pattern.*not supported"):
+        _receiver_service(Payload, [])
+
+
 def test_model_storage_is_read_without_shadowed_descriptor_hooks():
     events: list[str] = []
 

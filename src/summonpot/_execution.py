@@ -762,9 +762,20 @@ def _compile_receiving_schema(schema: Any) -> _ReceivingPredicate:
                 and model_schema.get("type") == "model-fields"
                 else None
             )
+            extras_keys_schema = (
+                model_schema.get("extras_keys_schema")
+                if type(model_schema) is dict
+                and model_schema.get("type") == "model-fields"
+                else None
+            )
             extra_predicate = (
                 compile_node(extras_schema, nested_config)
                 if extras_schema is not None
+                else lambda value, seen: True
+            )
+            extra_key_predicate = (
+                compile_node(extras_keys_schema, nested_config)
+                if extras_keys_schema is not None
                 else lambda value, seen: True
             )
             token = id(node)
@@ -795,7 +806,7 @@ def _compile_receiving_schema(schema: Any) -> _ReceivingPredicate:
                 if extra_behavior != "allow":
                     return dict.__len__(extras) == 0
                 return all(
-                    type(name) is str and extra_predicate(item, seen)
+                    extra_key_predicate(name, seen) and extra_predicate(item, seen)
                     for name, item in dict.items(extras)
                 )
 
