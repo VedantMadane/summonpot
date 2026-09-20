@@ -6,10 +6,11 @@ import asyncio
 import inspect
 import math
 from collections.abc import Mapping, Sequence
+from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
-from types import MappingProxyType
+from types import GetSetDescriptorType, MappingProxyType, MemberDescriptorType
 from typing import Any, LiteralString
 from uuid import UUID
 from weakref import ReferenceType, ref
@@ -69,6 +70,7 @@ class _ProjectionField:
     prompt_name: str
     excluded: bool
     schema: _ProjectionSchema
+    slot: MemberDescriptorType | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +85,7 @@ class _ProjectionSchema:
     items: tuple[_ProjectionSchema, ...] = ()
     reference: str | None = None
     allow_extras: bool = False
+    instance_dict: GetSetDescriptorType | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,6 +169,7 @@ class _ConsumedTransport:
 
 _TRANSPORT_SNAPSHOTS: dict[int, _TransportSnapshot | _ConsumedTransport] = {}
 _UNAVAILABLE = "<unavailable>"
+_MISSING = object()
 _BASE_MODEL_DICT_DESCRIPTOR = BaseModel.__dict__["__dict__"]
 _BASE_MODEL_EXTRA_DESCRIPTOR = BaseModel.__dict__["__pydantic_extra__"]
 
@@ -202,6 +206,18 @@ def _compile_projection_contract(
             if type(reference) is str:
                 definitions[reference] = _compile_projection_schema(definition)
     return _compile_projection_schema(root), MappingProxyType(definitions)
+
+
+def _trusted_dataclass_descriptor(cls: Any, name: str) -> Any:
+    """Find built-in storage descriptors without application attribute dispatch."""
+    if not isinstance(cls, type):
+        return None
+    for base in type.__getattribute__(cls, "__mro__"):
+        namespace = type.__getattribute__(base, "__dict__")
+        descriptor = namespace.get(name)
+        if type(descriptor) in (GetSetDescriptorType, MemberDescriptorType):
+            return descriptor
+    return None
 
 
 def _compile_projection_schema(source: Any) -> _ProjectionSchema:
@@ -241,6 +257,46 @@ def _compile_projection_schema(source: Any) -> _ProjectionSchema:
             fields=tuple(fields),
             allow_extras=(
                 type(config) is dict and config.get("extra_fields_behavior") == "allow"
+            ),
+        )
+    if kind == "dataclass":
+        cls = source.get("cls")
+        fields_schema = source.get("schema")
+        while (
+            type(fields_schema) is dict
+            and fields_schema.get("type") != "dataclass-args"
+        ):
+            fields_schema = fields_schema.get("schema")
+        instance_dict = _trusted_dataclass_descriptor(cls, "__dict__")
+        fields: list[_ProjectionField] = []
+        if type(fields_schema) is dict and type(fields_schema.get("fields")) is list:
+            for field_schema in fields_schema["fields"]:
+                if type(field_schema) is not dict:
+                    continue
+                name = field_schema.get("name")
+                if type(name) is not str:
+                    continue
+                alias = field_schema.get("serialization_alias", name)
+                descriptor = _trusted_dataclass_descriptor(cls, name)
+                fields.append(
+                    _ProjectionField(
+                        name=name,
+                        prompt_name=alias if type(alias) is str else name,
+                        excluded=field_schema.get("serialization_exclude") is True,
+                        schema=_compile_projection_schema(field_schema.get("schema")),
+                        slot=(
+                            descriptor
+                            if type(descriptor) is MemberDescriptorType
+                            else None
+                        ),
+                    )
+                )
+        return _ProjectionSchema(
+            "dataclass",
+            cls=cls if isinstance(cls, type) else None,
+            fields=tuple(fields),
+            instance_dict=(
+                instance_dict if type(instance_dict) is GetSetDescriptorType else None
             ),
         )
     if kind in ("list", "set", "frozenset", "generator"):
@@ -374,6 +430,43 @@ def _inert_transport_value(
         return value
     if kind is float:
         return value if math.isfinite(value) else _UNAVAILABLE
+    if schema is not None and schema.kind == "dataclass":
+        if (
+            schema.cls is None
+            or id(value) in ancestors
+            or len(ancestors) >= 64
+            or not any(
+                base is schema.cls for base in type.__getattribute__(kind, "__mro__")
+            )
+        ):
+            return _UNAVAILABLE
+        storage: Any = None
+        if schema.instance_dict is not None:
+            storage = GetSetDescriptorType.__get__(schema.instance_dict, value, kind)
+            if type(storage) is not dict:
+                return _UNAVAILABLE
+        ancestors = ancestors | {id(value)}
+        projected: dict[str, Any] = {}
+        for projection_field in schema.fields:
+            if projection_field.excluded:
+                continue
+            item = _MISSING
+            if type(storage) is dict and projection_field.name in storage:
+                item = storage[projection_field.name]
+            elif projection_field.slot is not None:
+                with suppress(AttributeError):
+                    item = MemberDescriptorType.__get__(
+                        projection_field.slot, value, kind
+                    )
+            if item is not _MISSING:
+                projected[projection_field.prompt_name] = _inert_transport_value(
+                    item,
+                    ancestors,
+                    native=native,
+                    schema=projection_field.schema,
+                    definitions=definitions,
+                )
+        return projected
     if isinstance(value, BaseModel):
         if id(value) in ancestors or len(ancestors) >= 64:
             return _UNAVAILABLE
@@ -502,6 +595,18 @@ def _projection_union_choice(
                 )
                 if matches:
                     return choice
+    runtime_mro = type.__getattribute__(kind, "__mro__")
+    for exact in (True, False):
+        for choice in resolved:
+            if choice.kind != "dataclass" or choice.cls is None:
+                continue
+            matches = (
+                kind is choice.cls
+                if exact
+                else any(base is choice.cls for base in runtime_mro)
+            )
+            if matches:
+                return choice
     expected = {
         "list": list,
         "set": set,

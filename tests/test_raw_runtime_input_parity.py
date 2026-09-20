@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections import UserDict
 from collections.abc import Mapping
-from dataclasses import dataclass, make_dataclass
+from dataclasses import dataclass, field, make_dataclass
 from typing import Annotated, Any
 
 import pytest
@@ -2030,4 +2030,196 @@ def test_raw_request_projection_bypasses_model_metadata_and_attribute_hooks():
     assert (
         asyncio.run(summon._runtime.call(summon.endpoints[0], {"value": 23})) == "done"
     )
+    assert hooks == []
+
+
+@pytest.mark.parametrize("dataclass_options", [{}, {"frozen": True}, {"slots": True}])
+def test_dataclass_prompt_projection_matches_http_without_losing_identity(
+    dataclass_options: dict[str, bool],
+):
+    prompts: list[str] = []
+    canonical: list[Any] = []
+    received: list[Any] = []
+
+    @dataclass(**dataclass_options)
+    class Box:
+        value: Annotated[int, Field(serialization_alias="v")]
+        hidden: Annotated[str, Field(exclude=True)] = "hidden"
+
+    PrivateBox = make_dataclass(
+        "PrivateBox",
+        [("credential", str, field(default="PRIVATE_DATACLASS_MARKER"))],
+        bases=(Box,),
+        frozen=dataclass_options.get("frozen", False),
+        slots=dataclass_options.get("slots", False),
+    )
+
+    class Request(BaseModel):
+        box: Box
+        nested: list[dict[str, Box]]
+
+        @field_validator("box", mode="after")
+        @classmethod
+        def use_runtime_subclass(cls, value: Box) -> Box:
+            result = PrivateBox(value.value, value.hidden)
+            canonical.append(result)
+            return result
+
+        @field_validator("nested", mode="after")
+        @classmethod
+        def use_nested_runtime_subclasses(
+            cls, value: list[dict[str, Box]]
+        ) -> list[dict[str, Box]]:
+            return [
+                {
+                    key: PrivateBox(item.value, item.hidden)
+                    for key, item in group.items()
+                }
+                for group in value
+            ]
+
+    class AgentResult(BaseModel):
+        answer: int
+
+    def apply(box: Box) -> Result:
+        received.append(box)
+        return Result(value=box.value)
+
+    apply.__annotations__ = {"box": Box, "return": Result}
+    operation = Operation(apply, bind={"box": FromRequest("box")}, output=Result)
+
+    def service(name: str) -> Summon:
+        turns = 0
+
+        def model(messages, info):
+            nonlocal turns
+            turns += 1
+            if turns == 1:
+                prompt = next(
+                    part.content
+                    for message in messages
+                    for part in message.parts
+                    if isinstance(part, UserPromptPart)
+                )
+                assert type(prompt) is str
+                prompts.append(prompt)
+                return ModelResponse(parts=[ToolCallPart("apply", {})])
+            return ModelResponse(
+                parts=[ToolCallPart(info.output_tools[0].name, {"answer": 7})]
+            )
+
+        summon = Summon(name)
+        summon._runtime = Runtime(model=FunctionModel(model))
+
+        def endpoint(
+            request: Any,
+            result=Required(operation, calls=Exactly(1)),
+        ) -> AgentResult:
+            """Project declared dataclass fields into the model prompt."""
+            ...
+
+        endpoint.__annotations__["request"] = Request
+        endpoint.__annotations__["return"] = AgentResult
+        summon("/dataclass-prompt")(endpoint)
+        return summon
+
+    body = {
+        "box": {"value": 7, "hidden": "secret"},
+        "nested": [{"first": {"value": 8, "hidden": "nested-secret"}}],
+    }
+    raw = service("dataclass-prompt-raw")
+    assert asyncio.run(raw._runtime.call(raw.endpoints[0], body)) == AgentResult(
+        answer=7
+    )
+
+    http = service("dataclass-prompt-http")
+    response = TestClient(build_app(http)).post("/dataclass-prompt", json=body)
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"answer": 7}
+    assert prompts[0] == prompts[1]
+    assert '  box: {"v": 7}' in prompts[0]
+    assert '  nested: [{"first": {"v": 8}}]' in prompts[0]
+    assert "PRIVATE_DATACLASS_MARKER" not in prompts[0]
+    assert "credential" not in prompts[0]
+    assert "hidden" not in prompts[0]
+    assert received[0] is canonical[0]
+    assert received[1] is canonical[1]
+
+
+@pytest.mark.parametrize("dataclass_options", [{}, {"frozen": True}, {"slots": True}])
+def test_dataclass_prompt_projection_bypasses_application_hooks(
+    dataclass_options: dict[str, bool],
+):
+    hooks: list[str] = []
+    prompts: list[str] = []
+
+    @dataclass(**dataclass_options)
+    class Box:
+        value: int
+
+        def __getattribute__(self, name: str) -> Any:
+            if name in {"value", "__dict__"}:
+                hooks.append(f"attribute:{name}")
+                raise RuntimeError("application attribute")
+            return object.__getattribute__(self, name)
+
+        def __repr__(self) -> str:
+            hooks.append("repr")
+            raise RuntimeError("application repr")
+
+        def __copy__(self):
+            hooks.append("copy")
+            raise RuntimeError("application copy")
+
+        def __deepcopy__(self, memo):
+            hooks.append("deepcopy")
+            raise RuntimeError("application deepcopy")
+
+        def __eq__(self, other: object) -> bool:
+            hooks.append("eq")
+            raise RuntimeError("application equality")
+
+        def __hash__(self) -> int:
+            hooks.append("hash")
+            raise RuntimeError("application hash")
+
+        @field_serializer("value")
+        def serialize_value(self, value: int) -> str:
+            hooks.append("serialize")
+            raise RuntimeError("application serializer")
+
+    class Request(BaseModel):
+        box: Box
+
+    def model(messages, info):
+        prompt = next(
+            part.content
+            for message in messages
+            for part in message.parts
+            if isinstance(part, UserPromptPart)
+        )
+        assert type(prompt) is str
+        prompts.append(prompt)
+        return ModelResponse(parts=[TextPart("done")])
+
+    def service(name: str) -> Summon:
+        summon = Summon(name)
+        summon._runtime = Runtime(model=FunctionModel(model))
+
+        def endpoint(request: Any) -> str:
+            """Project a dataclass without application callbacks."""
+            ...
+
+        endpoint.__annotations__["request"] = Request
+        summon("/hostile-dataclass-prompt")(endpoint)
+        return summon
+
+    raw = service("hostile-dataclass-prompt-raw")
+    assert (
+        asyncio.run(raw._runtime.call(raw.endpoints[0], {"box": {"value": 7}}))
+        == "done"
+    )
+
+    assert '  box: {"value": 7}' in prompts[0]
     assert hooks == []
