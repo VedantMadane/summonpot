@@ -10,8 +10,10 @@ fall back to the original adapter if compilation fails.
 from __future__ import annotations
 
 from collections import deque
+from contextlib import suppress
 from contextvars import ContextVar
 from dataclasses import is_dataclass
+from types import MemberDescriptorType
 from typing import Any, cast
 
 from pydantic import BaseModel, TypeAdapter
@@ -516,6 +518,45 @@ def _runtime_model_extra_collision_auditor(schema: Any) -> Any:
                 return value
         return _missing
 
+    def reject_nonexact_string_keys(current: dict[Any, Any]) -> None:
+        """Reject str subclasses without hashing, comparing, or formatting them."""
+        for key in dict.__iter__(current):
+            key_type = type(key)
+            if key_type is not str and any(base is str for base in key_type.__mro__):
+                raise ValueError("output mapping keys must use the exact str type")
+
+    def dataclass_storage(value: Any) -> tuple[dict[Any, Any], ...]:
+        """Read dict and slot state while bypassing application state hooks."""
+        storages: list[dict[Any, Any]] = []
+        try:
+            instance_dict = object.__getattribute__(value, "__dict__")
+        except AttributeError:
+            pass
+        else:
+            if type(instance_dict) is dict:
+                storages.append(instance_dict)
+
+        current_type = type(value)
+        current_mro = current_type.__mro__
+        slot_values: dict[str, Any] = {}
+        for dataclass_type, field_names in dataclass_fields:
+            if not any(base is dataclass_type for base in current_mro):
+                continue
+            for name in field_names:
+                for base in current_mro:
+                    namespace = type.__getattribute__(base, "__dict__")
+                    descriptor = namespace.get(name)
+                    if type(descriptor) is not MemberDescriptorType:
+                        continue
+                    with suppress(AttributeError):
+                        slot_values[name] = MemberDescriptorType.__get__(
+                            descriptor, value, current_type
+                        )
+                    break
+        if slot_values:
+            storages.append(slot_values)
+        return tuple(storages)
+
     def discriminator_paths(discriminator: Any) -> tuple[tuple[str | int, ...], ...]:
         if type(discriminator) is str:
             return ((discriminator,),)
@@ -545,6 +586,15 @@ def _runtime_model_extra_collision_auditor(schema: Any) -> Any:
             extras = object.__getattribute__(current, "__pydantic_extra__")
             if type(extras) is dict:
                 return exact_dict_value(extras, part)
+            return _missing
+        if any(
+            any(base is dataclass_type for base in type(current).__mro__)
+            for dataclass_type, _ in dataclass_fields
+        ):
+            for storage in dataclass_storage(current):
+                value = exact_dict_value(storage, part)
+                if value is not _missing:
+                    return value
             return _missing
         if type(part) is int and type(current) is list:
             length = list.__len__(current)
@@ -770,14 +820,6 @@ def _runtime_model_extra_collision_auditor(schema: Any) -> Any:
         finally:
             active.remove(marker)
 
-    def dataclass_storage(value: Any) -> tuple[dict[Any, Any], ...]:
-        state = object.__getstate__(value)
-        if isinstance(state, dict):
-            return (state,)
-        if isinstance(state, tuple):
-            return tuple(item for item in state if isinstance(item, dict))
-        return ()
-
     def schema_audit(value: Any) -> None:
         """Follow schema-owned storage after outer validators may replace values."""
         seen: set[tuple[int, int]] = set()
@@ -881,6 +923,7 @@ def _runtime_model_extra_collision_auditor(schema: Any) -> Any:
             if node_type == "typed-dict":
                 if not isinstance(current, dict):
                     return
+                reject_nonexact_string_keys(current)
                 fields = node.get("fields", {})
                 field_names = set(fields)
                 emitted_names = {
@@ -1029,7 +1072,12 @@ def _runtime_model_extra_collision_auditor(schema: Any) -> Any:
                     field.alias if field.alias is not None else name
                     for name, field in model_type.model_computed_fields.items()
                 )
-                extras = object.__getattribute__(current, "__pydantic_extra__") or {}
+                extras = object.__getattribute__(current, "__pydantic_extra__")
+                if extras is None:
+                    extras = {}
+                elif not isinstance(extras, dict):
+                    raise ValueError("output model extras must use dict storage")
+                reject_nonexact_string_keys(extras)
                 extra_names = {key for key in dict.__iter__(extras) if type(key) is str}
                 shadowed = (set(model_type.model_fields) | emitted).intersection(
                     extra_names

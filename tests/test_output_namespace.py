@@ -812,6 +812,71 @@ class SafeMutatingTypedDictEnvelope(BaseModel):
         return self
 
 
+NONEXACT_KEY_HOOKS: list[str] = []
+
+
+class HostileStringKey(str):
+    def __hash__(self) -> int:
+        NONEXACT_KEY_HOOKS.append("hash")
+        return str.__hash__(self)
+
+    def __eq__(self, other: object) -> bool:
+        NONEXACT_KEY_HOOKS.append("eq")
+        raise AssertionError("equality hook called during output audit")
+
+    def __repr__(self) -> str:
+        NONEXACT_KEY_HOOKS.append("repr")
+        raise AssertionError("repr hook called during output audit")
+
+    def __str__(self) -> str:
+        NONEXACT_KEY_HOOKS.append("str")
+        raise AssertionError("string hook called during output audit")
+
+
+class NonexactKeyModelOutput(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    value: int = Field(serialization_alias="wireValue")
+
+    @model_validator(mode="after")
+    def add_nonexact_key(self) -> "NonexactKeyModelOutput":
+        assert self.__pydantic_extra__ is not None
+        self.__pydantic_extra__[HostileStringKey("wireValue")] = 99
+        NONEXACT_KEY_HOOKS.clear()
+        return self
+
+
+class SafeExactKeyModelOutput(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    value: int = Field(serialization_alias="wireValue")
+
+    @model_validator(mode="after")
+    def add_exact_key(self) -> "SafeExactKeyModelOutput":
+        assert self.__pydantic_extra__ is not None
+        self.__pydantic_extra__["note"] = "safe"
+        return self
+
+
+class NonexactKeyTypedDictEnvelope(BaseModel):
+    item: AllowedExtraTypedDict
+
+    @model_validator(mode="after")
+    def replace_nested_mapping(self) -> "NonexactKeyTypedDictEnvelope":
+        replacement = dict(self.item)
+        replacement[HostileStringKey("wireValue")] = 99
+        NONEXACT_KEY_HOOKS.clear()
+        self.item = replacement  # type: ignore[assignment]
+        return self
+
+
+class SafeExactKeyTypedDictEnvelope(BaseModel):
+    item: AllowedExtraTypedDict
+
+    @model_validator(mode="after")
+    def replace_nested_mapping(self) -> "SafeExactKeyTypedDictEnvelope":
+        self.item = {**self.item, "note": "safe"}  # type: ignore[assignment,typeddict-unknown-key]
+        return self
+
+
 class ReplacingTypedDictEnvelope(BaseModel):
     item: AllowedExtraTypedDict
 
@@ -1380,6 +1445,69 @@ class HostileTaggedModelEnvelope(BaseModel):
         return self
 
 
+@dataclass(slots=True, frozen=True)
+class SafeTaggedDataclass:
+    kind: Literal["safe"]
+    value: int
+
+
+@dataclass(slots=True, frozen=True)
+class CollisionTaggedDataclass:
+    kind: Literal["collision"]
+    item: AllowedExtraTypedDict
+
+    @model_validator(mode="after")
+    def replace_nested_mapping(self) -> "CollisionTaggedDataclass":
+        object.__setattr__(self, "item", {**self.item, "wireValue": 99})
+        return self
+
+
+TaggedDataclass = Annotated[
+    SafeTaggedDataclass | CollisionTaggedDataclass,
+    Field(discriminator="kind"),
+]
+
+
+DATACLASS_STORAGE_HOOKS: list[str] = []
+
+
+class HostileSafeTaggedDataclass(SafeTaggedDataclass):
+    def __getattribute__(self, name: str) -> Any:
+        if name in {"kind", "value"}:
+            DATACLASS_STORAGE_HOOKS.append("getattribute")
+            raise AssertionError("attribute hook called during tagged-union audit")
+        return object.__getattribute__(self, name)
+
+    def __getstate__(self) -> Any:
+        DATACLASS_STORAGE_HOOKS.append("getstate")
+        raise AssertionError("state hook called during tagged-union audit")
+
+    def __repr__(self) -> str:
+        DATACLASS_STORAGE_HOOKS.append("repr")
+        raise AssertionError("repr hook called during tagged-union audit")
+
+    def __eq__(self, other: object) -> bool:
+        DATACLASS_STORAGE_HOOKS.append("eq")
+        raise AssertionError("equality hook called during tagged-union audit")
+
+    def __hash__(self) -> int:
+        DATACLASS_STORAGE_HOOKS.append("hash")
+        raise AssertionError("hash hook called during tagged-union audit")
+
+
+class HostileTaggedDataclassEnvelope(BaseModel):
+    item: TaggedDataclass
+
+    @model_validator(mode="after")
+    def replace_selected_dataclass(self) -> "HostileTaggedDataclassEnvelope":
+        replacement = object.__new__(HostileSafeTaggedDataclass)
+        object.__setattr__(replacement, "kind", "safe")
+        object.__setattr__(replacement, "value", self.item.value)
+        object.__setattr__(self, "item", replacement)
+        DATACLASS_STORAGE_HOOKS.clear()
+        return self
+
+
 def test_mapping_extra_cannot_shadow_a_declared_serialization_alias():
     with pytest.raises(ValidationError, match="wireValue"):
         _compile_output_validator(TypeAdapter(AliasedExtraOutput)).validate_python(
@@ -1434,6 +1562,106 @@ def test_parent_validator_can_add_nested_typed_dict_noncolliding_extra():
     assert validated.model_dump(mode="json", by_alias=True) == {
         "item": {"wireValue": 7, "note": "safe"}
     }
+
+
+@pytest.mark.parametrize(
+    "output,value",
+    [
+        (NonexactKeyModelOutput, {"value": 7}),
+        (NonexactKeyTypedDictEnvelope, {"item": {"value": 7}}),
+    ],
+)
+def test_post_validation_nonexact_string_keys_are_rejected_without_hooks(
+    output: Any, value: Any
+):
+    NONEXACT_KEY_HOOKS.clear()
+
+    with pytest.raises(ValidationError, match="exact str"):
+        _compile_output_validator(TypeAdapter(output)).validate_python(value)
+
+    assert NONEXACT_KEY_HOOKS == []
+
+
+@pytest.mark.parametrize(
+    "output,value,expected",
+    [
+        (SafeExactKeyModelOutput, {"value": 7}, {"wireValue": 7, "note": "safe"}),
+        (
+            SafeExactKeyTypedDictEnvelope,
+            {"item": {"value": 7}},
+            {"item": {"wireValue": 7, "note": "safe"}},
+        ),
+    ],
+)
+def test_post_validation_safe_exact_string_keys_remain_supported(
+    output: Any, value: Any, expected: Any
+):
+    validated = _compile_output_validator(TypeAdapter(output)).validate_python(value)
+
+    assert (
+        TypeAdapter(output).dump_python(validated, mode="json", by_alias=True)
+        == expected
+    )
+
+
+@pytest.mark.parametrize(
+    "output,result,expected",
+    [
+        (SafeExactKeyModelOutput, {"value": 7}, {"wireValue": 7, "note": "safe"}),
+        (
+            SafeExactKeyTypedDictEnvelope,
+            {"item": {"value": 7}},
+            {"item": {"wireValue": 7, "note": "safe"}},
+        ),
+    ],
+)
+def test_runtime_and_http_preserve_safe_exact_string_keys(
+    output: Any,
+    result: Any,
+    expected: Any,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("SUMMONPOT_MODEL", "test")
+    summon = _direct_summon(output, result)
+
+    runtime_result = asyncio.run(
+        Runtime(model="test").call(summon.endpoints[0], {"value": 7})
+    )
+    assert (
+        TypeAdapter(output).dump_python(runtime_result, mode="json", by_alias=True)
+        == expected
+    )
+
+    response = TestClient(build_app(summon), raise_server_exceptions=False).post(
+        "/output", json={"value": 7}
+    )
+    assert response.status_code == 200
+    assert response.json() == expected
+
+
+@pytest.mark.parametrize(
+    "output,result",
+    [
+        (NonexactKeyModelOutput, {"value": 7}),
+        (NonexactKeyTypedDictEnvelope, {"item": {"value": 7}}),
+    ],
+)
+def test_runtime_and_http_reject_nonexact_string_keys_without_hooks(
+    output: Any, result: Any, monkeypatch: pytest.MonkeyPatch
+):
+    NONEXACT_KEY_HOOKS.clear()
+    monkeypatch.setenv("SUMMONPOT_MODEL", "test")
+    summon = _direct_summon(output, result)
+
+    with pytest.raises(_OperationOutputError, match="invalid declared output"):
+        asyncio.run(Runtime(model="test").call(summon.endpoints[0], {"value": 7}))
+    assert NONEXACT_KEY_HOOKS == []
+
+    response = TestClient(build_app(summon), raise_server_exceptions=False).post(
+        "/output", json={"value": 7}
+    )
+    assert response.status_code == 500
+    assert NONEXACT_KEY_HOOKS == []
 
 
 @pytest.mark.parametrize(
@@ -1840,6 +2068,69 @@ def test_tagged_union_reads_hostile_model_storage_without_hooks():
         ).validate_python({"item": {"kind": "collision", "value": 7}})
 
     assert TAGGED_STORAGE_HOOKS == []
+
+
+def test_tagged_dataclass_union_reads_slots_and_frozen_storage():
+    validated = _compile_output_validator(TypeAdapter(TaggedDataclass)).validate_python(
+        {"kind": "safe", "value": 7}
+    )
+
+    assert type(validated) is SafeTaggedDataclass
+    assert validated.value == 7
+
+
+def test_tagged_dataclass_union_bypasses_application_storage_hooks():
+    DATACLASS_STORAGE_HOOKS.clear()
+
+    validated = _compile_output_validator(
+        TypeAdapter(HostileTaggedDataclassEnvelope)
+    ).validate_python({"item": {"kind": "safe", "value": 7}})
+
+    assert type(validated.item) is HostileSafeTaggedDataclass
+    assert object.__getattribute__(validated.item, "value") == 7
+    assert DATACLASS_STORAGE_HOOKS == []
+
+
+def test_tagged_dataclass_union_audits_the_selected_collision_branch():
+    with pytest.raises(ValidationError, match="wireValue"):
+        _compile_output_validator(TypeAdapter(TaggedDataclass)).validate_python(
+            {"kind": "collision", "item": {"value": 7}}
+        )
+
+
+def test_runtime_and_http_preserve_valid_tagged_dataclass_output(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("SUMMONPOT_MODEL", "test")
+    summon = _direct_summon(TaggedDataclass, {"kind": "safe", "value": 7})
+
+    result = asyncio.run(Runtime(model="test").call(summon.endpoints[0], {"value": 7}))
+    assert result == {"operation": {"kind": "safe", "value": 7}}
+
+    response = TestClient(build_app(summon), raise_server_exceptions=False).post(
+        "/output", json={"value": 7}
+    )
+    assert response.status_code == 200
+    assert response.json() == {"operation": {"kind": "safe", "value": 7}}
+
+
+def test_runtime_and_http_reject_tagged_dataclass_collision_branch(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setenv("SUMMONPOT_MODEL", "test")
+    summon = _direct_summon(
+        TaggedDataclass,
+        {"kind": "collision", "item": {"value": 7}},
+    )
+
+    with pytest.raises(_OperationOutputError, match="invalid declared output"):
+        asyncio.run(Runtime(model="test").call(summon.endpoints[0], {"value": 7}))
+
+    response = TestClient(build_app(summon), raise_server_exceptions=False).post(
+        "/output", json={"value": 7}
+    )
+    assert response.status_code == 500
+    assert "wireValue" not in response.text
 
 
 @pytest.mark.parametrize(
