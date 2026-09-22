@@ -13,8 +13,10 @@ from fastapi.testclient import TestClient
 from pydantic import (
     AfterValidator,
     BaseModel,
+    ConfigDict,
     Field,
     InstanceOf,
+    RootModel,
     ValidationError,
     create_model,
     field_serializer,
@@ -2590,3 +2592,216 @@ def test_dataclass_prompt_projection_bypasses_application_hooks(
 
     assert '  box: {"value": 7}' in prompts[0]
     assert hooks == []
+
+
+def _raw_http_agent_prompts(
+    request_model: type[BaseModel], body: dict[str, Any], path: str
+) -> list[str]:
+    prompts: list[str] = []
+
+    def model(messages, info):
+        prompt = next(
+            part.content
+            for message in messages
+            for part in message.parts
+            if isinstance(part, UserPromptPart)
+        )
+        assert type(prompt) is str
+        prompts.append(prompt)
+        return ModelResponse(parts=[TextPart("done")])
+
+    def service(name: str) -> Summon:
+        summon = Summon(name)
+        summon._runtime = Runtime(model=FunctionModel(model))
+
+        def endpoint(request: Any) -> str:
+            """Project the validated request through its declared public schema."""
+            ...
+
+        endpoint.__annotations__["request"] = request_model
+        summon(path)(endpoint)
+        return summon
+
+    raw = service(f"{path}-raw")
+    assert asyncio.run(raw._runtime.call(raw.endpoints[0], body)) == "done"
+
+    http = service(f"{path}-http")
+    response = TestClient(build_app(http)).post(path, json=body)
+    assert response.status_code == 200, response.text
+    assert response.json() == "done"
+    assert len(prompts) == 2
+    assert prompts[0] == prompts[1]
+    return prompts
+
+
+def test_typed_model_extras_project_through_declared_value_schema_without_hooks():
+    hooks: list[str] = []
+    marker = "TYPED_MODEL_EXTRA_PRIVATE_CREDENTIAL"
+
+    class Public(BaseModel):
+        visible: int
+
+    class Private(Public):
+        credential: str
+
+        def __getattribute__(self, name: str) -> Any:
+            if name in {"visible", "credential"}:
+                hooks.append(f"attribute:{name}")
+            return super().__getattribute__(name)
+
+        def __repr__(self) -> str:
+            hooks.append("repr")
+            raise RuntimeError("application repr")
+
+    class Request(BaseModel):
+        model_config = ConfigDict(extra="allow")
+        __pydantic_extra__: dict[str, Public] = Field(  # type: ignore[reportIncompatibleVariableOverride]
+            init=False
+        )
+
+        @model_validator(mode="after")
+        def replace_extra_with_runtime_subclass(self) -> Request:
+            storage = BaseModel.__dict__["__dict__"].__get__(self, type(self))
+            assert type(storage) is dict
+            extras = dict.__getitem__(storage, "__pydantic_extra__")
+            assert type(extras) is dict
+            dict.__setitem__(
+                extras,
+                "note",
+                Private(visible=23, credential=marker),
+            )
+            return self
+
+    prompts = _raw_http_agent_prompts(
+        Request,
+        {"note": {"visible": 23}},
+        "/typed-model-extra-prompt",
+    )
+
+    assert '  note: {"visible": 23}' in prompts[0]
+    assert marker not in prompts[0]
+    assert "credential" not in prompts[0]
+    assert hooks == []
+
+
+def test_selected_union_branch_resolves_nullable_reference_wrappers_without_hooks():
+    hooks: list[str] = []
+    marker = "WRAPPED_UNION_PRIVATE_CREDENTIAL"
+
+    class Public(BaseModel):
+        visible: int
+
+    class Private(Public):
+        credential: str
+
+        def __getattribute__(self, name: str) -> Any:
+            if name in {"visible", "credential"}:
+                hooks.append(f"attribute:{name}")
+            return super().__getattribute__(name)
+
+        def __repr__(self) -> str:
+            hooks.append("repr")
+            raise RuntimeError("application repr")
+
+    class Request(BaseModel):
+        value: Annotated[Public | None, Field(description="public value")] | int
+
+        @field_validator("value", mode="after")
+        @classmethod
+        def replace_with_runtime_subclass(cls, value: Public | int | None) -> Any:
+            if isinstance(value, Public):
+                return Private(visible=23, credential=marker)
+            return value
+
+    prompts = _raw_http_agent_prompts(
+        Request,
+        {"value": {"visible": 23}},
+        "/wrapped-union-prompt",
+    )
+
+    assert '  value: {"visible": 23}' in prompts[0]
+    assert marker not in prompts[0]
+    assert "credential" not in prompts[0]
+    assert hooks == []
+
+
+def test_typed_dict_union_selection_requires_declared_required_fields():
+    class Left(TypedDict):
+        a: int
+
+    class Right(TypedDict):
+        b: int
+
+    class Request(BaseModel):
+        value: Left | Right
+
+    prompts = _raw_http_agent_prompts(
+        Request,
+        {"value": {"b": 2}},
+        "/required-typed-dict-union-prompt",
+    )
+
+    assert '  value: {"b": 2}' in prompts[0]
+
+
+def test_root_model_projects_its_declared_root_schema_without_hooks():
+    hooks: list[str] = []
+    marker = "ROOT_MODEL_PRIVATE_CREDENTIAL"
+
+    class Public(BaseModel):
+        visible: int
+
+    class Private(Public):
+        credential: str
+
+        def __getattribute__(self, name: str) -> Any:
+            if name in {"visible", "credential"}:
+                hooks.append(f"attribute:{name}")
+            return super().__getattribute__(name)
+
+        def __repr__(self) -> str:
+            hooks.append("repr")
+            raise RuntimeError("application repr")
+
+    class PublicRoot(RootModel[Public]):
+        pass
+
+    class Request(BaseModel):
+        value: PublicRoot
+
+        @field_validator("value", mode="after")
+        @classmethod
+        def replace_root_with_runtime_subclass(cls, value: PublicRoot) -> PublicRoot:
+            return PublicRoot.model_construct(
+                root=Private(visible=23, credential=marker)
+            )
+
+    prompts = _raw_http_agent_prompts(
+        Request,
+        {"value": {"visible": 23}},
+        "/root-model-prompt",
+    )
+
+    assert '  value: {"visible": 23}' in prompts[0]
+    assert marker not in prompts[0]
+    assert "credential" not in prompts[0]
+    assert hooks == []
+
+
+def test_typed_dict_with_allowed_extras_retains_admitted_values_in_prompt():
+    class OpenPayload(TypedDict):
+        __pydantic_config__ = ConfigDict(  # pyright: ignore[reportGeneralTypeIssues]
+            extra="allow"
+        )
+        count: int
+
+    class Request(BaseModel):
+        value: OpenPayload
+
+    prompts = _raw_http_agent_prompts(
+        Request,
+        {"value": {"count": 1, "note": "admitted"}},
+        "/open-typed-dict-prompt",
+    )
+
+    assert '  value: {"count": 1, "note": "admitted"}' in prompts[0]

@@ -80,6 +80,7 @@ class _ProjectionField:
     prompt_name: str
     excluded: bool
     schema: _ProjectionSchema
+    required: bool = False
     slot: MemberDescriptorType | None = None
 
 
@@ -91,6 +92,7 @@ class _ProjectionSchema:
     item: _ProjectionSchema | None = None
     keys: _ProjectionSchema | None = None
     values: _ProjectionSchema | None = None
+    extras: _ProjectionSchema | None = None
     choices: tuple[_ProjectionSchema, ...] = ()
     items: tuple[_ProjectionSchema, ...] = ()
     reference: str | None = None
@@ -242,6 +244,12 @@ def _compile_projection_schema(source: Any) -> _ProjectionSchema:
             "ref", reference=reference if type(reference) is str else None
         )
     if kind == "model":
+        if source.get("root_model") is True:
+            return _ProjectionSchema(
+                "root-model",
+                cls=source.get("cls"),
+                item=_compile_projection_schema(source.get("schema")),
+            )
         fields_schema = source.get("schema")
         while (
             type(fields_schema) is dict and fields_schema.get("type") != "model-fields"
@@ -268,6 +276,12 @@ def _compile_projection_schema(source: Any) -> _ProjectionSchema:
             fields=tuple(fields),
             allow_extras=(
                 type(config) is dict and config.get("extra_fields_behavior") == "allow"
+            ),
+            extras=(
+                _compile_projection_schema(fields_schema.get("extras_schema"))
+                if type(fields_schema) is dict
+                and fields_schema.get("extras_schema") is not None
+                else None
             ),
         )
     if kind == "dataclass":
@@ -324,9 +338,24 @@ def _compile_projection_schema(source: Any) -> _ProjectionSchema:
                         prompt_name=alias if type(alias) is str else name,
                         excluded=field_schema.get("serialization_exclude") is True,
                         schema=_compile_projection_schema(field_schema.get("schema")),
+                        required=field_schema.get("required") is True,
                     )
                 )
-        return _ProjectionSchema("typed-dict", fields=tuple(fields))
+        config = source.get("config")
+        allow_extras = source.get("extra_behavior") == "allow" or (
+            type(config) is dict and config.get("extra_fields_behavior") == "allow"
+        )
+        extras_schema = source.get("extras_schema")
+        return _ProjectionSchema(
+            "typed-dict",
+            fields=tuple(fields),
+            allow_extras=allow_extras,
+            extras=(
+                _compile_projection_schema(extras_schema)
+                if extras_schema is not None
+                else _ProjectionSchema("any")
+            ),
+        )
     if kind in ("list", "set", "frozenset", "generator"):
         return _ProjectionSchema(
             kind, item=_compile_projection_schema(source.get("items_schema"))
@@ -421,30 +450,14 @@ def _inert_transport_value(
 ) -> Any:
     """Project known exact types only, without application serialization hooks."""
     if schema is not None:
-        while (
-            schema.kind == "ref"
-            and schema.reference is not None
-            and schema.reference in definitions
-        ):
-            schema = definitions[schema.reference]
-        if schema.kind == "nullable":
-            if value is None:
-                return None
-            schema = schema.item
-            while (
-                schema is not None
-                and schema.kind == "ref"
-                and schema.reference is not None
-                and schema.reference in definitions
-            ):
-                schema = definitions[schema.reference]
-        if schema is not None and schema.kind == "union":
-            schema = _projection_union_choice(value, schema.choices, definitions)
-            if schema is None:
-                raise _unsupported_raw_request(
-                    "request_projection",
-                    "request value does not match a safely projectable declared union branch",
-                )
+        schema = _resolve_projection_wrappers(value, schema, definitions)
+        if schema is None:
+            raise _unsupported_raw_request(
+                "request_projection",
+                "request value does not match a safely projectable declared union branch",
+            )
+        if schema.kind == "nullable" and value is None:
+            return None
     kind = type(value)
     if kind is UUID and type(value.int) is int and 0 <= value.int < 1 << 128:
         # UUID can be changed through object.__setattr__, so never share it.
@@ -514,6 +527,16 @@ def _inert_transport_value(
         storage = _BASE_MODEL_DICT_DESCRIPTOR.__get__(value, kind)
         if type(storage) is not dict or not _has_exact_string_keys(storage):
             return _UNAVAILABLE
+        if schema is not None and schema.kind == "root-model":
+            if schema.item is None or not dict.__contains__(storage, "root"):
+                return _UNAVAILABLE
+            return _inert_transport_value(
+                dict.__getitem__(storage, "root"),
+                ancestors,
+                native=native,
+                schema=schema.item,
+                definitions=definitions,
+            )
         if schema is not None and schema.kind == "model":
             projected = {
                 field.prompt_name: _inert_transport_value(
@@ -543,7 +566,13 @@ def _inert_transport_value(
         if type(extras) is dict and (schema is None or schema.allow_extras):
             projected.update(
                 {
-                    key: _inert_transport_value(item, ancestors, native=native)
+                    key: _inert_transport_value(
+                        item,
+                        ancestors,
+                        native=native,
+                        schema=schema.extras if schema is not None else None,
+                        definitions=definitions,
+                    )
                     for key, item in extras.items()
                     if type(key) is str and key not in projected
                 }
@@ -567,7 +596,7 @@ def _inert_transport_value(
         if schema is not None and schema.kind == "typed-dict":
             if not _has_exact_string_keys(value):
                 return _UNAVAILABLE
-            return {
+            projected = {
                 field.prompt_name: _inert_transport_value(
                     dict.__getitem__(value, field.name),
                     ancestors,
@@ -578,6 +607,19 @@ def _inert_transport_value(
                 for field in schema.fields
                 if dict.__contains__(value, field.name) and not field.excluded
             }
+            if schema.allow_extras:
+                declared_names = {field.name for field in schema.fields}
+                for key, item in dict.items(value):
+                    if key in declared_names or key in projected:
+                        continue
+                    projected[key] = _inert_transport_value(
+                        item,
+                        ancestors,
+                        native=native,
+                        schema=schema.extras,
+                        definitions=definitions,
+                    )
+            return projected
         value_schema = (
             schema.values if schema is not None and schema.kind == "dict" else None
         )
@@ -622,6 +664,39 @@ def _inert_transport_value(
     return kind(items) if native else items
 
 
+def _resolve_projection_wrappers(
+    value: Any,
+    schema: _ProjectionSchema,
+    definitions: Mapping[str, _ProjectionSchema],
+) -> _ProjectionSchema | None:
+    """Resolve refs, nullable wrappers, and selected unions to a renderable schema."""
+    seen_references: set[str] = set()
+    while True:
+        if schema.kind == "ref":
+            reference = schema.reference
+            if (
+                reference is None
+                or reference in seen_references
+                or reference not in definitions
+            ):
+                return schema
+            seen_references.add(reference)
+            schema = definitions[reference]
+            continue
+        if schema.kind == "nullable" and value is not None:
+            if schema.item is None:
+                return None
+            schema = schema.item
+            continue
+        if schema.kind == "union":
+            selected = _projection_union_choice(value, schema.choices, definitions)
+            if selected is None:
+                return None
+            schema = selected
+            continue
+        return schema
+
+
 def _projection_schema_applies(
     value: Any,
     schema: _ProjectionSchema,
@@ -659,7 +734,7 @@ def _projection_schema_applies(
 
     kind = type(value)
     runtime_mro = type.__getattribute__(kind, "__mro__")
-    if schema.kind in ("model", "dataclass"):
+    if schema.kind in ("model", "root-model", "dataclass"):
         return schema.cls is not None and any(
             base is schema.cls for base in runtime_mro
         )
@@ -715,15 +790,29 @@ def _projection_schema_applies(
             )
         )
     if schema.kind == "typed-dict":
-        return (
-            kind is dict
-            and _has_exact_string_keys(value)
+        if kind is not dict or not _has_exact_string_keys(value):
+            return False
+        if not all(
+            not field.required or dict.__contains__(value, field.name)
+            for field in schema.fields
+        ) or not all(
+            not dict.__contains__(value, field.name)
+            or _projection_schema_applies(
+                dict.__getitem__(value, field.name), field.schema, definitions
+            )
+            for field in schema.fields
+        ):
+            return False
+        declared_names = {field.name for field in schema.fields}
+        extras = [
+            item for name, item in dict.items(value) if name not in declared_names
+        ]
+        return not extras or (
+            schema.allow_extras
+            and schema.extras is not None
             and all(
-                not dict.__contains__(value, field.name)
-                or _projection_schema_applies(
-                    dict.__getitem__(value, field.name), field.schema, definitions
-                )
-                for field in schema.fields
+                _projection_schema_applies(item, schema.extras, definitions)
+                for item in extras
             )
         )
     return False
@@ -749,7 +838,7 @@ def _projection_union_choice(
     if any(base is BaseModel for base in runtime_mro):
         for exact in (True, False):
             for choice in resolved:
-                if choice.kind != "model" or choice.cls is None:
+                if choice.kind not in ("model", "root-model") or choice.cls is None:
                     continue
                 matches = (
                     kind is choice.cls
