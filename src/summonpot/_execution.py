@@ -1564,12 +1564,16 @@ def _prepare_request(
     validated = plan.input_validator.validate_python(raw_params)
     fields = _pydantic_fields(validated)
     storage = _BASE_MODEL_DICT_DESCRIPTOR.__get__(validated, type(validated))
-    if type(storage) is not dict:
+    if type(storage) is not dict or not _has_exact_string_keys(storage):
         raise _unsupported_raw_request(
             "canonical_storage_type",
             "validated request has unsupported canonical storage",
         )
-    typed = {name: storage[name] for name in fields if name in storage}
+    typed = {
+        name: dict.__getitem__(storage, name)
+        for name in fields
+        if dict.__contains__(storage, name)
+    }
     prompt = _inert_transport_value(
         validated,
         schema=plan.prompt_schema,

@@ -412,6 +412,53 @@ def test_custom_init_hostile_top_level_storage_fails_closed_for_raw_only():
     assert hooks == []
 
 
+def test_custom_init_exact_storage_with_hostile_key_fails_before_equality():
+    hooks: list[str] = []
+    armed = [False]
+    base_descriptor = BaseModel.__dict__["__dict__"]
+
+    class HostileKey:
+        def __hash__(self) -> int:
+            return hash("value")
+
+        def __eq__(self, other: object) -> bool:
+            if armed[0]:
+                hooks.append("eq")
+                raise AssertionError("application equality ran")
+            return False
+
+        def __repr__(self) -> str:
+            hooks.append("repr")
+            raise AssertionError("application repr ran")
+
+    class Request(BaseModel):
+        value: int
+
+        def __init__(self, *, value: int) -> None:
+            super().__init__(value=value)
+            storage: dict[object, Any] = {HostileKey(): "hidden", "value": value}
+            base_descriptor.__set__(self, storage)
+            armed[0] = True
+
+    raw_received: list[Any] = []
+    raw = _model_service(Request, raw_received)
+    with pytest.raises(ValidationError, match="canonical storage"):
+        asyncio.run(Runtime().call(raw.endpoints[0], {"value": 7}))
+
+    armed[0] = False
+    http_received: list[Any] = []
+    http = _model_service(Request, http_received)
+    response = TestClient(build_app(http), raise_server_exceptions=False).post(
+        "/model", json={"value": 11}
+    )
+
+    assert response.status_code == 500
+    assert response.text == "Internal Server Error"
+    assert raw_received == []
+    assert http_received == []
+    assert hooks == []
+
+
 def test_custom_init_request_runs_once_for_agent_raw_and_http():
     initializations: list[int] = []
     received: list[int] = []
