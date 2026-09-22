@@ -6,7 +6,7 @@ import asyncio
 from collections import UserDict
 from collections.abc import Mapping
 from dataclasses import dataclass, field, make_dataclass
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 import pytest
 from fastapi.testclient import TestClient
@@ -2024,6 +2024,48 @@ def test_empty_container_union_keeps_raw_and_http_prompt_parity():
     assert response.json() == "done"
     assert prompts[0] == prompts[1]
     assert "  value: []" in prompts[0]
+
+
+def test_literal_union_keeps_raw_and_http_prompt_parity():
+    prompts: list[str] = []
+
+    class Request(BaseModel):
+        value: Literal["safe"] | int
+
+    def model(messages, info):
+        prompt = next(
+            part.content
+            for message in messages
+            for part in message.parts
+            if isinstance(part, UserPromptPart)
+        )
+        assert type(prompt) is str
+        prompts.append(prompt)
+        return ModelResponse(parts=[TextPart("done")])
+
+    def service(name: str) -> Summon:
+        summon = Summon(name)
+        summon._runtime = Runtime(model=FunctionModel(model))
+
+        def endpoint(request: Any) -> str:
+            """Project a literal through the declared union contract."""
+            ...
+
+        endpoint.__annotations__["request"] = Request
+        summon("/literal-union")(endpoint)
+        return summon
+
+    body = {"value": "safe"}
+    raw = service("literal-union-raw")
+    assert asyncio.run(raw._runtime.call(raw.endpoints[0], body)) == "done"
+
+    http = service("literal-union-http")
+    response = TestClient(build_app(http)).post("/literal-union", json=body)
+
+    assert response.status_code == 200, response.text
+    assert response.json() == "done"
+    assert prompts[0] == prompts[1]
+    assert '  value: "safe"' in prompts[0]
 
 
 def test_nested_model_empty_alias_is_preserved_in_raw_and_http_prompts():

@@ -96,6 +96,7 @@ class _ProjectionSchema:
     reference: str | None = None
     allow_extras: bool = False
     instance_dict: GetSetDescriptorType | None = None
+    literal_values: tuple[Any, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -356,6 +357,8 @@ def _compile_projection_schema(source: Any) -> _ProjectionSchema:
         return _ProjectionSchema(
             kind, item=_compile_projection_schema(source.get("schema"))
         )
+    if kind == "literal":
+        return _ProjectionSchema(kind, literal_values=tuple(source.get("expected", ())))
     if kind in {
         "default",
         "function-before",
@@ -643,6 +646,16 @@ def _projection_schema_applies(
         )
     if schema.kind == "any":
         return True
+    if schema.kind == "literal":
+        return any(
+            value is expected
+            or (
+                type(value) in _LITERAL_TYPES
+                and type(value) is type(expected)
+                and value == expected
+            )
+            for expected in schema.literal_values
+        )
 
     kind = type(value)
     runtime_mro = type.__getattribute__(kind, "__mro__")
