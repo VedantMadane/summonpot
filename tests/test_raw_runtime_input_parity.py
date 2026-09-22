@@ -1934,6 +1934,51 @@ def test_raw_prompt_selects_container_union_by_declared_item_schema():
     assert hooks == []
 
 
+def test_empty_container_union_keeps_raw_and_http_prompt_parity():
+    prompts: list[str] = []
+
+    class Public(BaseModel):
+        visible: int
+
+    class Request(BaseModel):
+        value: list[int] | list[Public]
+
+    def model(messages, info):
+        prompt = next(
+            part.content
+            for message in messages
+            for part in message.parts
+            if isinstance(part, UserPromptPart)
+        )
+        assert type(prompt) is str
+        prompts.append(prompt)
+        return ModelResponse(parts=[TextPart("done")])
+
+    def service(name: str) -> Summon:
+        summon = Summon(name)
+        summon._runtime = Runtime(model=FunctionModel(model))
+
+        def endpoint(request: Any) -> str:
+            """Project an empty container through the declared union contract."""
+            ...
+
+        endpoint.__annotations__["request"] = Request
+        summon("/empty-container-union")(endpoint)
+        return summon
+
+    body = {"value": []}
+    raw = service("empty-container-union-raw")
+    assert asyncio.run(raw._runtime.call(raw.endpoints[0], body)) == "done"
+
+    http = service("empty-container-union-http")
+    response = TestClient(build_app(http)).post("/empty-container-union", json=body)
+
+    assert response.status_code == 200, response.text
+    assert response.json() == "done"
+    assert prompts[0] == prompts[1]
+    assert "  value: []" in prompts[0]
+
+
 def test_nested_model_empty_alias_is_preserved_in_raw_and_http_prompts():
     prompts: list[str] = []
 

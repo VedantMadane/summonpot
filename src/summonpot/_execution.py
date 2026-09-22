@@ -762,10 +762,11 @@ def _projection_union_choice(
         if choice.kind != "any"
         and _projection_schema_applies(value, choice, definitions)
     ]
-    if len(applicable) == 1:
-        return applicable[0]
     if applicable:
-        return None
+        # Pydantic resolves structurally indistinguishable branches left-to-right.
+        # Empty containers are the common case: either applicable branch projects
+        # the same inert value, so retaining declaration order preserves HTTP parity.
+        return applicable[0]
     fallbacks = [choice for choice in resolved if choice.kind == "any"]
     return fallbacks[0] if len(fallbacks) == 1 else None
 
