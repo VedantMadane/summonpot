@@ -299,6 +299,23 @@ def _compile_projection_schema(source: Any) -> _ProjectionSchema:
                 instance_dict if type(instance_dict) is GetSetDescriptorType else None
             ),
         )
+    if kind == "typed-dict":
+        fields: list[_ProjectionField] = []
+        source_fields = source.get("fields")
+        if type(source_fields) is dict:
+            for name, field_schema in source_fields.items():
+                if type(name) is not str or type(field_schema) is not dict:
+                    continue
+                alias = field_schema.get("serialization_alias", name)
+                fields.append(
+                    _ProjectionField(
+                        name=name,
+                        prompt_name=alias if type(alias) is str else name,
+                        excluded=field_schema.get("serialization_exclude") is True,
+                        schema=_compile_projection_schema(field_schema.get("schema")),
+                    )
+                )
+        return _ProjectionSchema("typed-dict", fields=tuple(fields))
     if kind in ("list", "set", "frozenset", "generator"):
         return _ProjectionSchema(
             kind, item=_compile_projection_schema(source.get("items_schema"))
@@ -410,6 +427,8 @@ def _inert_transport_value(
                 schema = definitions[schema.reference]
         if schema is not None and schema.kind == "union":
             schema = _projection_union_choice(value, schema.choices, definitions)
+            if schema is None:
+                return _UNAVAILABLE
     kind = type(value)
     if kind is UUID and type(value.int) is int and 0 <= value.int < 1 << 128:
         # UUID can be changed through object.__setattr__, so never share it.
@@ -522,6 +541,18 @@ def _inert_transport_value(
     ancestors = ancestors | {id(value)}
     if kind is dict:
         # Do not stringify keys: even hashing an application key can execute code.
+        if schema is not None and schema.kind == "typed-dict":
+            return {
+                field.prompt_name: _inert_transport_value(
+                    value[field.name],
+                    ancestors,
+                    native=native,
+                    schema=field.schema,
+                    definitions=definitions,
+                )
+                for field in schema.fields
+                if field.name in value and not field.excluded
+            }
         value_schema = (
             schema.values if schema is not None and schema.kind == "dict" else None
         )
@@ -566,6 +597,93 @@ def _inert_transport_value(
     return kind(items) if native else items
 
 
+def _projection_schema_applies(
+    value: Any,
+    schema: _ProjectionSchema,
+    definitions: Mapping[str, _ProjectionSchema],
+) -> bool:
+    """Match a value to a declared branch without application dispatch."""
+    while (
+        schema.kind == "ref"
+        and schema.reference is not None
+        and schema.reference in definitions
+    ):
+        schema = definitions[schema.reference]
+    if schema.kind == "nullable":
+        return value is None or (
+            schema.item is not None
+            and _projection_schema_applies(value, schema.item, definitions)
+        )
+    if schema.kind == "union":
+        return any(
+            _projection_schema_applies(value, choice, definitions)
+            for choice in schema.choices
+        )
+    if schema.kind == "any":
+        return True
+
+    kind = type(value)
+    runtime_mro = type.__getattribute__(kind, "__mro__")
+    if schema.kind in ("model", "dataclass"):
+        return schema.cls is not None and any(
+            base is schema.cls for base in runtime_mro
+        )
+
+    expected = {
+        "none": type(None),
+        "bool": bool,
+        "int": int,
+        "float": float,
+        "str": str,
+        "bytes": bytes,
+        "date": date,
+        "datetime": datetime,
+        "time": time,
+        "timedelta": timedelta,
+        "decimal": Decimal,
+        "uuid": UUID,
+    }
+    if schema.kind in expected:
+        return expected[schema.kind] is kind
+    if schema.kind in ("list", "set", "frozenset"):
+        expected_kind = {
+            "list": list,
+            "set": set,
+            "frozenset": frozenset,
+        }[schema.kind]
+        return kind is expected_kind and schema.item is not None and all(
+            _projection_schema_applies(item, schema.item, definitions)
+            for item in value
+        )
+    if schema.kind == "tuple":
+        if kind is not tuple or not schema.items:
+            return False
+        return all(
+            _projection_schema_applies(
+                item, schema.items[min(index, len(schema.items) - 1)], definitions
+            )
+            for index, item in enumerate(value)
+        )
+    if schema.kind == "dict":
+        return (
+            kind is dict
+            and schema.keys is not None
+            and schema.values is not None
+            and all(
+                _projection_schema_applies(key, schema.keys, definitions)
+                and _projection_schema_applies(item, schema.values, definitions)
+                for key, item in value.items()
+            )
+        )
+    if schema.kind == "typed-dict":
+        return kind is dict and all(
+            field.name not in value
+            or _projection_schema_applies(value[field.name], field.schema, definitions)
+            for field in schema.fields
+        )
+    return False
+
+
 def _projection_union_choice(
     value: Any,
     choices: tuple[_ProjectionSchema, ...],
@@ -582,8 +700,8 @@ def _projection_union_choice(
             choice = definitions[choice.reference]
         resolved.append(choice)
     kind = type(value)
-    if isinstance(value, BaseModel):
-        runtime_mro = type.__getattribute__(kind, "__mro__")
+    runtime_mro = type.__getattribute__(kind, "__mro__")
+    if any(base is BaseModel for base in runtime_mro):
         for exact in (True, False):
             for choice in resolved:
                 if choice.kind != "model" or choice.cls is None:
@@ -595,7 +713,6 @@ def _projection_union_choice(
                 )
                 if matches:
                     return choice
-    runtime_mro = type.__getattribute__(kind, "__mro__")
     for exact in (True, False):
         for choice in resolved:
             if choice.kind != "dataclass" or choice.cls is None:
@@ -607,23 +724,18 @@ def _projection_union_choice(
             )
             if matches:
                 return choice
-    expected = {
-        "list": list,
-        "set": set,
-        "frozenset": frozenset,
-        "tuple": tuple,
-        "dict": dict,
-        "none": type(None),
-        "bool": bool,
-        "int": int,
-        "float": float,
-        "str": str,
-        "bytes": bytes,
-    }
-    for choice in resolved:
-        if expected.get(choice.kind) is kind:
-            return choice
-    return next((choice for choice in resolved if choice.kind == "any"), None)
+    applicable = [
+        choice
+        for choice in resolved
+        if choice.kind != "any"
+        and _projection_schema_applies(value, choice, definitions)
+    ]
+    if len(applicable) == 1:
+        return applicable[0]
+    if applicable:
+        return None
+    fallbacks = [choice for choice in resolved if choice.kind == "any"]
+    return fallbacks[0] if len(fallbacks) == 1 else None
 
 
 def _public_transport_views(

@@ -22,6 +22,7 @@ from pydantic import (
 )
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, UserPromptPart
 from pydantic_ai.models.function import FunctionModel
+from typing_extensions import TypedDict
 
 from summonpot import Exactly, FromRequest, Operation, Required, Summon
 from summonpot.runtime import Runtime
@@ -1698,6 +1699,156 @@ def test_raw_prompt_projects_runtime_subclasses_through_declared_nested_schemas(
     assert "credential" not in prompts[0]
     assert '  value: {"visible": 1}' in prompts[0]
     assert '  nested: [{"first": {"visible": 2}, "empty": null}]' in prompts[0]
+    assert hooks == []
+
+
+def test_raw_prompt_projects_typed_dict_fields_through_declared_schemas():
+    prompts: list[str] = []
+    hooks: list[str] = []
+    marker = "TYPED_DICT_PRIVATE_CREDENTIAL"
+
+    class Public(BaseModel):
+        visible: int
+
+    class Private(Public):
+        credential: str
+
+        def __getattribute__(self, name: str) -> Any:
+            if name in {"visible", "credential"}:
+                hooks.append(f"attribute:{name}")
+            return super().__getattribute__(name)
+
+        def __repr__(self) -> str:
+            hooks.append("repr")
+            raise RuntimeError("application repr")
+
+    class Wrapped(TypedDict):
+        child: Public
+
+    class Request(BaseModel):
+        value: Wrapped
+
+        @field_validator("value", mode="after")
+        @classmethod
+        def return_runtime_subclass(cls, value: Wrapped) -> Wrapped:
+            return {
+                "child": Private(
+                    visible=value["child"].visible,
+                    credential=marker,
+                )
+            }
+
+    def model(messages, info):
+        prompt = next(
+            part.content
+            for message in messages
+            for part in message.parts
+            if isinstance(part, UserPromptPart)
+        )
+        assert type(prompt) is str
+        prompts.append(prompt)
+        return ModelResponse(parts=[TextPart("done")])
+
+    def service(name: str) -> Summon:
+        summon = Summon(name)
+        summon._runtime = Runtime(model=FunctionModel(model))
+
+        def endpoint(request: Any) -> str:
+            """Inspect a TypedDict through its declared public field schema."""
+            ...
+
+        endpoint.__annotations__["request"] = Request
+        summon("/typed-dict-prompt")(endpoint)
+        return summon
+
+    body = {"value": {"child": {"visible": 23}}}
+    raw = service("typed-dict-prompt-raw")
+    assert asyncio.run(raw._runtime.call(raw.endpoints[0], body)) == "done"
+
+    http = service("typed-dict-prompt-http")
+    response = TestClient(build_app(http)).post("/typed-dict-prompt", json=body)
+
+    assert response.status_code == 200, response.text
+    assert response.json() == "done"
+    assert prompts[0] == prompts[1]
+    assert marker not in prompts[0]
+    assert "credential" not in prompts[0]
+    assert '  value: {"child": {"visible": 23}}' in prompts[0]
+    assert hooks == []
+
+
+def test_raw_prompt_selects_container_union_by_declared_item_schema():
+    prompts: list[str] = []
+    hooks: list[str] = []
+    marker = "CONTAINER_UNION_PRIVATE_CREDENTIAL"
+
+    class Public(BaseModel):
+        visible: int
+
+    class Private(Public):
+        credential: str
+
+        def __getattribute__(self, name: str) -> Any:
+            if name in {"visible", "credential"}:
+                hooks.append(f"attribute:{name}")
+            return super().__getattribute__(name)
+
+        def __repr__(self) -> str:
+            hooks.append("repr")
+            raise RuntimeError("application repr")
+
+    class Request(BaseModel):
+        value: list[int] | list[Public]
+
+        @field_validator("value", mode="after")
+        @classmethod
+        def return_runtime_subclasses(
+            cls, value: list[int] | list[Public]
+        ) -> list[int] | list[Public]:
+            if value and isinstance(value[0], Public):
+                return [
+                    Private(visible=item.visible, credential=marker)
+                    for item in value
+                    if isinstance(item, Public)
+                ]
+            return value
+
+    def model(messages, info):
+        prompt = next(
+            part.content
+            for message in messages
+            for part in message.parts
+            if isinstance(part, UserPromptPart)
+        )
+        assert type(prompt) is str
+        prompts.append(prompt)
+        return ModelResponse(parts=[TextPart("done")])
+
+    def service(name: str) -> Summon:
+        summon = Summon(name)
+        summon._runtime = Runtime(model=FunctionModel(model))
+
+        def endpoint(request: Any) -> str:
+            """Inspect a container union through its applicable declared branch."""
+            ...
+
+        endpoint.__annotations__["request"] = Request
+        summon("/container-union-prompt")(endpoint)
+        return summon
+
+    body = {"value": [{"visible": 23}]}
+    raw = service("container-union-prompt-raw")
+    assert asyncio.run(raw._runtime.call(raw.endpoints[0], body)) == "done"
+
+    http = service("container-union-prompt-http")
+    response = TestClient(build_app(http)).post("/container-union-prompt", json=body)
+
+    assert response.status_code == 200, response.text
+    assert response.json() == "done"
+    assert prompts[0] == prompts[1]
+    assert marker not in prompts[0]
+    assert "credential" not in prompts[0]
+    assert '  value: [{"visible": 23}]' in prompts[0]
     assert hooks == []
 
 
