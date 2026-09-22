@@ -525,6 +525,27 @@ def _runtime_model_extra_collision_auditor(schema: Any) -> Any:
             if key_type is not str and any(base is str for base in key_type.__mro__):
                 raise ValueError("output mapping keys must use the exact str type")
 
+    def reject_model_extra_collisions(
+        current: BaseModel,
+        field_names: set[str],
+        emitted_names: set[str],
+    ) -> dict[Any, Any]:
+        """Audit model-owned extra storage without invoking application hooks."""
+        extras = object.__getattribute__(current, "__pydantic_extra__")
+        if extras is None:
+            extras = {}
+        elif not isinstance(extras, dict):
+            raise ValueError("output model extras must use dict storage")
+        reject_nonexact_string_keys(extras)
+        extra_names = {key for key in dict.__iter__(extras) if type(key) is str}
+        shadowed = (field_names | emitted_names).intersection(extra_names)
+        if shadowed:
+            names = ", ".join(repr(name) for name in sorted(shadowed))
+            raise ValueError(
+                f"output extras shadow declared serialized field keys: {names}"
+            )
+        return extras
+
     def dataclass_storage(value: Any) -> tuple[dict[Any, Any], ...]:
         """Read dict and slot state while bypassing application state hooks."""
         storages: list[dict[Any, Any]] = []
@@ -917,8 +938,19 @@ def _runtime_model_extra_collision_auditor(schema: Any) -> Any:
             if node_type == "model-fields":
                 if not isinstance(current, BaseModel):
                     return
+                fields = node.get("fields", {})
+                emitted_names = {
+                    field.get("serialization_alias", name)
+                    for name, field in fields.items()
+                    if not field.get("serialization_exclude")
+                }
+                emitted_names.update(
+                    field.get("alias", field["property_name"])
+                    for field in node.get("computed_fields", [])
+                )
+                reject_model_extra_collisions(current, set(fields), emitted_names)
                 storage = object.__getattribute__(current, "__dict__")
-                for name, field in node.get("fields", {}).items():
+                for name, field in fields.items():
                     if dict.__contains__(storage, name):
                         inspect_schema(dict.__getitem__(storage, name), field)
                 return
@@ -1077,21 +1109,9 @@ def _runtime_model_extra_collision_auditor(schema: Any) -> Any:
                     field.alias if field.alias is not None else name
                     for name, field in model_type.model_computed_fields.items()
                 )
-                extras = object.__getattribute__(current, "__pydantic_extra__")
-                if extras is None:
-                    extras = {}
-                elif not isinstance(extras, dict):
-                    raise ValueError("output model extras must use dict storage")
-                reject_nonexact_string_keys(extras)
-                extra_names = {key for key in dict.__iter__(extras) if type(key) is str}
-                shadowed = (set(model_type.model_fields) | emitted).intersection(
-                    extra_names
+                extras = reject_model_extra_collisions(
+                    current, set(model_type.model_fields), emitted
                 )
-                if shadowed:
-                    names = ", ".join(repr(name) for name in sorted(shadowed))
-                    raise ValueError(
-                        f"output extras shadow declared serialized field keys: {names}"
-                    )
                 storage = object.__getattribute__(current, "__dict__")
                 for item in dict.values(storage):
                     inspect(item)

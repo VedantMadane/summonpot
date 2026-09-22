@@ -341,6 +341,42 @@ class SafeNestedDataclassEnvelope(BaseModel):
     payload: SafeNestedDataclassCarrier
 
 
+DATACLASS_SUBCLASS_HOOKS: list[str] = []
+
+
+@dataclass(slots=True)
+class SlottedNestedDataclassCarrier:
+    item: AliasedExtraOutput
+
+
+class ShadowingSlottedDataclassCarrier(SlottedNestedDataclassCarrier):
+    __slots__ = ()
+
+    @property
+    def __dict__(  # type: ignore[reportIncompatibleVariableOverride]
+        self,
+    ) -> dict[str, Any]:
+        DATACLASS_SUBCLASS_HOOKS.append("dict")
+        raise AssertionError("__dict__ hook called during output audit")
+
+    def __repr__(self) -> str:
+        DATACLASS_SUBCLASS_HOOKS.append("repr")
+        raise AssertionError("repr hook called during output audit")
+
+
+class ReplacingDataclassSubclassEnvelope(BaseModel):
+    payload: SlottedNestedDataclassCarrier
+
+    @model_validator(mode="after")
+    def replace_with_subclass(self) -> "ReplacingDataclassSubclassEnvelope":
+        item = self.payload.item
+        assert item.__pydantic_extra__ is not None
+        item.__pydantic_extra__["wireValue"] = 99
+        self.payload = ShadowingSlottedDataclassCarrier(item=item)
+        DATACLASS_SUBCLASS_HOOKS.clear()
+        return self
+
+
 class TypedDictCollisionOutput(TypedDict):
     first: int
     value: int
@@ -576,6 +612,17 @@ def test_dataclass_carrier_preserves_nested_noncolliding_post_validation_extra()
     ) == {"item": {"wireValue": 7, "note": "safe"}}
 
 
+def test_dataclass_subclass_cannot_hide_nested_model_extra_collision():
+    DATACLASS_SUBCLASS_HOOKS.clear()
+
+    with pytest.raises(ValidationError, match="wireValue"):
+        _compile_output_validator(
+            TypeAdapter(ReplacingDataclassSubclassEnvelope)
+        ).validate_python({"payload": {"item": {"value": 7}}})
+
+    assert DATACLASS_SUBCLASS_HOOKS == []
+
+
 def test_root_scalar_output_remains_supported():
     output = RootModel[int](7)
 
@@ -743,6 +790,22 @@ def test_http_emits_nested_dataclass_noncolliding_extra_once():
     assert response.json() == {"payload": {"item": {"wireValue": 7, "note": "safe"}}}
     assert response.text.count('"wireValue"') == 1
     assert response.text.count('"note"') == 1
+
+
+def test_http_rejects_nested_collision_inside_dataclass_subclass():
+    DATACLASS_SUBCLASS_HOOKS.clear()
+    summon = _direct_summon(
+        ReplacingDataclassSubclassEnvelope,
+        {"payload": {"item": {"value": 7}}},
+    )
+
+    response = TestClient(build_app(summon), raise_server_exceptions=False).post(
+        "/output", json={"value": 7}
+    )
+
+    assert response.status_code == 500
+    assert response.text.count('"wireValue"') == 0
+    assert DATACLASS_SUBCLASS_HOOKS == []
 
 
 class SeparateNamespaceCollisionOutput(BaseModel):
