@@ -438,7 +438,10 @@ def _inert_transport_value(
         if schema is not None and schema.kind == "union":
             schema = _projection_union_choice(value, schema.choices, definitions)
             if schema is None:
-                return _UNAVAILABLE
+                raise _unsupported_raw_request(
+                    "request_projection",
+                    "request value does not match a safely projectable declared union branch",
+                )
     kind = type(value)
     if kind is UUID and type(value.int) is int and 0 <= value.int < 1 << 128:
         # UUID can be changed through object.__setattr__, so never share it.
@@ -699,10 +702,16 @@ def _projection_schema_applies(
             )
         )
     if schema.kind == "typed-dict":
-        return kind is dict and all(
-            field.name not in value
-            or _projection_schema_applies(value[field.name], field.schema, definitions)
-            for field in schema.fields
+        return (
+            kind is dict
+            and _has_exact_string_keys(value)
+            and all(
+                not dict.__contains__(value, field.name)
+                or _projection_schema_applies(
+                    dict.__getitem__(value, field.name), field.schema, definitions
+                )
+                for field in schema.fields
+            )
         )
     return False
 

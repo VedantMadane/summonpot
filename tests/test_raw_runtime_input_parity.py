@@ -1795,6 +1795,70 @@ def test_raw_prompt_projects_typed_dict_fields_through_declared_schemas():
     assert hooks == []
 
 
+def test_typed_dict_union_rejects_hostile_keys_without_equality_hooks():
+    hooks: list[str] = []
+    model_calls: list[str] = []
+
+    class Public(BaseModel):
+        visible: int
+
+    class Wrapped(TypedDict):
+        child: Public
+
+    class HostileKey:
+        def __hash__(self) -> int:
+            return hash("child")
+
+        def __eq__(self, other: object) -> bool:
+            hooks.append("eq")
+            raise AssertionError("application equality must not run")
+
+        def __repr__(self) -> str:
+            hooks.append("repr")
+            raise AssertionError("application repr must not run")
+
+    class Request(BaseModel):
+        value: Wrapped | int
+
+        @field_validator("value", mode="after")
+        @classmethod
+        def replace_with_hostile_storage(cls, value: Wrapped | int) -> Wrapped | int:
+            result = {HostileKey(): Public(visible=23)}
+            hooks.clear()
+            return result  # type: ignore[return-value]
+
+    def model(messages, info):
+        model_calls.append("model")
+        return ModelResponse(parts=[TextPart("done")])
+
+    def service(name: str) -> Summon:
+        summon = Summon(name)
+        summon._runtime = Runtime(model=FunctionModel(model))
+
+        def endpoint(request: Any) -> str:
+            """Reject incompatible TypedDict union storage without application hooks."""
+            ...
+
+        endpoint.__annotations__["request"] = Request
+        summon("/typed-dict-union-prompt")(endpoint)
+        return summon
+
+    body = {"value": {"child": {"visible": 23}}}
+    raw = service("typed-dict-union-hostile-raw")
+    with pytest.raises(ValidationError):
+        asyncio.run(raw._runtime.call(raw.endpoints[0], body))
+
+    http = service("typed-dict-union-hostile-http")
+    response = TestClient(build_app(http), raise_server_exceptions=False).post(
+        "/typed-dict-union-prompt", json=body
+    )
+
+    assert response.status_code == 500
+    assert response.text == "Internal Server Error"
+    assert hooks == []
+    assert model_calls == []
+
+
 def test_raw_prompt_selects_container_union_by_declared_item_schema():
     prompts: list[str] = []
     hooks: list[str] = []
