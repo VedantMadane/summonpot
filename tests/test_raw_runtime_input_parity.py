@@ -14,6 +14,7 @@ from pydantic import (
     AfterValidator,
     BaseModel,
     Field,
+    InstanceOf,
     ValidationError,
     create_model,
     field_serializer,
@@ -630,6 +631,7 @@ def test_custom_init_request_still_rejects_invalid_nested_constructed_model():
         operation_calls.append(value)
         return Result(value=value.x)
 
+    apply.__annotations__ = {"value": Any, "return": Result}
     operation = Operation(apply, bind={"value": FromRequest("value")}, output=Result)
     summon = Summon("custom-init-structural-admission")
 
@@ -894,6 +896,7 @@ def test_custom_init_rejects_dataclass_carriers_before_application_code(
         received.append(payload)
         return Result(value=payload.inner.x)
 
+    apply.__annotations__ = {"payload": InstanceOf[Box], "return": Result}
     operation = Operation(
         apply, bind={"payload": FromRequest("payload")}, output=Result
     )
@@ -923,6 +926,7 @@ def test_custom_init_dataclass_mapping_matches_http_canonicalization_once(
     dataclass_options: dict[str, bool],
 ):
     initializations: list[Any] = []
+    canonical: list[Any] = []
     received: list[Any] = []
 
     class Inner(BaseModel):
@@ -939,10 +943,17 @@ def test_custom_init_dataclass_mapping_matches_http_canonicalization_once(
             initializations.append(payload)
             super().__init__(payload=payload)
 
-    def apply(payload: Box) -> Result:
+        @field_validator("payload", mode="after")
+        @classmethod
+        def capture_canonical(cls, payload: Box) -> Box:
+            canonical.append(payload)
+            return payload
+
+    def apply(payload: Any) -> Result:
         received.append(payload)
         return Result(value=payload.inner.x)
 
+    apply.__annotations__ = {"payload": InstanceOf[Box], "return": Result}
     operation = Operation(
         apply, bind={"payload": FromRequest("payload")}, output=Result
     )
@@ -970,7 +981,11 @@ def test_custom_init_dataclass_mapping_matches_http_canonicalization_once(
 
     assert response.status_code == 200, response.text
     assert response.json() == {"value": 7}
-    assert len(initializations) == len(received) == 2
+    assert len(initializations) == len(canonical) == len(received) == 2
+    assert all(type(box) is Box for box in received)
+    assert all(
+        box is expected for box, expected in zip(received, canonical, strict=True)
+    )
     assert all(type(box.inner.x) is int for box in received)
 
 
@@ -1238,6 +1253,7 @@ def test_direct_raw_input_rejects_invalid_nested_constructed_model_like_http():
         received.append(value.x)
         return Result(value=value.x)
 
+    apply.__annotations__ = {"value": Inner, "return": Result}
     operation = Operation(apply, bind={"value": FromRequest("value")}, output=Result)
     raw = Summon("nested-direct-raw")
 
@@ -1295,6 +1311,7 @@ def test_agent_raw_input_rejects_invalid_nested_constructed_model_before_model()
         events.append("model")
         raise AssertionError("invalid input reached the model")
 
+    apply.__annotations__ = {"value": Inner, "return": Result}
     operation = Operation(apply, bind={"value": FromRequest("value")}, output=Result)
 
     def service(name: str) -> Summon:
@@ -1353,6 +1370,7 @@ def test_nested_constructed_model_and_request_validators_run_once_on_raw_admissi
         received.append(value.x)
         return Result(value=value.x)
 
+    apply.__annotations__ = {"value": Any, "return": Result}
     operation = Operation(apply, bind={"value": FromRequest("value")}, output=Result)
     summon = Summon("nested-validator-once")
 
@@ -2232,11 +2250,11 @@ def test_dataclass_prompt_projection_matches_http_without_losing_identity(
     class AgentResult(BaseModel):
         answer: int
 
-    def apply(box: Box) -> Result:
+    def apply(box: Any) -> Result:
         received.append(box)
         return Result(value=box.value)
 
-    apply.__annotations__ = {"box": Box, "return": Result}
+    apply.__annotations__ = {"box": InstanceOf[Box], "return": Result}
     operation = Operation(apply, bind={"box": FromRequest("box")}, output=Result)
 
     def service(name: str) -> Summon:
