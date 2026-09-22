@@ -1471,6 +1471,46 @@ TaggedDataclass = Annotated[
 DATACLASS_STORAGE_HOOKS: list[str] = []
 
 
+@dataclass(slots=True, frozen=True)
+class SlottedDataclassOutput:
+    value: int
+
+
+class ShadowedDictSlottedDataclass(SlottedDataclassOutput):
+    __slots__ = ()
+
+    @property
+    def __dict__(  # type: ignore[reportIncompatibleVariableOverride]
+        self,
+    ) -> dict[str, Any]:
+        DATACLASS_STORAGE_HOOKS.append("dict")
+        raise AssertionError("dict property called during dataclass audit")
+
+    def __repr__(self) -> str:
+        DATACLASS_STORAGE_HOOKS.append("repr")
+        raise AssertionError("repr hook called during dataclass audit")
+
+    def __eq__(self, other: object) -> bool:
+        DATACLASS_STORAGE_HOOKS.append("eq")
+        raise AssertionError("equality hook called during dataclass audit")
+
+    def __hash__(self) -> int:
+        DATACLASS_STORAGE_HOOKS.append("hash")
+        raise AssertionError("hash hook called during dataclass audit")
+
+
+class ShadowedDictDataclassEnvelope(BaseModel):
+    item: SlottedDataclassOutput
+
+    @model_validator(mode="after")
+    def replace_dataclass(self) -> "ShadowedDictDataclassEnvelope":
+        replacement = object.__new__(ShadowedDictSlottedDataclass)
+        object.__setattr__(replacement, "value", self.item.value)
+        object.__setattr__(self, "item", replacement)
+        DATACLASS_STORAGE_HOOKS.clear()
+        return self
+
+
 class HostileSafeTaggedDataclass(SafeTaggedDataclass):
     def __getattribute__(self, name: str) -> Any:
         if name in {"kind", "value"}:
@@ -2088,6 +2128,37 @@ def test_tagged_dataclass_union_bypasses_application_storage_hooks():
 
     assert type(validated.item) is HostileSafeTaggedDataclass
     assert object.__getattribute__(validated.item, "value") == 7
+    assert DATACLASS_STORAGE_HOOKS == []
+
+
+def test_dataclass_audit_bypasses_shadowed_dict_property():
+    DATACLASS_STORAGE_HOOKS.clear()
+
+    validated = _compile_output_validator(
+        TypeAdapter(ShadowedDictDataclassEnvelope)
+    ).validate_python({"item": {"value": 7}})
+
+    assert type(validated.item) is ShadowedDictSlottedDataclass
+    assert object.__getattribute__(validated.item, "value") == 7
+    assert DATACLASS_STORAGE_HOOKS == []
+
+
+def test_http_serializes_slotted_dataclass_with_shadowed_dict_property(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    DATACLASS_STORAGE_HOOKS.clear()
+    monkeypatch.setenv("SUMMONPOT_MODEL", "test")
+    summon = _direct_summon(
+        ShadowedDictDataclassEnvelope,
+        {"item": {"value": 7}},
+    )
+
+    response = TestClient(build_app(summon), raise_server_exceptions=False).post(
+        "/output", json={"value": 7}
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"item": {"value": 7}}
     assert DATACLASS_STORAGE_HOOKS == []
 
 

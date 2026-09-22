@@ -13,7 +13,7 @@ from collections import deque
 from contextlib import suppress
 from contextvars import ContextVar
 from dataclasses import is_dataclass
-from types import MemberDescriptorType
+from types import GetSetDescriptorType, MemberDescriptorType
 from typing import Any, cast
 
 from pydantic import BaseModel, TypeAdapter
@@ -528,16 +528,21 @@ def _runtime_model_extra_collision_auditor(schema: Any) -> Any:
     def dataclass_storage(value: Any) -> tuple[dict[Any, Any], ...]:
         """Read dict and slot state while bypassing application state hooks."""
         storages: list[dict[Any, Any]] = []
-        try:
-            instance_dict = object.__getattribute__(value, "__dict__")
-        except AttributeError:
-            pass
-        else:
-            if type(instance_dict) is dict:
-                storages.append(instance_dict)
-
         current_type = type(value)
-        current_mro = current_type.__mro__
+        current_mro = type.__getattribute__(current_type, "__mro__")
+        for base in current_mro:
+            namespace = type.__getattribute__(base, "__dict__")
+            descriptor = namespace.get("__dict__")
+            if type(descriptor) is not GetSetDescriptorType:
+                continue
+            with suppress(AttributeError):
+                instance_dict = GetSetDescriptorType.__get__(
+                    descriptor, value, current_type
+                )
+                if type(instance_dict) is dict:
+                    storages.append(instance_dict)
+            break
+
         slot_values: dict[str, Any] = {}
         for dataclass_type, field_names in dataclass_fields:
             if not any(base is dataclass_type for base in current_mro):
