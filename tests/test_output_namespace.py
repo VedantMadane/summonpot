@@ -4,6 +4,7 @@ import asyncio
 import math
 from collections import deque
 from dataclasses import InitVar
+from types import GetSetDescriptorType, MemberDescriptorType
 from typing import Annotated, Any, Literal, SupportsIndex, get_args
 
 import pytest
@@ -377,6 +378,99 @@ class ReplacingDataclassSubclassEnvelope(BaseModel):
         return self
 
 
+MODEL_EXTRA_STORAGE_HOOKS: list[str] = []
+
+
+def _model_extra_storage_descriptor() -> MemberDescriptorType:
+    for base in type.__getattribute__(BaseModel, "__mro__"):
+        descriptor = type.__getattribute__(base, "__dict__").get("__pydantic_extra__")
+        if type(descriptor) is MemberDescriptorType:
+            return descriptor
+    raise AssertionError("BaseModel extra storage descriptor not found")
+
+
+def _model_dict_storage_descriptor() -> GetSetDescriptorType:
+    for base in type.__getattribute__(BaseModel, "__mro__"):
+        descriptor = type.__getattribute__(base, "__dict__").get("__dict__")
+        if type(descriptor) is GetSetDescriptorType:
+            return descriptor
+    raise AssertionError("BaseModel dict storage descriptor not found")
+
+
+class ShadowingModelExtraOutput(AliasedExtraOutput):
+    @property
+    def __pydantic_extra__(  # type: ignore[reportIncompatibleVariableOverride]
+        self,
+    ) -> dict[str, Any] | None:
+        MODEL_EXTRA_STORAGE_HOOKS.append("extra-get")
+        if len(MODEL_EXTRA_STORAGE_HOOKS) == 1:
+            return {"note": "decoy"}
+        return MemberDescriptorType.__get__(
+            _model_extra_storage_descriptor(), self, type(self)
+        )
+
+    @__pydantic_extra__.setter
+    def __pydantic_extra__(  # type: ignore[reportIncompatibleVariableOverride]
+        self, value: dict[str, Any] | None
+    ) -> None:
+        MemberDescriptorType.__set__(_model_extra_storage_descriptor(), self, value)
+
+
+class ReplacingModelExtraStorageEnvelope(BaseModel):
+    payload: SlottedNestedDataclassCarrier
+
+    @model_validator(mode="after")
+    def replace_with_shadowing_model(self) -> "ReplacingModelExtraStorageEnvelope":
+        replacement = ShadowingModelExtraOutput.model_construct(value=7)
+        MemberDescriptorType.__set__(
+            _model_extra_storage_descriptor(), replacement, {"wireValue": 99}
+        )
+        self.payload = ShadowingSlottedDataclassCarrier(item=replacement)
+        MODEL_EXTRA_STORAGE_HOOKS.clear()
+        return self
+
+
+MODEL_DICT_STORAGE_HOOKS: list[str] = []
+
+
+class NestedExtraOutput(BaseModel):
+    item: AliasedExtraOutput
+
+
+class ShadowingModelDictOutput(NestedExtraOutput):
+    @property
+    def __dict__(  # type: ignore[reportIncompatibleVariableOverride]
+        self,
+    ) -> dict[str, Any]:
+        MODEL_DICT_STORAGE_HOOKS.append("dict-get")
+        if len(MODEL_DICT_STORAGE_HOOKS) == 1:
+            return {}
+        return GetSetDescriptorType.__get__(
+            _model_dict_storage_descriptor(), self, type(self)
+        )
+
+    @__dict__.setter
+    def __dict__(  # type: ignore[reportIncompatibleVariableOverride]
+        self, value: dict[str, Any]
+    ) -> None:
+        GetSetDescriptorType.__set__(_model_dict_storage_descriptor(), self, value)
+
+
+class ReplacingModelDictStorageEnvelope(BaseModel):
+    payload: NestedExtraOutput
+
+    @model_validator(mode="after")
+    def replace_with_shadowing_model(self) -> "ReplacingModelDictStorageEnvelope":
+        item = AliasedExtraOutput.model_construct(value=7)
+        MemberDescriptorType.__set__(
+            _model_extra_storage_descriptor(), item, {"wireValue": 99}
+        )
+        replacement = ShadowingModelDictOutput.model_construct(item=item)
+        self.payload = replacement
+        MODEL_DICT_STORAGE_HOOKS.clear()
+        return self
+
+
 class TypedDictCollisionOutput(TypedDict):
     first: int
     value: int
@@ -623,6 +717,28 @@ def test_dataclass_subclass_cannot_hide_nested_model_extra_collision():
     assert DATACLASS_SUBCLASS_HOOKS == []
 
 
+def test_model_extra_property_cannot_hide_nested_collision():
+    MODEL_EXTRA_STORAGE_HOOKS.clear()
+
+    with pytest.raises(ValidationError, match="wireValue"):
+        _compile_output_validator(
+            TypeAdapter(ReplacingModelExtraStorageEnvelope)
+        ).validate_python({"payload": {"item": {"value": 7}}})
+
+    assert MODEL_EXTRA_STORAGE_HOOKS == []
+
+
+def test_model_dict_property_cannot_hide_nested_collision():
+    MODEL_DICT_STORAGE_HOOKS.clear()
+
+    with pytest.raises(ValidationError, match="wireValue"):
+        _compile_output_validator(
+            TypeAdapter(ReplacingModelDictStorageEnvelope)
+        ).validate_python({"payload": {"item": {"value": 7}}})
+
+    assert MODEL_DICT_STORAGE_HOOKS == []
+
+
 def test_root_scalar_output_remains_supported():
     output = RootModel[int](7)
 
@@ -806,6 +922,38 @@ def test_http_rejects_nested_collision_inside_dataclass_subclass():
     assert response.status_code == 500
     assert response.text.count('"wireValue"') == 0
     assert DATACLASS_SUBCLASS_HOOKS == []
+
+
+def test_http_model_extra_property_cannot_hide_nested_collision():
+    MODEL_EXTRA_STORAGE_HOOKS.clear()
+    summon = _direct_summon(
+        ReplacingModelExtraStorageEnvelope,
+        {"payload": {"item": {"value": 7}}},
+    )
+
+    response = TestClient(build_app(summon), raise_server_exceptions=False).post(
+        "/output", json={"value": 7}
+    )
+
+    assert response.status_code == 500
+    assert response.text.count('"wireValue"') == 0
+    assert MODEL_EXTRA_STORAGE_HOOKS == []
+
+
+def test_http_model_dict_property_cannot_hide_nested_collision():
+    MODEL_DICT_STORAGE_HOOKS.clear()
+    summon = _direct_summon(
+        ReplacingModelDictStorageEnvelope,
+        {"payload": {"item": {"value": 7}}},
+    )
+
+    response = TestClient(build_app(summon), raise_server_exceptions=False).post(
+        "/output", json={"value": 7}
+    )
+
+    assert response.status_code == 500
+    assert response.text.count('"wireValue"') == 0
+    assert MODEL_DICT_STORAGE_HOOKS == []
 
 
 class SeparateNamespaceCollisionOutput(BaseModel):

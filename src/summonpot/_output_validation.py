@@ -525,17 +525,55 @@ def _runtime_model_extra_collision_auditor(schema: Any) -> Any:
             if key_type is not str and any(base is str for base in key_type.__mro__):
                 raise ValueError("output mapping keys must use the exact str type")
 
+    def model_dict_storage(current: BaseModel) -> dict[Any, Any]:
+        """Read BaseModel field state through its trusted built-in descriptor."""
+        descriptor: Any = None
+        for base in type.__getattribute__(BaseModel, "__mro__"):
+            namespace = type.__getattribute__(base, "__dict__")
+            candidate = namespace.get("__dict__")
+            if type(candidate) is GetSetDescriptorType:
+                descriptor = candidate
+                break
+        if descriptor is None:
+            raise ValueError("output model field storage is unavailable")
+        try:
+            storage = GetSetDescriptorType.__get__(descriptor, current, type(current))
+        except (AttributeError, TypeError) as exc:
+            raise ValueError("output model field storage is unavailable") from exc
+        if type(storage) is not dict:
+            raise ValueError("output model fields must use exact dict storage")
+        return storage
+
+    def model_extra_storage(current: BaseModel) -> dict[Any, Any]:
+        """Read BaseModel extra state through its trusted built-in slot."""
+        descriptor: Any = None
+        for base in type.__getattribute__(BaseModel, "__mro__"):
+            namespace = type.__getattribute__(base, "__dict__")
+            candidate = namespace.get("__pydantic_extra__")
+            if type(candidate) is MemberDescriptorType:
+                descriptor = candidate
+                break
+        if descriptor is None:
+            raise ValueError("output model extra storage is unavailable")
+        try:
+            extras = MemberDescriptorType.__get__(descriptor, current, type(current))
+        except AttributeError:
+            return {}
+        except TypeError as exc:
+            raise ValueError("output model extra storage is unavailable") from exc
+        if extras is None:
+            return {}
+        if type(extras) is not dict:
+            raise ValueError("output model extras must use exact dict storage")
+        return extras
+
     def reject_model_extra_collisions(
         current: BaseModel,
         field_names: set[str],
         emitted_names: set[str],
     ) -> dict[Any, Any]:
         """Audit model-owned extra storage without invoking application hooks."""
-        extras = object.__getattribute__(current, "__pydantic_extra__")
-        if extras is None:
-            extras = {}
-        elif not isinstance(extras, dict):
-            raise ValueError("output model extras must use dict storage")
+        extras = model_extra_storage(current)
         reject_nonexact_string_keys(extras)
         extra_names = {key for key in dict.__iter__(extras) if type(key) is str}
         shadowed = (field_names | emitted_names).intersection(extra_names)
@@ -603,7 +641,7 @@ def _runtime_model_extra_collision_auditor(schema: Any) -> Any:
         if type(current) is dict:
             return exact_dict_value(current, part)
         if BaseModel in type(current).__mro__:
-            storage = object.__getattribute__(current, "__dict__")
+            storage = model_dict_storage(current)
             if type(storage) is not dict:
                 return _missing
             value = exact_dict_value(storage, part)
@@ -927,7 +965,7 @@ def _runtime_model_extra_collision_auditor(schema: Any) -> Any:
                 ):
                     return
                 if node.get("root_model"):
-                    storage = object.__getattribute__(current, "__dict__")
+                    storage = model_dict_storage(current)
                     if dict.__contains__(storage, "root"):
                         inspect_schema(
                             dict.__getitem__(storage, "root"), node.get("schema")
@@ -949,7 +987,7 @@ def _runtime_model_extra_collision_auditor(schema: Any) -> Any:
                     for field in node.get("computed_fields", [])
                 )
                 reject_model_extra_collisions(current, set(fields), emitted_names)
-                storage = object.__getattribute__(current, "__dict__")
+                storage = model_dict_storage(current)
                 for name, field in fields.items():
                     if dict.__contains__(storage, name):
                         inspect_schema(dict.__getitem__(storage, name), field)
@@ -1112,7 +1150,7 @@ def _runtime_model_extra_collision_auditor(schema: Any) -> Any:
                 extras = reject_model_extra_collisions(
                     current, set(model_type.model_fields), emitted
                 )
-                storage = object.__getattribute__(current, "__dict__")
+                storage = model_dict_storage(current)
                 for item in dict.values(storage):
                     inspect(item)
                 for item in dict.values(extras):
