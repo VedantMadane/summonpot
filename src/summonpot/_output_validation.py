@@ -558,7 +558,9 @@ def _runtime_model_extra_collision_auditor(schema: Any) -> Any:
         try:
             extras = MemberDescriptorType.__get__(descriptor, current, type(current))
         except AttributeError:
-            return {}
+            extras = exact_dict_value(model_dict_storage(current), "__pydantic_extra__")
+            if extras is _missing:
+                return {}
         except TypeError as exc:
             raise ValueError("output model extra storage is unavailable") from exc
         if extras is None:
@@ -984,11 +986,17 @@ def _runtime_model_extra_collision_auditor(schema: Any) -> Any:
                     field.get("alias", field["property_name"])
                     for field in node.get("computed_fields", [])
                 )
-                reject_model_extra_collisions(current, set(fields), emitted_names)
+                extras = reject_model_extra_collisions(
+                    current, set(fields), emitted_names
+                )
                 storage = model_dict_storage(current)
                 for name, field in fields.items():
                     if dict.__contains__(storage, name):
                         inspect_schema(dict.__getitem__(storage, name), field)
+                extras_schema = node.get("extras_schema")
+                if extras_schema is not None:
+                    for item in dict.values(extras):
+                        inspect_schema(item, extras_schema)
                 return
             if node_type == "model-field" or node_type == "typed-dict-field":
                 inspect_schema(current, node.get("schema"))
