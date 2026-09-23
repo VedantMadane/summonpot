@@ -1121,8 +1121,9 @@ def _runtime_model_extra_collision_auditor(schema: Any) -> Any:
 
         def inspect(current: Any) -> None:
             current_type = type(current)
+            current_mro = type.__getattribute__(current_type, "__mro__")
             for dataclass_type, field_names in dataclass_fields:
-                if current_type is not dataclass_type:
+                if not any(base is dataclass_type for base in current_mro):
                     continue
                 identity = id(current)
                 if identity in seen:

@@ -430,6 +430,63 @@ class SafeReplacingTypedNestedExtraEnvelope(BaseModel):
         return self
 
 
+class UntypedNestedExtraLeaf(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    value: int = Field(serialization_alias="wireValue")
+
+
+class UntypedNestedExtraBox(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    value: int
+
+
+@dataclass(slots=True)
+class UntypedNestedExtraCarrier:
+    item: UntypedNestedExtraBox
+
+
+class ShadowingUntypedNestedExtraCarrier(UntypedNestedExtraCarrier):
+    __slots__ = ()
+
+    @property
+    def __dict__(  # type: ignore[reportIncompatibleVariableOverride]
+        self,
+    ) -> dict[str, Any]:
+        DATACLASS_SUBCLASS_HOOKS.append("untyped-extra-dict")
+        raise AssertionError("__dict__ hook called during untyped-extra output audit")
+
+
+class ReplacingUntypedNestedExtraEnvelope(BaseModel):
+    payload: UntypedNestedExtraCarrier
+
+    @model_validator(mode="after")
+    def replace_with_subclass(self) -> "ReplacingUntypedNestedExtraEnvelope":
+        item = self.payload.item
+        assert item.__pydantic_extra__ is not None
+        leaf = UntypedNestedExtraLeaf.model_validate(item.__pydantic_extra__["note"])
+        assert leaf.__pydantic_extra__ is not None
+        leaf.__pydantic_extra__["wireValue"] = 99
+        item.__pydantic_extra__["note"] = leaf
+        self.payload = ShadowingUntypedNestedExtraCarrier(item=item)
+        DATACLASS_SUBCLASS_HOOKS.clear()
+        return self
+
+
+class SafeReplacingUntypedNestedExtraEnvelope(BaseModel):
+    payload: UntypedNestedExtraCarrier
+
+    @model_validator(mode="after")
+    def replace_with_subclass(self) -> "SafeReplacingUntypedNestedExtraEnvelope":
+        item = self.payload.item
+        assert item.__pydantic_extra__ is not None
+        item.__pydantic_extra__["note"] = UntypedNestedExtraLeaf.model_validate(
+            item.__pydantic_extra__["note"]
+        )
+        self.payload = ShadowingUntypedNestedExtraCarrier(item=item)
+        DATACLASS_SUBCLASS_HOOKS.clear()
+        return self
+
+
 MODEL_EXTRA_STORAGE_HOOKS: list[str] = []
 
 
@@ -849,6 +906,33 @@ def test_typed_model_extra_in_valid_dataclass_subclass_remains_supported():
     assert DATACLASS_SUBCLASS_HOOKS == []
 
 
+def test_dataclass_subclass_cannot_hide_collision_in_untyped_model_extra():
+    DATACLASS_SUBCLASS_HOOKS.clear()
+
+    with pytest.raises(ValidationError, match="wireValue"):
+        _compile_output_validator(
+            TypeAdapter(ReplacingUntypedNestedExtraEnvelope)
+        ).validate_python({"payload": {"item": {"value": 1, "note": {"value": 7}}}})
+
+    assert DATACLASS_SUBCLASS_HOOKS == []
+
+
+def test_untyped_model_extra_in_valid_dataclass_subclass_remains_supported():
+    DATACLASS_SUBCLASS_HOOKS.clear()
+    validator = _compile_output_validator(
+        TypeAdapter(SafeReplacingUntypedNestedExtraEnvelope)
+    )
+
+    validated = validator.validate_python(
+        {"payload": {"item": {"value": 1, "note": {"value": 7}}}}
+    )
+
+    assert validated.model_dump(mode="json", by_alias=True) == {
+        "payload": {"item": {"value": 1, "note": {"wireValue": 7}}}
+    }
+    assert DATACLASS_SUBCLASS_HOOKS == []
+
+
 def test_model_extra_property_cannot_hide_nested_collision():
     MODEL_EXTRA_STORAGE_HOOKS.clear()
 
@@ -1086,6 +1170,37 @@ def test_http_rejects_typed_model_extra_collision_inside_dataclass_subclass():
     DATACLASS_SUBCLASS_HOOKS.clear()
     summon = _direct_summon(
         ReplacingTypedNestedExtraEnvelope,
+        {"payload": {"item": {"value": 1, "note": {"value": 7}}}},
+    )
+
+    response = TestClient(build_app(summon), raise_server_exceptions=False).post(
+        "/output", json={"value": 7}
+    )
+
+    assert response.status_code == 500
+    assert response.text.count('"wireValue"') == 0
+    assert DATACLASS_SUBCLASS_HOOKS == []
+
+
+def test_runtime_rejects_untyped_model_extra_collision_inside_dataclass_subclass():
+    DATACLASS_SUBCLASS_HOOKS.clear()
+    summon = _direct_summon(
+        ReplacingUntypedNestedExtraEnvelope,
+        {"payload": {"item": {"value": 1, "note": {"value": 7}}}},
+    )
+
+    with pytest.raises(_OperationOutputError, match="invalid declared output"):
+        asyncio.run(
+            Runtime(model="invalid:no-model").call(summon.endpoints[0], {"value": 7})
+        )
+
+    assert DATACLASS_SUBCLASS_HOOKS == []
+
+
+def test_http_rejects_untyped_model_extra_collision_inside_dataclass_subclass():
+    DATACLASS_SUBCLASS_HOOKS.clear()
+    summon = _direct_summon(
+        ReplacingUntypedNestedExtraEnvelope,
         {"payload": {"item": {"value": 1, "note": {"value": 7}}}},
     )
 
