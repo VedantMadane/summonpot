@@ -2878,3 +2878,46 @@ def test_deep_recursive_union_projection_is_bounded_and_matches_http():
     )
 
     assert "<unavailable>" in prompts[0]
+
+
+def test_nested_nullable_union_budget_cannot_select_private_runtime_branch():
+    marker = "NESTED_NULLABLE_PRIVATE_CREDENTIAL"
+
+    class Public(BaseModel):
+        visible: int
+
+    class Private(Public):
+        credential: str
+
+    left: Any = int
+    right: Any = Public
+    public_value: Any = {"visible": 1}
+    private_value: Any = Private(visible=1, credential=marker)
+    for _ in range(34):
+        left = list[left | None]
+        right = list[right | None]
+        public_value = [public_value]
+        private_value = [private_value]
+
+    @field_validator("value", mode="after")
+    @classmethod
+    def replace_with_private_runtime_subclass(cls, value: Any) -> Any:
+        return private_value
+
+    Request = create_model(
+        "NestedNullableCompetingUnionRequest",
+        value=(left | right, ...),
+        __validators__={
+            "replace_with_private_runtime_subclass": replace_with_private_runtime_subclass
+        },
+    )
+
+    prompts = _raw_http_agent_prompts(
+        Request,
+        {"value": public_value},
+        "/nested-nullable-competing-union-prompt",
+    )
+
+    assert marker not in prompts[0]
+    assert "credential" not in prompts[0]
+    assert '"visible": 1' in prompts[0]

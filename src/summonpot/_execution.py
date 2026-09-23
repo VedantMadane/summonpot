@@ -738,13 +738,11 @@ def _projection_schema_applies(
     if schema.kind == "nullable":
         return value is None or (
             schema.item is not None
-            and _projection_schema_applies(
-                value, schema.item, definitions, depth + 1, seen
-            )
+            and _projection_schema_applies(value, schema.item, definitions, depth, seen)
         )
     if schema.kind == "union":
         return any(
-            _projection_schema_applies(value, choice, definitions, depth + 1, seen)
+            _projection_schema_applies(value, choice, definitions, depth, seen)
             for choice in schema.choices
         )
     if schema.kind == "any":
