@@ -647,10 +647,8 @@ def _runtime_model_extra_collision_auditor(schema: Any) -> Any:
             value = exact_dict_value(storage, part)
             if value is not _missing:
                 return value
-            extras = object.__getattribute__(current, "__pydantic_extra__")
-            if type(extras) is dict:
-                return exact_dict_value(extras, part)
-            return _missing
+            extras = model_extra_storage(current)
+            return exact_dict_value(extras, part)
         if any(
             any(base is dataclass_type for base in type(current).__mro__)
             for dataclass_type, _ in dataclass_fields

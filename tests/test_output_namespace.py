@@ -430,6 +430,59 @@ class ReplacingModelExtraStorageEnvelope(BaseModel):
         return self
 
 
+TAGGED_EXTRA_STORAGE_HOOKS: list[str] = []
+
+
+class SafeTaggedExtraOutput(BaseModel):
+    kind: Literal["safe"] = Field(validation_alias="tag", serialization_alias="outKind")
+    value: int
+
+
+class CollisionTaggedExtraOutput(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    kind: Literal["collision"] = Field(
+        validation_alias="tag", serialization_alias="outKind"
+    )
+    value: int = Field(serialization_alias="wireValue")
+
+
+class ShadowingTaggedExtraOutput(CollisionTaggedExtraOutput):
+    @property
+    def __pydantic_extra__(  # type: ignore[reportIncompatibleVariableOverride]
+        self,
+    ) -> dict[str, Any] | None:
+        TAGGED_EXTRA_STORAGE_HOOKS.append("extra-get")
+        raise AssertionError("application extra property executed")
+
+    @__pydantic_extra__.setter
+    def __pydantic_extra__(  # type: ignore[reportIncompatibleVariableOverride]
+        self, value: dict[str, Any] | None
+    ) -> None:
+        MemberDescriptorType.__set__(_model_extra_storage_descriptor(), self, value)
+
+
+TaggedExtraOutput = Annotated[
+    SafeTaggedExtraOutput | CollisionTaggedExtraOutput,
+    Field(discriminator="kind"),
+]
+
+
+class ReplacingTaggedExtraStorageEnvelope(BaseModel):
+    item: TaggedExtraOutput
+
+    @model_validator(mode="after")
+    def replace_with_shadowing_model(self) -> "ReplacingTaggedExtraStorageEnvelope":
+        replacement = ShadowingTaggedExtraOutput.model_construct(value=7)
+        MemberDescriptorType.__set__(
+            _model_extra_storage_descriptor(),
+            replacement,
+            {"tag": "collision", "note": "safe"},
+        )
+        self.item = replacement
+        TAGGED_EXTRA_STORAGE_HOOKS.clear()
+        return self
+
+
 MODEL_DICT_STORAGE_HOOKS: list[str] = []
 
 
@@ -726,6 +779,17 @@ def test_model_extra_property_cannot_hide_nested_collision():
         ).validate_python({"payload": {"item": {"value": 7}}})
 
     assert MODEL_EXTRA_STORAGE_HOOKS == []
+
+
+def test_tagged_union_discriminator_uses_trusted_extra_storage():
+    TAGGED_EXTRA_STORAGE_HOOKS.clear()
+
+    result = _compile_output_validator(
+        TypeAdapter(ReplacingTaggedExtraStorageEnvelope)
+    ).validate_python({"item": {"tag": "collision", "value": 7}})
+
+    assert result.item.value == 7
+    assert TAGGED_EXTRA_STORAGE_HOOKS == []
 
 
 def test_model_dict_property_cannot_hide_nested_collision():
