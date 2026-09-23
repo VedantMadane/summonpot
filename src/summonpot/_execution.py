@@ -99,6 +99,7 @@ class _ProjectionSchema:
     allow_extras: bool = False
     instance_dict: GetSetDescriptorType | None = None
     literal_values: tuple[Any, ...] = ()
+    enum_members: tuple[tuple[Any, Any], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -388,6 +389,13 @@ def _compile_projection_schema(source: Any) -> _ProjectionSchema:
         )
     if kind == "literal":
         return _ProjectionSchema(kind, literal_values=tuple(source.get("expected", ())))
+    if kind == "enum":
+        members: list[tuple[Any, Any]] = []
+        for member in source.get("members", ()):
+            raw_value = object.__getattribute__(member, "_value_")
+            if type(raw_value) in (type(None), bool, int, float, str, bytes):
+                members.append((member, raw_value))
+        return _ProjectionSchema(kind, enum_members=tuple(members))
     if kind in {
         "default",
         "function-before",
@@ -458,6 +466,16 @@ def _inert_transport_value(
             )
         if schema.kind == "nullable" and value is None:
             return None
+        if schema.kind == "enum":
+            for member, projected in schema.enum_members:
+                if value is member:
+                    return _inert_transport_value(
+                        projected,
+                        ancestors,
+                        native=native,
+                        definitions=definitions,
+                    )
+            return _UNAVAILABLE
     kind = type(value)
     if kind is UUID and type(value.int) is int and 0 <= value.int < 1 << 128:
         # UUID can be changed through object.__setattr__, so never share it.
@@ -701,8 +719,16 @@ def _projection_schema_applies(
     value: Any,
     schema: _ProjectionSchema,
     definitions: Mapping[str, _ProjectionSchema],
+    depth: int = 0,
+    seen: frozenset[tuple[int, int]] = frozenset(),
 ) -> bool:
     """Match a value to a declared branch without application dispatch."""
+    marker = (id(value), id(schema))
+    if depth >= 64 or marker in seen:
+        # Rendering has the same bound and replaces the uninspected tail with an
+        # inert sentinel, so applicability may conservatively retain this branch.
+        return True
+    seen = seen | {marker}
     while (
         schema.kind == "ref"
         and schema.reference is not None
@@ -712,11 +738,13 @@ def _projection_schema_applies(
     if schema.kind == "nullable":
         return value is None or (
             schema.item is not None
-            and _projection_schema_applies(value, schema.item, definitions)
+            and _projection_schema_applies(
+                value, schema.item, definitions, depth + 1, seen
+            )
         )
     if schema.kind == "union":
         return any(
-            _projection_schema_applies(value, choice, definitions)
+            _projection_schema_applies(value, choice, definitions, depth + 1, seen)
             for choice in schema.choices
         )
     if schema.kind == "any":
@@ -731,6 +759,8 @@ def _projection_schema_applies(
             )
             for expected in schema.literal_values
         )
+    if schema.kind == "enum":
+        return any(value is member for member, _ in schema.enum_members)
 
     kind = type(value)
     runtime_mro = type.__getattribute__(kind, "__mro__")
@@ -765,7 +795,9 @@ def _projection_schema_applies(
             kind is expected_kind
             and schema.item is not None
             and all(
-                _projection_schema_applies(item, schema.item, definitions)
+                _projection_schema_applies(
+                    item, schema.item, definitions, depth + 1, seen
+                )
                 for item in value
             )
         )
@@ -774,7 +806,11 @@ def _projection_schema_applies(
             return False
         return all(
             _projection_schema_applies(
-                item, schema.items[min(index, len(schema.items) - 1)], definitions
+                item,
+                schema.items[min(index, len(schema.items) - 1)],
+                definitions,
+                depth + 1,
+                seen,
             )
             for index, item in enumerate(value)
         )
@@ -784,8 +820,12 @@ def _projection_schema_applies(
             and schema.keys is not None
             and schema.values is not None
             and all(
-                _projection_schema_applies(key, schema.keys, definitions)
-                and _projection_schema_applies(item, schema.values, definitions)
+                _projection_schema_applies(
+                    key, schema.keys, definitions, depth + 1, seen
+                )
+                and _projection_schema_applies(
+                    item, schema.values, definitions, depth + 1, seen
+                )
                 for key, item in value.items()
             )
         )
@@ -798,7 +838,11 @@ def _projection_schema_applies(
         ) or not all(
             not dict.__contains__(value, field.name)
             or _projection_schema_applies(
-                dict.__getitem__(value, field.name), field.schema, definitions
+                dict.__getitem__(value, field.name),
+                field.schema,
+                definitions,
+                depth + 1,
+                seen,
             )
             for field in schema.fields
         ):
@@ -811,7 +855,9 @@ def _projection_schema_applies(
             schema.allow_extras
             and schema.extras is not None
             and all(
-                _projection_schema_applies(item, schema.extras, definitions)
+                _projection_schema_applies(
+                    item, schema.extras, definitions, depth + 1, seen
+                )
                 for item in extras
             )
         )

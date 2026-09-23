@@ -6,6 +6,7 @@ import asyncio
 from collections import UserDict
 from collections.abc import Mapping
 from dataclasses import dataclass, field, make_dataclass
+from enum import Enum
 from typing import Annotated, Any, Literal
 
 import pytest
@@ -25,7 +26,7 @@ from pydantic import (
 )
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart, UserPromptPart
 from pydantic_ai.models.function import FunctionModel
-from typing_extensions import TypedDict
+from typing_extensions import TypeAliasType, TypedDict
 
 from summonpot import Exactly, FromRequest, Operation, Required, Summon
 from summonpot.runtime import Runtime
@@ -34,6 +35,12 @@ from summonpot.server import build_app
 
 class Result(BaseModel):
     value: int
+
+
+RecursiveJson = TypeAliasType(
+    "RecursiveJson",
+    "dict[str, RecursiveJson] | list[RecursiveJson] | str | int | None",
+)
 
 
 def _scalar_service(
@@ -2805,3 +2812,69 @@ def test_typed_dict_with_allowed_extras_retains_admitted_values_in_prompt():
     )
 
     assert '  value: {"count": 1, "note": "admitted"}' in prompts[0]
+
+
+def test_enum_union_projection_matches_http_without_application_hooks():
+    hooks: list[str] = []
+
+    class Color(str, Enum):  # noqa: UP042 - regression covers classic str Enum
+        red = "red"
+
+        def __eq__(self, other: object) -> bool:
+            hooks.append("equality")
+            return str.__eq__(self, other)
+
+        def __hash__(self) -> int:
+            hooks.append("hash")
+            return str.__hash__(self)
+
+        def __str__(self) -> str:
+            hooks.append("serialization")
+            return str.__str__(self)
+
+    class DirectRequest(BaseModel):
+        value: Color | int
+
+        @model_validator(mode="after")
+        def start_projection_probe(self) -> DirectRequest:
+            hooks.clear()
+            return self
+
+    class Wrapped(TypedDict):
+        color: Color
+
+    class WrappedRequest(BaseModel):
+        value: Wrapped | int
+
+        @model_validator(mode="after")
+        def start_projection_probe(self) -> WrappedRequest:
+            hooks.clear()
+            return self
+
+    direct_prompts = _raw_http_agent_prompts(
+        DirectRequest, {"value": "red"}, "/enum-union-prompt"
+    )
+    wrapped_prompts = _raw_http_agent_prompts(
+        WrappedRequest,
+        {"value": {"color": "red"}},
+        "/typed-dict-enum-union-prompt",
+    )
+
+    assert '  value: "red"' in direct_prompts[0]
+    assert '  value: {"color": "red"}' in wrapped_prompts[0]
+    assert hooks == []
+
+
+def test_deep_recursive_union_projection_is_bounded_and_matches_http():
+    class Request(BaseModel):
+        value: RecursiveJson
+
+    value: Any = 1
+    for _ in range(200):
+        value = [value]
+
+    prompts = _raw_http_agent_prompts(
+        Request, {"value": value}, "/deep-recursive-union-prompt"
+    )
+
+    assert "<unavailable>" in prompts[0]
