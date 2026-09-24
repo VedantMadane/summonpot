@@ -18,7 +18,11 @@ from weakref import ReferenceType, ref
 from pydantic import BaseModel, TypeAdapter
 from pydantic_core import SchemaValidator, TzInfo
 
-from summonpot._output_validation import _compile_output_validator
+from summonpot._output_validation import (
+    _compile_output_auditor,
+    _compile_output_validator,
+    _reject_ambiguous_object_namespaces,
+)
 from summonpot._validation import _enforced_contract_tool_index
 from summonpot.contracts import AgentChoice, FromRequest
 from summonpot.models import EndpointDef, ParamDef, ToolDef
@@ -118,6 +122,7 @@ class _CompiledEndpoint:
     input_model: Any
     input_adapter: TypeAdapter[Any] | None
     output_model: Any
+    output_auditor: Callable[[Any], Any] | None
     model: str | None
     method: str
     operation_id: str
@@ -289,6 +294,21 @@ def _compile_endpoint(
 ) -> _CompiledEndpoint:
     """Snapshot validated endpoint metadata into an immutable runtime plan."""
     source_tools = tuple(endpoint.tools)
+    output_adapter = (
+        TypeAdapter(endpoint.output_model)
+        if endpoint.output_model is not None
+        else None
+    )
+    output_shapes = [
+        *(
+            tool.contract.output
+            for tool in source_tools
+            if tool.contract is not None and tool.contract.output is not None
+        ),
+    ]
+    for output in output_shapes:
+        if output is not None:
+            _reject_ambiguous_object_namespaces(TypeAdapter(output).core_schema)
     enforce_index = _enforced_contract_tool_index(source_tools)
     direct_index = (
         _direct_tool_index(endpoint, source_tools, enforce_index)
@@ -317,6 +337,11 @@ def _compile_endpoint(
             else None
         ),
         output_model=endpoint.output_model,
+        output_auditor=(
+            _compile_output_auditor(output_adapter)
+            if output_adapter is not None
+            else None
+        ),
         model=endpoint.model,
         method=endpoint.method,
         operation_id=endpoint.operation_id,
