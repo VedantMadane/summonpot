@@ -587,7 +587,9 @@ def _runtime_model_extra_collision_auditor(schema: Any) -> Any:
             )
         return extras
 
-    def reject_runtime_model_namespace(model_type: type[BaseModel]) -> None:
+    def reject_runtime_model_namespace(
+        model_type: type[BaseModel],
+    ) -> tuple[set[str], set[str]]:
         """Reject duplicate emitted keys owned by a safely discovered model type."""
         fields = type.__getattribute__(model_type, "__pydantic_fields__")
         computed_fields = type.__getattribute__(
@@ -616,6 +618,7 @@ def _runtime_model_extra_collision_auditor(schema: Any) -> Any:
                     f"as duplicate JSON key {key!r}"
                 )
             emitted[key] = name
+        return set(dict.__iter__(fields)), set(dict.__iter__(emitted))
 
     def dataclass_storage(value: Any) -> tuple[dict[Any, Any], ...]:
         """Read dict and slot state while bypassing application state hooks."""
@@ -1180,21 +1183,8 @@ def _runtime_model_extra_collision_auditor(schema: Any) -> Any:
                     return
                 seen.add(identity)
                 model_type = type(current)
-                reject_runtime_model_namespace(model_type)
-                emitted = {
-                    field.serialization_alias
-                    if field.serialization_alias is not None
-                    else name
-                    for name, field in model_type.model_fields.items()
-                    if not field.exclude
-                }
-                emitted.update(
-                    field.alias if field.alias is not None else name
-                    for name, field in model_type.model_computed_fields.items()
-                )
-                extras = reject_model_extra_collisions(
-                    current, set(model_type.model_fields), emitted
-                )
+                field_names, emitted = reject_runtime_model_namespace(model_type)
+                extras = reject_model_extra_collisions(current, field_names, emitted)
                 storage = model_dict_storage(current)
                 for item in dict.values(storage):
                     inspect(item)

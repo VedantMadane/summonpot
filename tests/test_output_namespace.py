@@ -3138,3 +3138,45 @@ def test_runtime_model_in_untyped_extra_preserves_unique_emitted_keys():
         "value": 1,
         "inner": {"value": 5, "doubledValue": 10},
     }
+
+
+@pytest.mark.parametrize("colliding", [True, False])
+def test_runtime_model_namespace_audit_bypasses_application_metaclass(
+    colliding: bool,
+):
+    hooks: list[str] = []
+
+    class HostileModelMeta(type(BaseModel)):
+        def __getattribute__(cls, name: str) -> Any:
+            if name in {"model_fields", "model_computed_fields"}:
+                hooks.append(name)
+                return {}
+            return super().__getattribute__(name)
+
+    class AliasedModel(BaseModel, metaclass=HostileModelMeta):
+        model_config = ConfigDict(extra="allow")
+        value: int = Field(serialization_alias="wire")
+
+    class HolderModel(BaseModel):
+        model_config = ConfigDict(extra="allow")
+        value: int
+
+    extra_name = "wire" if colliding else "note"
+    inner = AliasedModel.model_validate({"value": 1, extra_name: 99})
+    result = HolderModel.model_validate({"value": 2, "inner": inner})
+    hooks.clear()
+    summon = _direct_summon(HolderModel, result)
+    response = TestClient(build_app(summon), raise_server_exceptions=False).post(
+        "/output", json={"value": 7}
+    )
+
+    assert hooks == []
+    if colliding:
+        assert response.status_code == 500
+        assert response.text.count('"wire"') == 0
+    else:
+        assert response.status_code == 200, response.text
+        assert response.json() == {
+            "value": 2,
+            "inner": {"wire": 1, "note": 99},
+        }
