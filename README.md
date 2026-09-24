@@ -471,6 +471,15 @@ Runtime-enforced model output also rejects allowed extras from instances or raw 
 shadow a canonical field or emitted alias, while retaining noncolliding validated extras. This namespace admission does not imply runtime
 structural validation for broader operation graphs, whose execution remains unsupported.
 
+Raw `Runtime.call(endpoint, mapping)` invocations validate that mapping once against the
+same declared request contract as HTTP, including required fields, defaults, aliases, and
+canonical typed values for both Pydantic request models and individual parameters. The HTTP
+adapter still validates at its transport boundary and hands its plan-bound value graph to the
+runtime once; runtime preparation does not rerun those validators. Raw preparation does not
+render canonical values through Pydantic field serializers or application copy/string hooks.
+Parameterless endpoints accept only an empty raw mapping, rejecting undeclared keys before
+model execution or application value hooks; their HTTP routes expose no request fields.
+
 Pydantic AI is an internal runtime dependency. Applications use `Summon`, `@summon`,
 Pydantic models, and declarative capabilities; they do not construct provider clients or
 Pydantic AI agents.

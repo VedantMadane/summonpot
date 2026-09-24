@@ -13,12 +13,11 @@ from collections import deque
 from collections.abc import Callable
 from contextlib import suppress
 from contextvars import ContextVar
-from dataclasses import is_dataclass
 from types import GetSetDescriptorType, MemberDescriptorType
 from typing import Any, cast
 
-from pydantic import BaseModel, TypeAdapter
-from pydantic_core import SchemaValidator, core_schema
+from pydantic import BaseModel, TypeAdapter, ValidationError
+from pydantic_core import PydanticCustomError, SchemaValidator, core_schema
 
 _mapping_namespaces: ContextVar[
     dict[int, tuple[dict[Any, Any], frozenset[str], frozenset[str]]] | None
@@ -28,8 +27,7 @@ _mapping_namespaces: ContextVar[
 def _input_kind(value: Any) -> str:
     return (
         "instance"
-        if isinstance(value, BaseModel)
-        or (is_dataclass(value) and not isinstance(value, type))
+        if isinstance(value, BaseModel) or _is_dataclass_instance(value)
         else "input"
     )
 
@@ -1296,7 +1294,11 @@ def _separate_typed_dict_extras(schema: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def _revalidating_schema(node: Any) -> Any:
+def _revalidating_schema(
+    node: Any,
+    *,
+    reject_custom_init: bool = True,
+) -> Any:
     """Copy schema containers, retaining classes, hooks and definition references.
 
     Model instances hold canonical field names; mappings must retain their
@@ -1305,12 +1307,16 @@ def _revalidating_schema(node: Any) -> Any:
     globally. Any schemas deliberately remain Any: do not traverse runtime data.
     """
     if isinstance(node, dict):
-        if node.get("type") == "model" and node.get("custom_init"):
+        if (
+            reject_custom_init
+            and node.get("type") == "model"
+            and node.get("custom_init")
+        ):
             # Core invokes custom constructors even with _use_prebuilt=False.
             # A normal super().__init__ call then re-enters the original class
             # validator, bypassing our nested instance revalidation. Disabling
             # custom_init would silently discard mapping-input transformations;
-            # reject the unsupported contract at registration instead.
+            # reject the unsupported output contract at registration instead.
             cls = node["cls"]
             raise TypeError(
                 f"Output model {cls.__qualname__!r} uses a custom __init__, which "
@@ -1321,7 +1327,10 @@ def _revalidating_schema(node: Any) -> Any:
         result = {
             key: value
             if is_schema and key in {"default", "metadata", "config", "serialization"}
-            else _revalidating_schema(value)
+            else _revalidating_schema(
+                value,
+                reject_custom_init=reject_custom_init,
+            )
             for key, value in node.items()
         }
         if (
@@ -1362,9 +1371,21 @@ def _revalidating_schema(node: Any) -> Any:
             branch["ref"] = reference
         return branch
     if isinstance(node, list):
-        return [_revalidating_schema(value) for value in node]
+        return [
+            _revalidating_schema(
+                value,
+                reject_custom_init=reject_custom_init,
+            )
+            for value in node
+        ]
     if isinstance(node, tuple):
-        return tuple(_revalidating_schema(value) for value in node)
+        return tuple(
+            _revalidating_schema(
+                value,
+                reject_custom_init=reject_custom_init,
+            )
+            for value in node
+        )
     return node
 
 
@@ -1388,6 +1409,115 @@ def _compile_output_validator(adapter: TypeAdapter[Any]) -> SchemaValidator:
     # REQUIRED: prebuilt class validators bypass our nested model branches and
     # revalidation policy. This private flag is covered by nested/recursive tests.
     return SchemaValidator(schema, _use_prebuilt=False)
+
+
+def _compile_input_validator(adapter: TypeAdapter[Any]) -> SchemaValidator:
+    """Compile request admission while preserving Pydantic custom constructors."""
+    source = adapter.core_schema
+    if _contains_custom_init(source):
+        # Pydantic custom constructors accept nested model instances without
+        # revalidating them. A second model pass cannot repair that safely: it
+        # repeats outer hooks/post-init and can validate a converted replacement
+        # while returning the unchecked original. Reject such raw graphs before
+        # any application constructor runs; callers can provide the equivalent
+        # mapping, which follows the same one-pass path as HTTP JSON.
+        schema = core_schema.no_info_before_validator_function(
+            _reject_nested_model_instances,
+            cast(core_schema.CoreSchema, source),
+        )
+    else:
+        schema = cast(
+            core_schema.CoreSchema,
+            _revalidating_schema(source, reject_custom_init=False),
+        )
+    return SchemaValidator(schema, _use_prebuilt=False)
+
+
+def _reject_nested_model_instances(value: Any) -> Any:
+    if _has_nested_model_instance(value):
+        error = PydanticCustomError(
+            "custom_init_model_instance",
+            "raw model instances are unsupported for custom-initialized request "
+            "contracts; provide an equivalent mapping",
+        )
+        raise ValidationError.from_exception_data(
+            "custom-initialized request",
+            [{"type": error, "loc": (), "input": "<unsupported raw value>"}],
+        )
+    return value
+
+
+def _has_nested_model_instance(
+    value: Any, ancestors: frozenset[int] = frozenset()
+) -> bool:
+    if isinstance(value, BaseModel):
+        return True
+    kind = type(value)
+    if kind in (str, bytes):
+        return False
+    if kind not in (dict, list, tuple, set, frozenset):
+        if _is_dataclass_instance(value):
+            # Dataclass fields may be descriptors or slots owned by application
+            # code. Reject the carrier before custom initialization rather than
+            # read arbitrary storage while searching for constructed models.
+            return True
+        # Non-exact containers cannot be traversed without dispatching application
+        # iteration, indexing, or mapping hooks. Detect their protocol statically
+        # through the class dictionaries and fail closed before custom __init__.
+        return _has_static_container_protocol(kind)
+    identity = id(value)
+    if identity in ancestors:
+        return False
+    if len(ancestors) >= 64:
+        # The scan cannot prove a deeper application-owned graph safe. Reject
+        # before a custom constructor can observe it rather than fail open.
+        return True
+    ancestors = ancestors | {identity}
+    if kind is dict:
+        return any(
+            _has_nested_model_instance(key, ancestors)
+            or _has_nested_model_instance(item, ancestors)
+            for key, item in dict.items(value)
+        )
+    return any(_has_nested_model_instance(item, ancestors) for item in value)
+
+
+def _is_dataclass_instance(value: Any) -> bool:
+    """Detect dataclass storage statically, without metaclass/attribute dispatch."""
+    kind = type(value)
+    if kind is type:
+        return False
+    mro = type.__getattribute__(kind, "__mro__")
+    return any(
+        "__dataclass_fields__" in type.__getattribute__(base, "__dict__")
+        for base in mro
+    )
+
+
+def _has_static_container_protocol(kind: type[Any]) -> bool:
+    """Recognize container-like classes without invoking their metaclass or hooks."""
+    protocol = {"__iter__", "__next__", "__getitem__", "items", "keys"}
+    mro = type.__getattribute__(kind, "__mro__")
+    return any(
+        not protocol.isdisjoint(type.__getattribute__(base, "__dict__")) for base in mro
+    )
+
+
+def _contains_custom_init(node: Any) -> bool:
+    if isinstance(node, dict):
+        if node.get("type") == "model" and node.get("custom_init"):
+            return True
+        is_schema = isinstance(node.get("type"), str)
+        return any(
+            _contains_custom_init(value)
+            for key, value in node.items()
+            if not (
+                is_schema and key in {"default", "metadata", "config", "serialization"}
+            )
+        )
+    if isinstance(node, (list, tuple)):
+        return any(_contains_custom_init(value) for value in node)
+    return False
 
 
 def _compile_output_auditor(adapter: TypeAdapter[Any]) -> Callable[[Any], Any]:
