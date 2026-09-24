@@ -2921,3 +2921,71 @@ def test_nested_nullable_union_budget_cannot_select_private_runtime_branch():
     assert marker not in prompts[0]
     assert "credential" not in prompts[0]
     assert '"visible": 1' in prompts[0]
+
+
+@pytest.mark.parametrize(
+    "parameter_name",
+    [
+        "model_config",
+        "model_fields",
+        "model_computed_fields",
+        "model_extra",
+        "__base__",
+        "__config__",
+        "__validators__",
+        "__cls_kwargs__",
+    ],
+)
+@pytest.mark.parametrize("method", ["GET", "POST"])
+def test_reserved_parameter_names_register_and_match_raw_http_contract(
+    parameter_name: str, method: str
+):
+    prompts: list[str] = []
+
+    def model(messages, info):
+        prompt = next(
+            part.content
+            for message in messages
+            for part in message.parts
+            if isinstance(part, UserPromptPart)
+        )
+        assert type(prompt) is str
+        prompts.append(prompt)
+        return ModelResponse(parts=[TextPart("ready")])
+
+    def service(name: str) -> Summon:
+        summon = Summon(name)
+        summon._runtime = Runtime(model=FunctionModel(model))
+        namespace: dict[str, Any] = {}
+        exec(
+            compile(
+                f"def endpoint({parameter_name}: int) -> str:\n    return Ellipsis\n",
+                "<reserved-parameter>",
+                "exec",
+                dont_inherit=True,
+            ),
+            namespace,
+        )
+        endpoint = namespace["endpoint"]
+        endpoint.__doc__ = "Inspect one reserved-name parameter."
+        summon("/reserved", method=method)(endpoint)
+        return summon
+
+    raw = service(f"reserved-{parameter_name}-{method.lower()}-raw")
+    assert (
+        asyncio.run(raw._runtime.call(raw.endpoints[0], {parameter_name: "7"}))
+        == "ready"
+    )
+
+    http = service(f"reserved-{parameter_name}-{method.lower()}-http")
+    client = TestClient(build_app(http))
+    response = (
+        client.get("/reserved", params={parameter_name: "7"})
+        if method == "GET"
+        else client.post("/reserved", json={parameter_name: "7"})
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json() == "ready"
+    assert prompts[0] == prompts[1]
+    assert f"  {parameter_name}: 7" in prompts[0]

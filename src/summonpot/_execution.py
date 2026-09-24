@@ -16,6 +16,7 @@ from uuid import UUID
 from weakref import ReferenceType, ref
 
 from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError, create_model
+from pydantic.fields import FieldInfo
 from pydantic_core import PydanticCustomError, SchemaValidator, TzInfo
 
 from summonpot._output_validation import (
@@ -147,6 +148,7 @@ class _CompiledEndpoint:
     parameters: tuple[_CompiledParameter, ...]
     input_model: Any
     input_adapter: TypeAdapter[Any]
+    input_field_names: Mapping[str, str] | None
     input_validator: SchemaValidator
     prompt_schema: _ProjectionSchema
     prompt_definitions: Mapping[str, _ProjectionSchema]
@@ -1021,7 +1023,7 @@ def _compile_endpoint(
         )
         for index, tool in enumerate(source_tools)
     )
-    input_adapter = _compile_input_adapter(endpoint)
+    input_adapter, input_field_names = _compile_input_adapter(endpoint)
     prompt_schema, prompt_definitions = _compile_projection_contract(
         input_adapter.core_schema
     )
@@ -1033,6 +1035,7 @@ def _compile_endpoint(
         parameters=tuple(_compile_parameter(param) for param in endpoint.parameters),
         input_model=endpoint.input_model,
         input_adapter=input_adapter,
+        input_field_names=input_field_names,
         input_validator=_compile_input_validator(input_adapter),
         prompt_schema=prompt_schema,
         prompt_definitions=prompt_definitions,
@@ -1046,31 +1049,65 @@ def _compile_endpoint(
     )
 
 
-def _compile_input_adapter(endpoint: EndpointDef) -> TypeAdapter[Any]:
+def _compile_input_adapter(
+    endpoint: EndpointDef,
+) -> tuple[TypeAdapter[Any], Mapping[str, str] | None]:
     """Compile the request contract used by raw runtime callers."""
     if endpoint.input_model is not None:
-        return TypeAdapter(endpoint.input_model)
+        return TypeAdapter(endpoint.input_model), None
     if not endpoint.parameters:
         empty_model = create_model(
             f"{endpoint.name}RuntimeRequest",
             __config__=ConfigDict(extra="forbid"),
         )
-        return TypeAdapter(empty_model)
-    fields: dict[str, tuple[Any, Any]] = {
-        parameter.name: (
-            parameter.annotation
-            if parameter.annotation is not None
-            and not isinstance(parameter.annotation, str)
-            else Any,
-            ... if parameter.required else parameter.default,
-        )
-        for parameter in endpoint.parameters
-    }
-    request_model = create_model(
+        return TypeAdapter(empty_model), MappingProxyType({})
+    request_model, field_names = _create_parameter_model(
         f"{endpoint.name}RuntimeRequest",
+        [
+            (
+                parameter.name,
+                parameter.annotation
+                if parameter.annotation is not None
+                and not isinstance(parameter.annotation, str)
+                else Any,
+                parameter.required,
+                parameter.default,
+            )
+            for parameter in endpoint.parameters
+        ],
+    )
+    return TypeAdapter(request_model), field_names
+
+
+def _create_parameter_model(
+    model_name: str,
+    parameters: Sequence[tuple[str, Any, bool, Any]],
+) -> tuple[type[BaseModel], Mapping[str, str]]:
+    """Create an aliased model without exposing public names to model internals."""
+    fields: dict[str, tuple[Any, Any]] = {}
+    field_names: dict[str, str] = {}
+    for index, (name, annotation, required, parameter_default) in enumerate(parameters):
+        reserved = name in inspect.signature(create_model).parameters or any(
+            name in type.__getattribute__(base, "__dict__")
+            for base in type.__getattribute__(BaseModel, "__mro__")
+        )
+        internal_name = f"summonpot_field_{index}" if reserved else name
+        default = ... if required else parameter_default
+        field = FieldInfo.from_annotated_attribute(
+            annotation,
+            default,  # pyright: ignore[reportArgumentType]
+        )
+        if reserved and field.validation_alias is None:
+            field.validation_alias = name
+        if reserved and field.serialization_alias is None:
+            field.serialization_alias = name
+        fields[internal_name] = (field.annotation or annotation, field)
+        field_names[internal_name] = name
+    request_model = create_model(
+        model_name,
         **fields,  # pyright: ignore[reportArgumentType, reportCallIssue]
     )
-    return TypeAdapter(request_model)
+    return request_model, MappingProxyType(field_names)
 
 
 def _direct_tool_index(
@@ -1716,7 +1753,9 @@ def _prepare_request(
             "validated request has unsupported canonical storage",
         )
     typed = {
-        name: dict.__getitem__(storage, name)
+        (
+            plan.input_field_names[name] if plan.input_field_names is not None else name
+        ): dict.__getitem__(storage, name)
         for name in fields
         if dict.__contains__(storage, name)
     }
