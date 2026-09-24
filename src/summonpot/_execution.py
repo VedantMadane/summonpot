@@ -1082,24 +1082,50 @@ def _compile_input_adapter(
 def _create_parameter_model(
     model_name: str,
     parameters: Sequence[tuple[str, Any, bool, Any]],
+    *,
+    all_parameter_names: Sequence[str] | None = None,
 ) -> tuple[type[BaseModel], Mapping[str, str]]:
     """Create an aliased model without exposing public names to model internals."""
     fields: dict[str, tuple[Any, Any]] = {}
     field_names: dict[str, str] = {}
-    for index, (name, annotation, required, parameter_default) in enumerate(parameters):
-        reserved = name in inspect.signature(create_model).parameters or any(
-            name in type.__getattribute__(base, "__dict__")
-            for base in type.__getattribute__(BaseModel, "__mro__")
+    public_names = (
+        tuple(all_parameter_names)
+        if all_parameter_names is not None
+        else tuple(name for name, *_ in parameters)
+    )
+    public_name_set = set(public_names)
+    internal_names: dict[str, str] = {}
+    occupied: set[str] = set()
+    for index, name in enumerate(public_names):
+        reserved = (
+            name.startswith("_")
+            or name in inspect.signature(create_model).parameters
+            or any(
+                name in type.__getattribute__(base, "__dict__")
+                for base in type.__getattribute__(BaseModel, "__mro__")
+            )
         )
-        internal_name = f"summonpot_field_{index}" if reserved else name
+        internal_name = name
+        if reserved:
+            candidate_index = index
+            internal_name = f"summonpot_field_{candidate_index}"
+            while internal_name in public_name_set or internal_name in occupied:
+                candidate_index += 1
+                internal_name = f"summonpot_field_{candidate_index}"
+        internal_names[name] = internal_name
+        occupied.add(internal_name)
+
+    for name, annotation, required, parameter_default in parameters:
+        internal_name = internal_names[name]
+        aliased = internal_name != name
         default = ... if required else parameter_default
         field = FieldInfo.from_annotated_attribute(
             annotation,
             default,  # pyright: ignore[reportArgumentType]
         )
-        if reserved and field.validation_alias is None:
+        if aliased and field.validation_alias is None:
             field.validation_alias = name
-        if reserved and field.serialization_alias is None:
+        if aliased and field.serialization_alias is None:
             field.serialization_alias = name
         fields[internal_name] = (field.annotation or annotation, field)
         field_names[internal_name] = name

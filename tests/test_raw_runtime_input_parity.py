@@ -2934,6 +2934,8 @@ def test_nested_nullable_union_budget_cannot_select_private_runtime_branch():
         "__config__",
         "__validators__",
         "__cls_kwargs__",
+        "_value",
+        "_private_name",
     ],
 )
 @pytest.mark.parametrize("method", ["GET", "POST"])
@@ -2989,3 +2991,45 @@ def test_reserved_parameter_names_register_and_match_raw_http_contract(
     assert response.json() == "ready"
     assert prompts[0] == prompts[1]
     assert f"  {parameter_name}: 7" in prompts[0]
+
+
+def test_reserved_internal_names_stay_stable_across_path_and_body_models():
+    prompts: list[str] = []
+
+    def model(messages, info):
+        prompt = next(
+            part.content
+            for message in messages
+            for part in message.parts
+            if isinstance(part, UserPromptPart)
+        )
+        assert type(prompt) is str
+        prompts.append(prompt)
+        return ModelResponse(parts=[TextPart("ready")])
+
+    def service(name: str) -> Summon:
+        summon = Summon(name)
+        summon._runtime = Runtime(model=FunctionModel(model))
+
+        @summon("/items/{item_id}", method="POST")
+        def endpoint(item_id: int, model_config: int, summonpot_field_0: int) -> str:
+            """Inspect path and body parameters with colliding public names."""
+            ...
+
+        return summon
+
+    values = {"item_id": "1", "model_config": "2", "summonpot_field_0": "3"}
+    raw = service("reserved-path-body-raw")
+    assert asyncio.run(raw._runtime.call(raw.endpoints[0], values)) == "ready"
+
+    http = service("reserved-path-body-http")
+    response = TestClient(build_app(http)).post(
+        "/items/1", json={"model_config": "2", "summonpot_field_0": "3"}
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json() == "ready"
+    for prompt in prompts:
+        assert "  item_id: 1" in prompt
+        assert "  model_config: 2" in prompt
+        assert "  summonpot_field_0: 3" in prompt

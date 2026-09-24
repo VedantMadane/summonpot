@@ -94,6 +94,7 @@ def build_app(summon: Summon) -> Any:
                         (p.name, _field_type(p), p.required, p.default)
                         for p in _body_parameters(definition)
                     ],
+                    all_parameter_names=[p.name for p in definition.parameters],
                 )
 
             _handle_with_body = _make_body_handler(
