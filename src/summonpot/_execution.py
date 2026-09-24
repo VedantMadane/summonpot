@@ -19,6 +19,7 @@ from pydantic import BaseModel, TypeAdapter
 from pydantic_core import SchemaValidator, TzInfo
 
 from summonpot._output_validation import (
+    _compile_output_auditor,
     _compile_output_validator,
     _reject_ambiguous_object_namespaces,
 )
@@ -121,6 +122,7 @@ class _CompiledEndpoint:
     input_model: Any
     input_adapter: TypeAdapter[Any] | None
     output_model: Any
+    output_auditor: Callable[[Any], Any] | None
     model: str | None
     method: str
     operation_id: str
@@ -292,8 +294,12 @@ def _compile_endpoint(
 ) -> _CompiledEndpoint:
     """Snapshot validated endpoint metadata into an immutable runtime plan."""
     source_tools = tuple(endpoint.tools)
+    output_adapter = (
+        TypeAdapter(endpoint.output_model)
+        if endpoint.output_model is not None
+        else None
+    )
     output_shapes = [
-        endpoint.output_model,
         *(
             tool.contract.output
             for tool in source_tools
@@ -331,6 +337,11 @@ def _compile_endpoint(
             else None
         ),
         output_model=endpoint.output_model,
+        output_auditor=(
+            _compile_output_auditor(output_adapter)
+            if output_adapter is not None
+            else None
+        ),
         model=endpoint.model,
         method=endpoint.method,
         operation_id=endpoint.operation_id,

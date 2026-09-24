@@ -273,7 +273,8 @@ class Runtime:
         output = result.output
 
         if plan.output_model is not None:
-            return output
+            assert plan.output_auditor is not None
+            return plan.output_auditor(output)
         if plan.return_type.lower() not in ("str", "string", "any"):
             try:
                 return json.loads(output)

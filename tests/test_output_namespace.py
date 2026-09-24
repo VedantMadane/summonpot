@@ -25,6 +25,7 @@ from pydantic import (
     model_validator,
 )
 from pydantic.dataclasses import dataclass
+from pydantic_ai.models.test import TestModel
 from typing_extensions import TypedDict
 
 from summonpot import Exactly, FromRequest, Operation, Required, Summon
@@ -3018,3 +3019,122 @@ def test_safe_namespaces_do_not_bypass_fail_closed_runtime_admission():
             ...
 
     assert summon.endpoints == []
+
+
+def test_agent_endpoint_output_rejects_alias_shadowing_before_http_serialization():
+    summon = Summon("agent-output-namespace")
+    summon._runtime = Runtime(
+        model=TestModel(custom_output_args={"wireValue": 1, "value": 99})
+    )
+
+    @summon("/agent-output")
+    def endpoint(request: Request) -> AliasedExtraOutput:
+        """Return one namespace-safe agent result."""
+        ...
+
+    response = TestClient(build_app(summon), raise_server_exceptions=False).post(
+        "/agent-output", json={"value": 7}
+    )
+
+    assert response.status_code == 500
+    assert response.text.count('"wireValue"') == 0
+
+
+def test_agent_endpoint_output_preserves_noncolliding_extras():
+    summon = Summon("agent-output-namespace-safe")
+    summon._runtime = Runtime(
+        model=TestModel(custom_output_args={"value": 1, "note": "safe"})
+    )
+
+    @summon("/agent-output")
+    def endpoint(request: Request) -> AliasedExtraOutput:
+        """Return one namespace-safe agent result."""
+        ...
+
+    response = TestClient(build_app(summon)).post("/agent-output", json={"value": 7})
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"wireValue": 1, "note": "safe"}
+
+
+def test_missing_required_typed_dict_field_cannot_disable_collision_audit():
+    class RequiredOutput(TypedDict):
+        alpha: Annotated[int, Field(serialization_alias="alphaWire")]
+        beta: int
+
+    RequiredOutput.__pydantic_config__ = ConfigDict(extra="allow")  # type: ignore[attr-defined]
+
+    class Envelope(BaseModel):
+        item: RequiredOutput
+
+        @model_validator(mode="after")
+        def replace_item(self) -> "Envelope":
+            self.item = {"alpha": 1, "alphaWire": 99}  # type: ignore[assignment,typeddict-unknown-key]
+            return self
+
+    validator = _compile_output_validator(TypeAdapter(Envelope))
+    with pytest.raises(ValidationError, match=r"missing required fields.*beta"):
+        validator.validate_python({"item": {"alpha": 1, "beta": 2}})
+
+    result = {"item": {"alpha": 1, "beta": 2}}
+    direct = _direct_summon(Envelope, result)
+    with pytest.raises(_OperationOutputError):
+        asyncio.run(direct._runtime.call(direct.endpoints[0], {"value": 7}))
+
+    http = _direct_summon(Envelope, result)
+    response = TestClient(build_app(http), raise_server_exceptions=False).post(
+        "/output", json={"value": 7}
+    )
+    assert response.status_code == 500
+    assert response.text.count('"alphaWire"') == 0
+
+
+def test_runtime_model_in_untyped_extra_cannot_own_duplicate_emitted_keys():
+    class SelfCollidingModel(BaseModel):
+        value: int
+
+        @computed_field(alias="value")
+        @property
+        def doubled(self) -> int:
+            return self.value * 2
+
+    class HolderModel(BaseModel):
+        model_config = ConfigDict(extra="allow")
+        value: int
+
+    result = HolderModel.model_validate(
+        {"value": 1, "inner": SelfCollidingModel(value=5)}
+    )
+    summon = _direct_summon(HolderModel, result)
+    response = TestClient(build_app(summon), raise_server_exceptions=False).post(
+        "/output", json={"value": 7}
+    )
+
+    assert response.status_code == 500
+    assert response.text.count('"value"') == 0
+
+
+def test_runtime_model_in_untyped_extra_preserves_unique_emitted_keys():
+    class SafeComputedModel(BaseModel):
+        value: int
+
+        @computed_field(alias="doubledValue")
+        @property
+        def doubled(self) -> int:
+            return self.value * 2
+
+    class HolderModel(BaseModel):
+        model_config = ConfigDict(extra="allow")
+        value: int
+
+    result = HolderModel.model_validate(
+        {"value": 1, "inner": SafeComputedModel(value=5)}
+    )
+    summon = _direct_summon(HolderModel, result)
+    response = TestClient(build_app(summon)).post("/output", json={"value": 7})
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "value": 1,
+        "inner": {"value": 5, "doubledValue": 10},
+    }

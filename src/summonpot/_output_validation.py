@@ -10,6 +10,7 @@ fall back to the original adapter if compilation fails.
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Callable
 from contextlib import suppress
 from contextvars import ContextVar
 from dataclasses import is_dataclass
@@ -586,6 +587,36 @@ def _runtime_model_extra_collision_auditor(schema: Any) -> Any:
             )
         return extras
 
+    def reject_runtime_model_namespace(model_type: type[BaseModel]) -> None:
+        """Reject duplicate emitted keys owned by a safely discovered model type."""
+        fields = type.__getattribute__(model_type, "__pydantic_fields__")
+        computed_fields = type.__getattribute__(
+            model_type, "__pydantic_computed_fields__"
+        )
+        emitted: dict[str, str] = {}
+        for name, field in dict.items(fields):
+            if object.__getattribute__(field, "exclude"):
+                continue
+            alias = object.__getattribute__(field, "serialization_alias")
+            key = name if alias is None else alias
+            previous = emitted.get(key)
+            if previous is not None:
+                raise ValueError(
+                    f"output model emits fields {previous!r} and {name!r} "
+                    f"as duplicate JSON key {key!r}"
+                )
+            emitted[key] = name
+        for name, field in dict.items(computed_fields):
+            alias = object.__getattribute__(field, "alias")
+            key = name if alias is None else alias
+            previous = emitted.get(key)
+            if previous is not None:
+                raise ValueError(
+                    f"output model emits fields {previous!r} and {name!r} "
+                    f"as duplicate JSON key {key!r}"
+                )
+            emitted[key] = name
+
     def dataclass_storage(value: Any) -> tuple[dict[Any, Any], ...]:
         """Read dict and slot state while bypassing application state hooks."""
         storages: list[dict[Any, Any]] = []
@@ -1022,7 +1053,13 @@ def _runtime_model_extra_collision_auditor(schema: Any) -> Any:
                     if field.get("required", True)
                 }
                 if not required.issubset(string_values):
-                    return
+                    missing = ", ".join(
+                        repr(name)
+                        for name in sorted(required.difference(string_values))
+                    )
+                    raise ValueError(
+                        f"output TypedDict storage is missing required fields: {missing}"
+                    )
                 extras = set(string_values).difference(field_names)
                 shadowed = emitted_names.intersection(extras)
                 if shadowed:
@@ -1143,6 +1180,7 @@ def _runtime_model_extra_collision_auditor(schema: Any) -> Any:
                     return
                 seen.add(identity)
                 model_type = type(current)
+                reject_runtime_model_namespace(model_type)
                 emitted = {
                     field.serialization_alias
                     if field.serialization_alias is not None
@@ -1360,3 +1398,19 @@ def _compile_output_validator(adapter: TypeAdapter[Any]) -> SchemaValidator:
     # REQUIRED: prebuilt class validators bypass our nested model branches and
     # revalidation policy. This private flag is covered by nested/recursive tests.
     return SchemaValidator(schema, _use_prebuilt=False)
+
+
+def _compile_output_auditor(adapter: TypeAdapter[Any]) -> Callable[[Any], Any]:
+    """Compile a post-validation storage audit for endpoint model output."""
+    _reject_ambiguous_object_namespaces(adapter.core_schema)
+    _reject_callable_output_discriminators(adapter.core_schema)
+    audit = _runtime_model_extra_collision_auditor(adapter.core_schema)
+
+    def validate(value: Any) -> Any:
+        token = _mapping_namespaces.set({})
+        try:
+            return audit(value)
+        finally:
+            _mapping_namespaces.reset(token)
+
+    return validate
