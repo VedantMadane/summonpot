@@ -131,12 +131,22 @@ and no second capability is admitted. `FromRequest` and direct `AgentChoice` are
 runtime-supported binding sources. All other explicit shapes fail before serving; bare
 callable dependencies retain their implicit marker behavior.
 
-### Unreleased / next release boundary
+### 0.9.0 boundary
+
+Version 0.9.0 completes fail-closed runtime admission for explicit capability contracts in
+the shipped single-operation slice, validates receiving operation constraints before
+application code starts, and hardens declared and runtime output namespaces against
+ambiguous or duplicate emitted keys. Unsupported explicit shapes are rejected during
+registration rather than downgraded to the legacy model-supplied path.
 
 Raw runtime mappings use the declared request contract for the same required-field, default,
 alias, and canonical-value semantics as HTTP without rerunning the HTTP adapter's one-shot
 validation. Parameterless endpoints compile an explicit empty raw contract, rejecting
 undeclared keys before application hooks or model execution.
+
+This release does not add result chains, broader deterministic execution, stable typed
+operation-failure mappings, or end-to-end deadline semantics. Those remain in the milestones
+below.
 
 ## Next milestones
 

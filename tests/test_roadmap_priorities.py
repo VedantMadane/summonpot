@@ -68,25 +68,29 @@ def test_fail_closed_admission_is_shipped_not_left_as_a_future_claim():
     assert "unsupported runtime call-bound rejection" in hardening
 
 
-def test_raw_runtime_input_parity_is_unreleased_not_part_of_080_history():
+def test_v090_boundary_records_the_completed_hardening_release():
     text = " ".join(ROADMAP.read_text(encoding="utf-8").split())
     shipped = text.split("## Shipped foundation", 1)[1].split("### 0.5.0 boundary", 1)[
         0
     ]
     released_080 = text.split("### 0.8.0 boundary", 1)[1].split(
-        "### Unreleased / next release boundary", 1
+        "### 0.9.0 boundary", 1
     )[0]
-    unreleased = text.split("### Unreleased / next release boundary", 1)[1].split(
+    released_090 = text.split("### 0.9.0 boundary", 1)[1].split(
         "## Next milestones", 1
     )[0]
 
     for behavior in (
+        "fail-closed runtime admission",
+        "receiving operation constraints",
+        "output namespaces",
         "Raw runtime mappings use the declared request contract",
         "Parameterless endpoints compile an explicit empty raw contract",
     ):
         assert behavior not in released_080
-        assert behavior in unreleased
+        assert behavior in released_090
     assert "Matching raw `Runtime.call` input validation" not in shipped
+    assert "### Unreleased / next release boundary" not in text
 
 
 def test_context_slices_require_their_actual_execution_prerequisites():
