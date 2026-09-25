@@ -1,6 +1,10 @@
 """Acceptance coverage for the executable example progression."""
 
+import asyncio
+import importlib.metadata
 import runpy
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -24,6 +28,7 @@ EXAMPLES = [
     ("06_support_service/app.py", "/support", "post"),
     ("07_bound_operation.py", "/customers/view", "post"),
     ("08_direct_execution.py", "/quotes/direct", "post"),
+    ("09_contract_boundaries/app.py", "/customers/view", "post"),
 ]
 
 
@@ -42,6 +47,17 @@ def test_every_example_builds_its_advertised_openapi_route(
     schema = build_app(summon).openapi()
 
     assert method in schema["paths"][route]
+
+
+def test_example_entrypoint_inventory_is_complete():
+    discovered = {
+        path.relative_to(ROOT / "examples").as_posix()
+        for path in (ROOT / "examples").rglob("*.py")
+        if path.parent == ROOT / "examples" or path.name == "app.py"
+    }
+    expected = {relative_path for relative_path, _, _ in EXAMPLES}
+
+    assert discovered == expected
 
 
 def test_minimal_example_serves_a_real_keyless_request(monkeypatch):
@@ -116,6 +132,21 @@ def test_direct_example_runs_without_resolving_a_model(monkeypatch):
     assert summon._runtime._agents == {}
 
 
+def test_contract_boundary_example_runs_all_release_checks(monkeypatch):
+    checks = ROOT / "examples" / "09_contract_boundaries" / "checks.py"
+    monkeypatch.syspath_prepend(str(checks.parent))
+    run_checks = runpy.run_path(str(checks), run_name="contract_boundary_checks")[
+        "run_checks"
+    ]
+
+    assert asyncio.run(run_checks()) == {
+        "fail_closed_registration": True,
+        "receiving_constraint": True,
+        "output_namespace": True,
+        "raw_http_parity": True,
+    }
+
+
 def test_support_example_uses_only_admitted_legacy_capabilities(monkeypatch):
     summon = _load_example("06_support_service/app.py", monkeypatch)
     tools = {tool.name: tool for tool in summon.endpoints[0].tools}
@@ -126,7 +157,7 @@ def test_support_example_uses_only_admitted_legacy_capabilities(monkeypatch):
 
 
 def test_support_example_guide_states_the_current_binding_boundary():
-    guide = (ROOT / "examples/README.md").read_text(encoding="utf-8")
+    guide = " ".join((ROOT / "examples/README.md").read_text(encoding="utf-8").split())
 
     assert "FromRequest" in guide
     assert "FromResult" in guide
@@ -136,6 +167,11 @@ def test_support_example_guide_states_the_current_binding_boundary():
     assert "one permitted start" in guide
     assert "08_direct_execution.py" in guide
     assert "requires no provider model or credentials" in guide
+    assert "09_contract_boundaries" in guide
+    assert "fail-closed registration" in guide
+    assert "receiving-operation constraints" in guide
+    assert "output namespaces" in guide
+    assert "raw runtime and HTTP" in guide
     assert (
         "current `@summon` requests still use the configured model runtime" not in guide
     )
@@ -162,3 +198,75 @@ def test_examples_use_one_documented_provider_installation():
     assert "summonpot[serve,cli,openrouter]" in guide
     assert 'model="openrouter:openai/gpt-4o-mini"' in bounded
     assert "OPENAI_API_KEY" not in guide
+
+
+def test_examples_are_in_static_quality_gates():
+    makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    project = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+
+    assert "ruff check src/ tests/ examples/ scripts/" in makefile
+    assert "ruff format --check src/ tests/ examples/ scripts/" in makefile
+    assert "pyright src/ tests/ examples/ scripts/" in makefile
+    assert "ruff check src/ tests/ examples/ scripts/" in workflow
+    assert "ruff format --check src/ tests/ examples/ scripts/" in workflow
+    assert 'include = ["src", "tests", "examples", "scripts"]' in project
+
+
+def test_cli_launches_every_example_through_real_http():
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "release_smoke.py"),
+            "--examples-root",
+            str(ROOT / "examples"),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "verified 9 example applications" in result.stdout
+
+
+def test_release_smoke_verifies_installed_cli_version():
+    namespace = runpy.run_path(
+        str(ROOT / "scripts/release_smoke.py"), run_name="release_smoke"
+    )
+
+    assert namespace["_verify_installed_version"]() == importlib.metadata.version(
+        "summonpot"
+    )
+
+
+def test_release_smoke_removes_pythonpath_from_child_processes(monkeypatch):
+    monkeypatch.setenv("PYTHONPATH", str(ROOT / "src"))
+    namespace = runpy.run_path(
+        str(ROOT / "scripts/release_smoke.py"), run_name="release_smoke"
+    )
+
+    environment = namespace["_smoke_environment"](SUMMONPOT_MODEL="test")
+
+    assert "PYTHONPATH" not in environment
+    assert environment["SUMMONPOT_MODEL"] == "test"
+
+
+def test_ci_smokes_examples_against_the_installed_wheel():
+    workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+    assert '"${wheel}[serve,cli]"' in workflow
+    assert "scripts/release_smoke.py" in workflow
+    assert "env -u PYTHONPATH" in workflow
+    assert "--examples-root examples" in workflow
+
+
+def test_ci_and_release_verify_runnable_sdist_assets():
+    for workflow_name in ("ci.yml", "release.yml"):
+        workflow = (ROOT / ".github" / "workflows" / workflow_name).read_text(
+            encoding="utf-8"
+        )
+        assert '/scripts/release_smoke.py"' in workflow
+        assert '/examples/09_contract_boundaries/app.py"' in workflow
+        assert '"/.venv" not in name' in workflow

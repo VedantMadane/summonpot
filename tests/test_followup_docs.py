@@ -101,8 +101,9 @@ def test_receiving_operation_validation_is_documented_on_public_surfaces():
     assert "callable discriminators" in roadmap
     assert "string patterns" in roadmap
 
+    changelog_text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     changelog = " ".join(
-        (ROOT / "changelog.d/+621576d5.fixed.md").read_text(encoding="utf-8").split()
+        changelog_text.split("## [0.9.0]", 1)[1].split("## [0.8.0]", 1)[0].split()
     )
     assert "finite Decimal values" in changelog
     assert "callable discriminators" in changelog

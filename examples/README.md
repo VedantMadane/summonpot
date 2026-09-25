@@ -193,6 +193,35 @@ curl -X POST http://127.0.0.1:8000/quotes/direct \
 The response is computed by the exact application operation and validated as
 `QuoteResponse`; Summonpot does not resolve or construct a model for this endpoint.
 
+### 9. Contract boundary checks
+
+Directory: `09_contract_boundaries/`
+
+Shows the four hardening boundaries completed in 0.9.0: fail-closed registration for an
+unsupported explicit contract, receiving-operation constraints checked before application
+code starts, duplicate output namespaces rejected during registration, and matching raw
+runtime and HTTP handling for aliases, defaults, and canonical typed values.
+
+Run the credential-free checks directly:
+
+```bash
+python examples/09_contract_boundaries/checks.py
+```
+
+Then serve the same valid declaration and call it through HTTP:
+
+```bash
+summonpot serve examples/09_contract_boundaries/app.py --host 127.0.0.1 --port 8000
+
+curl -X POST http://127.0.0.1:8000/customers/view \
+  -H 'Content-Type: application/json' \
+  -d '{"customerId":"customer-7"}'
+```
+
+The operation requires a customer identifier of at least three characters even though the
+request model accepts any nonempty identifier. The boundary check submits a shorter value
+and verifies that the application operation never starts.
+
 ## What is intentionally not shown as shipped
 
 The examples do not claim these planned features exist:

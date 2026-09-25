@@ -106,6 +106,14 @@ jobs:
                   name.endswith("/src/summonpot/__init__.py")
                   for name in names
               )
+              assert any(
+                  name.endswith("/scripts/release_smoke.py") for name in names
+              ), names
+              assert any(
+                  name.endswith("/examples/09_contract_boundaries/app.py")
+                  for name in names
+              ), names
+              assert all("/.venv" not in name for name in names), names
               contributor_guidance = [
                   name
                   for name in names

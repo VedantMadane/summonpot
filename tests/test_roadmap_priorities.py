@@ -6,8 +6,9 @@ from pathlib import Path
 ROADMAP = Path(__file__).resolve().parents[1] / "ROADMAP.md"
 
 
-def test_hardening_is_planned_and_precedes_execution_expansion():
+def test_remaining_failure_and_deadline_work_precedes_execution_expansion():
     text = ROADMAP.read_text(encoding="utf-8")
+    shipped = " ".join(text.split("## Next milestones", 1)[0].split())
     planned = text.split("## Next milestones", 1)[1].split("## Non-goals", 1)[0]
     headings = re.findall(r"^### (\d+)\. (.+)$", planned, re.MULTILINE)
     assert [int(number) for number, _ in headings] == list(range(1, 10))
@@ -15,13 +16,25 @@ def test_hardening_is_planned_and_precedes_execution_expansion():
     assert "planned acceptance criteria, not claims" in planned
 
     hardening = " ".join(planned.split("### 2.", 1)[0].split())
-    for requirement in (
+    for completed in (
         "receiving operation constraints",
         "render model input only when agent execution needs it",
-        "sensitive validation inputs, provider bodies, or exception chains",
         "a copy-hook fix alone is not completion of the transport boundary",
     ):
-        assert requirement in hardening
+        assert completed not in hardening
+    for completed in (
+        "Receiving-operation constraint validation is shipped",
+        "Fail-closed runtime admission",
+        "Structural output-namespace validation",
+        "Raw runtime mappings use the declared request contract",
+    ):
+        assert completed in shipped
+    for remaining in (
+        "sensitive validation inputs, provider bodies, or exception chains",
+        "deadline across request preparation, execution, and finalization",
+        "synchronous application code cannot be forcibly stopped",
+    ):
+        assert remaining in hardening
 
 
 def test_output_namespace_hardening_is_shipped_not_planned():
@@ -50,7 +63,7 @@ def test_count_type_validation_is_shipped_not_future_runtime_enforcement():
     ):
         assert requirement in shipped
         assert requirement not in hardening
-    assert "unsupported runtime bounds fail before serving" in hardening
+    assert "unsupported runtime bounds fail before serving" not in hardening
     assert "### 5. Broader bounds and private path classification" in planned
     assert "invalid source/count rejection" not in planned
 
@@ -62,10 +75,10 @@ def test_fail_closed_admission_is_shipped_not_left_as_a_future_claim():
 
     assert "Fail-closed runtime admission" in shipped
     assert "All other explicit shapes fail before serving" in shipped
-    assert "The admission gate is shipped" in hardening
-    assert "second-capability regression" in hardening
-    assert "invalid source rejection" in hardening
-    assert "unsupported runtime call-bound rejection" in hardening
+    assert "The admission gate is shipped" not in hardening
+    assert "second-capability regression" not in hardening
+    assert "invalid source rejection" not in hardening
+    assert "unsupported runtime call-bound rejection" not in hardening
 
 
 def test_v090_boundary_records_the_completed_hardening_release():

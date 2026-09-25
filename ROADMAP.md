@@ -158,39 +158,18 @@ public graph, or handler body.
 
 ### 1. Contract enforcement and input/output hardening
 
-Close the gaps in existing declarations before adding result chains:
+Finish the two remaining boundary contracts before adding result chains. The completed 0.9.0
+admission, transport, and namespace boundary above remains the baseline:
 
-- The admission gate is shipped: exact built-in source types are required, unsupported
-  runtime bounds fail before serving, and every explicit binding, ordering, bound, and output
-  contract is either fully enforced by the single-operation slice or rejected. Bare callable
-  dependencies remain the only legacy model-supplied argument path; there is no strict-mode
-  switch.
-- Receiving operation constraints are checked before application code runs without silently
-  transforming canonical bound values or unexpectedly rerunning application validators.
-  Request validation alone does not imply compatibility with a narrower operation parameter
-  contract.
-- Keep canonical validated request values separate from model-facing representations. Remove
-  application copy, serialization, and string-rendering hooks from the authoritative handoff;
-  render model input only when agent execution needs it. Preserve aliases, defaults, custom
-  runtime compatibility, and the validate-once boundary through explicit tests.
-- Prevent output extras and serialization aliases from shadowing validated fields or producing
-  duplicate JSON keys. Unsupported output shapes should fail explicitly rather than weakening
-  validation. Keep private Pydantic integration isolated and dependency upgrades gated by the
-  adversarial suite; do not replace it with a lossy serialization round trip.
-- Align raw runtime input validation with HTTP required-field, default, and canonical-value
-  semantics, including scalar declarations.
 - Map operation contract failures to stable redacted HTTP errors. Normal logs must not include
   sensitive validation inputs, provider bodies, or exception chains.
 - Define the deadline across request preparation, execution, and finalization; check it before
   starting effects. Document that synchronous application code cannot be forcibly stopped by
   an asyncio timeout and that a timeout does not prove an effect did not occur.
 
-Acceptance requires registration checks and real HTTP probes for the relevant boundaries,
-including a second-capability regression, invalid source rejection, unsupported runtime
-call-bound rejection, receiving operation constraints, mutating serializers, output alias
-collisions, and sensitive failure logging.
-Keep fixes independently reviewable; a copy-hook fix alone is not completion of the transport
-boundary.
+Acceptance requires real HTTP probes for stable failure classification, sensitive failure
+logging, preparation and finalization timeouts, the pre-effect deadline check, and uncertain
+outcomes after synchronous work has started.
 
 ### 2. Validated result chains and failure semantics
 
