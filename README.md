@@ -661,6 +661,7 @@ The [`examples/`](examples/) directory grows from one endpoint to a multi-file s
 | 6 | [`06_support_service/`](examples/06_support_service/) | Multi-file legacy capabilities and persisted ticket |
 | 7 | [`07_bound_operation.py`](examples/07_bound_operation.py) | Enforced `FromRequest` + `AgentChoice` with `Exactly(1)` |
 | 8 | [`08_direct_execution.py`](examples/08_direct_execution.py) | Credential-free single-operation deterministic execution |
+| 9 | [`09_contract_boundaries/`](examples/09_contract_boundaries/) | Fail-closed registration, receiving constraints, output namespaces, and raw/HTTP parity |
 
 The [examples guide](examples/README.md) includes a real HTTP call for every level and
 explains what runs today and what remains planned.
